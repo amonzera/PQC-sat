@@ -21,9 +21,10 @@ import os
 # ─── Inicialização ────────────────────────────────────────────────
 pygame.init()
 
-# Resolução e janela
-WIDTH, HEIGHT = 1280, 800
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
+# Resolução e janela (fullscreen)
+info = pygame.display.Info()
+WIDTH, HEIGHT = info.current_w, info.current_h
+screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN | pygame.DOUBLEBUF)
 pygame.display.set_caption("PQC-SAT · Mission Control Dashboard")
 
 clock = pygame.time.Clock()
@@ -62,13 +63,13 @@ def load_font(name, size):
     except Exception:
         return pygame.font.Font(None, size)
 
-FONT_TITLE   = load_font("monospace", 28)
-FONT_HEADER  = load_font("monospace", 18)
-FONT_BODY    = load_font("monospace", 14)
-FONT_SMALL   = load_font("monospace", 12)
-FONT_LARGE   = load_font("monospace", 40)
-FONT_CMD     = load_font("monospace", 15)
-FONT_PIXEL   = load_font("monospace", 10)
+FONT_TITLE   = load_font("monospace", 34)
+FONT_HEADER  = load_font("monospace", 24)
+FONT_BODY    = load_font("monospace", 18)
+FONT_SMALL   = load_font("monospace", 16)
+FONT_LARGE   = load_font("monospace", 46)
+FONT_CMD     = load_font("monospace", 19)
+FONT_PIXEL   = load_font("monospace", 13)
 
 # ─── Estrelas de fundo ────────────────────────────────────────────
 class StarField:
@@ -98,69 +99,163 @@ class StarField:
 # ─── Terra ────────────────────────────────────────────────────────
 class Earth:
     def __init__(self):
-        self.radius = 160
+        self.radius = 140
         self.center_x = WIDTH // 2
-        self.center_y = HEIGHT // 2 + 40
+        self.center_y = HEIGHT // 2 + 20
         self.surface_cache = None
         self._build_surface()
 
     def _build_surface(self):
-        size = self.radius * 2 + 4
+        margin = 50
+        size = self.radius * 2 + margin * 2
         self.surface_cache = pygame.Surface((size, size), pygame.SRCALPHA)
         cx, cy = size // 2, size // 2
         r = self.radius
 
-        # Gradiente atmosférico (glow externo)
-        for i in range(30, 0, -1):
-            alpha = int(3 * (30 - i))
-            glow_color = (60, 140, 255, alpha)
-            pygame.draw.circle(self.surface_cache, glow_color, (cx, cy), r + i)
+        # Glow atmosférico externo
+        for i in range(40, 0, -1):
+            alpha = int(4.5 * (40 - i))
+            pygame.draw.circle(self.surface_cache, (50, 130, 255, min(alpha, 120)), (cx, cy), r + i)
 
-        # Corpo da Terra
-        pygame.draw.circle(self.surface_cache, C_EARTH_BLUE, (cx, cy), r)
+        # Corpo base — oceano azul SÓLIDO e opaco
+        pygame.draw.circle(self.surface_cache, (25, 100, 200, 255), (cx, cy), r)
 
-        # Continentes estilizados (manchas verdes)
-        continents = [
-            (cx - 40, cy - 30, 35, 25),
-            (cx + 20, cy - 50, 45, 30),
-            (cx - 60, cy + 20, 30, 40),
-            (cx + 30, cy + 30, 40, 25),
-            (cx - 10, cy + 50, 25, 20),
-            (cx + 50, cy - 10, 20, 35),
+        # Segundo passe oceânico para profundidade (totalmente opaco)
+        pygame.draw.circle(self.surface_cache, (30, 90, 185, 255), (cx, cy), r - 2)
+
+        # ── Continente das Américas — GRANDE, preenche quase toda a face ──
+        land_color = (50, 170, 75)  # verde vibrante
+
+        # América do Norte — massa enorme
+        s_na = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+        scale = r / 140  # escalar proporcionalmente ao raio
+        points_na = [
+            (int(cx - 15 * scale), int(cy - 120 * scale)),   # topo centro
+            (int(cx + 50 * scale), int(cy - 110 * scale)),   # topo direito
+            (int(cx + 80 * scale), int(cy - 85 * scale)),    # canto NE
+            (int(cx + 90 * scale), int(cy - 50 * scale)),    # leste superior
+            (int(cx + 70 * scale), int(cy - 20 * scale)),    # leste
+            (int(cx + 40 * scale), int(cy - 5 * scale)),     # golfo
+            (int(cx + 20 * scale), int(cy + 5 * scale)),     # america central topo
+            (int(cx + 5 * scale), int(cy - 10 * scale)),     # recuo golfo
+            (int(cx - 30 * scale), int(cy - 15 * scale)),    # costa oeste baixo
+            (int(cx - 60 * scale), int(cy - 40 * scale)),    # costa oeste
+            (int(cx - 80 * scale), int(cy - 70 * scale)),    # canto NW
+            (int(cx - 70 * scale), int(cy - 100 * scale)),   # alaska
+            (int(cx - 40 * scale), int(cy - 115 * scale)),   # topo esquerdo
         ]
-        for x, y, w, h in continents:
-            s = pygame.Surface((w, h), pygame.SRCALPHA)
-            pygame.draw.ellipse(s, (*C_EARTH_GREEN, 180), (0, 0, w, h))
-            self.surface_cache.blit(s, (x - w // 2, y - h // 2))
+        pygame.draw.polygon(self.surface_cache, (*land_color, 255), points_na)
+        # Textura interna
+        pygame.draw.polygon(self.surface_cache, (60, 185, 85, 80), points_na)
+        # Borda costeira
+        pygame.draw.polygon(self.surface_cache, (35, 130, 55, 180), points_na, 2)
 
-        # Nuvens semitransparentes
+        # América Central — istmo conectando
+        points_ca = [
+            (int(cx + 20 * scale), int(cy + 5 * scale)),
+            (int(cx + 30 * scale), int(cy + 15 * scale)),
+            (int(cx + 25 * scale), int(cy + 35 * scale)),
+            (int(cx + 15 * scale), int(cy + 40 * scale)),
+            (int(cx + 5 * scale), int(cy + 30 * scale)),
+            (int(cx + 10 * scale), int(cy + 10 * scale)),
+        ]
+        pygame.draw.polygon(self.surface_cache, (*land_color, 255), points_ca)
+        pygame.draw.polygon(self.surface_cache, (35, 130, 55, 180), points_ca, 2)
+
+        # América do Sul — massa grande
+        points_sa = [
+            (int(cx + 15 * scale), int(cy + 40 * scale)),    # topo
+            (int(cx + 55 * scale), int(cy + 45 * scale)),    # NE
+            (int(cx + 75 * scale), int(cy + 55 * scale)),    # leste alto
+            (int(cx + 80 * scale), int(cy + 75 * scale)),    # leste
+            (int(cx + 60 * scale), int(cy + 100 * scale)),   # SE
+            (int(cx + 30 * scale), int(cy + 115 * scale)),   # sul
+            (int(cx + 5 * scale), int(cy + 110 * scale)),    # ponta sul
+            (int(cx - 15 * scale), int(cy + 90 * scale)),    # SW
+            (int(cx - 25 * scale), int(cy + 65 * scale)),    # costa oeste
+            (int(cx - 10 * scale), int(cy + 48 * scale)),    # NW
+        ]
+        pygame.draw.polygon(self.surface_cache, (45, 160, 70, 255), points_sa)
+        # Textura interna — Amazônia mais escura
+        amazon = [
+            (int(cx + 20 * scale), int(cy + 55 * scale)),
+            (int(cx + 55 * scale), int(cy + 60 * scale)),
+            (int(cx + 50 * scale), int(cy + 80 * scale)),
+            (int(cx + 15 * scale), int(cy + 75 * scale)),
+        ]
+        pygame.draw.polygon(self.surface_cache, (35, 140, 55, 120), amazon)
+        # Borda costeira
+        pygame.draw.polygon(self.surface_cache, (30, 120, 50, 180), points_sa, 2)
+
+        # Groenlândia
+        points_gl = [
+            (int(cx + 20 * scale), int(cy - 115 * scale)),
+            (int(cx + 50 * scale), int(cy - 120 * scale)),
+            (int(cx + 55 * scale), int(cy - 100 * scale)),
+            (int(cx + 40 * scale), int(cy - 90 * scale)),
+            (int(cx + 20 * scale), int(cy - 95 * scale)),
+        ]
+        pygame.draw.polygon(self.surface_cache, (180, 210, 200, 255), points_gl)
+        pygame.draw.polygon(self.surface_cache, (140, 170, 160, 150), points_gl, 1)
+
+        # Ilhas do Caribe
+        for ix2, iy2, iw, ih in [
+            (int(cx + 35 * scale), int(cy + 15 * scale), int(10 * scale), int(6 * scale)),
+            (int(cx + 45 * scale), int(cy + 22 * scale), int(8 * scale), int(5 * scale)),
+            (int(cx + 40 * scale), int(cy + 30 * scale), int(6 * scale), int(4 * scale)),
+        ]:
+            pygame.draw.ellipse(self.surface_cache, (*land_color, 250),
+                                (ix2, iy2, max(3, iw), max(3, ih)))
+
+        # Nuvens
         clouds = [
-            (cx - 50, cy - 60, 60, 15),
-            (cx + 30, cy - 20, 70, 12),
-            (cx - 30, cy + 40, 50, 10),
-            (cx + 50, cy + 50, 40, 8),
+            (cx - 40, cy - 50, 70, 18),
+            (cx + 50, cy - 30, 60, 15),
+            (cx - 20, cy + 50, 65, 14),
+            (cx + 40, cy + 70, 50, 12),
+            (cx + 10, cy - 80, 55, 13),
         ]
         for x, y, w, h in clouds:
             s = pygame.Surface((w, h), pygame.SRCALPHA)
-            pygame.draw.ellipse(s, (200, 220, 255, 50), (0, 0, w, h))
+            pygame.draw.ellipse(s, (220, 235, 255, 45), (0, 0, w, h))
             self.surface_cache.blit(s, (x - w // 2, y - h // 2))
 
-        # Máscara circular (limpar fora do círculo)
-        mask = pygame.Surface((size, size), pygame.SRCALPHA)
-        pygame.draw.circle(mask, (255, 255, 255, 255), (cx, cy), r)
-        # Aplicar máscara: somente o conteúdo DENTRO do círculo fica
-        final = pygame.Surface((size, size), pygame.SRCALPHA)
-        for px in range(size):
-            for py in range(size):
-                if (px - cx) ** 2 + (py - cy) ** 2 <= r * r:
-                    final.set_at((px, py), self.surface_cache.get_at((px, py)))
-                elif (px - cx) ** 2 + (py - cy) ** 2 <= (r + 30) ** 2:
-                    # Glow externo
-                    final.set_at((px, py), self.surface_cache.get_at((px, py)))
-        self.surface_cache = final
+        # Iluminação solar — highlight especular
+        light_surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        for i in range(r, 0, -2):
+            ratio = i / r
+            alpha = int(50 * (1 - ratio) ** 2)
+            pygame.draw.circle(light_surf, (255, 255, 255, min(alpha, 40)),
+                               (cx - int(r * 0.3), cy - int(r * 0.3)), i)
+        self.surface_cache.blit(light_surf, (0, 0))
+
+        # Sombra terminador
+        shadow_surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        for i in range(r, 0, -2):
+            ratio = i / r
+            alpha = int(80 * (1 - ratio) ** 1.5)
+            pygame.draw.circle(shadow_surf, (0, 0, 20, min(alpha, 60)),
+                               (cx + int(r * 0.35), cy + int(r * 0.35)), i)
+        self.surface_cache.blit(shadow_surf, (0, 0))
+
+        # Máscara circular — manter só o planeta + glow
+        clean = pygame.Surface((size, size), pygame.SRCALPHA)
+        # Glow externo
+        for i in range(40, 0, -1):
+            alpha = int(4.5 * (40 - i))
+            pygame.draw.circle(clean, (50, 130, 255, min(alpha, 120)), (cx, cy), r + i)
+        # Corpo mascarado — copiar pixels dentro do raio
+        for y_pos in range(size):
+            for x_pos in range(size):
+                dist_sq = (x_pos - cx) ** 2 + (y_pos - cy) ** 2
+                if dist_sq <= r * r:
+                    clean.set_at((x_pos, y_pos), self.surface_cache.get_at((x_pos, y_pos)))
+        self.surface_cache = clean
+
+        # Borda atmosférica
+        pygame.draw.circle(self.surface_cache, (80, 160, 255, 50), (cx, cy), r, 2)
 
     def draw(self, surface, t):
-        # Desenha a terra com rotação simulada via offset de continentes
         blit_x = self.center_x - self.surface_cache.get_width() // 2
         blit_y = self.center_y - self.surface_cache.get_height() // 2
         surface.blit(self.surface_cache, (blit_x, blit_y))
@@ -169,32 +264,24 @@ class Earth:
 # ─── Robô Pixel Art (dentro do satélite) ─────────────────────────
 ROBOT_PIXELS = [
     # Formato: (col, row, color_key)
-    # Grade 12x12 — robô sorridente
-    # 'B' = body, 'E' = eye, 'S' = smile, 'A' = antenna, 'H' = head border
-    # Row 0 — antena
-    (5, 0, 'A'), (6, 0, 'A'),
-    # Row 1 — antena base
-    (4, 1, 'A'), (5, 1, 'H'), (6, 1, 'H'), (7, 1, 'A'),
-    # Row 2 — topo cabeça
-    (3, 2, 'H'), (4, 2, 'H'), (5, 2, 'B'), (6, 2, 'B'), (7, 2, 'H'), (8, 2, 'H'),
-    # Row 3 — cabeça
-    (2, 3, 'H'), (3, 3, 'B'), (4, 3, 'B'), (5, 3, 'B'), (6, 3, 'B'), (7, 3, 'B'), (8, 3, 'B'), (9, 3, 'H'),
-    # Row 4 — olhos
-    (2, 4, 'H'), (3, 4, 'B'), (4, 4, 'E'), (5, 4, 'B'), (6, 4, 'B'), (7, 4, 'E'), (8, 4, 'B'), (9, 4, 'H'),
-    # Row 5 — entre olhos e boca
-    (2, 5, 'H'), (3, 5, 'B'), (4, 5, 'B'), (5, 5, 'B'), (6, 5, 'B'), (7, 5, 'B'), (8, 5, 'B'), (9, 5, 'H'),
-    # Row 6 — sorriso
-    (2, 6, 'H'), (3, 6, 'B'), (4, 6, 'S'), (5, 6, 'B'), (6, 6, 'B'), (7, 6, 'S'), (8, 6, 'B'), (9, 6, 'H'),
-    # Row 7 — sorriso base
-    (2, 7, 'H'), (3, 7, 'B'), (4, 7, 'B'), (5, 7, 'S'), (6, 7, 'S'), (7, 7, 'B'), (8, 7, 'B'), (9, 7, 'H'),
-    # Row 8 — queixo
-    (3, 8, 'H'), (4, 8, 'H'), (5, 8, 'H'), (6, 8, 'H'), (7, 8, 'H'), (8, 8, 'H'),
-    # Row 9 — pescoço / corpo
-    (4, 9, 'H'), (5, 9, 'B'), (6, 9, 'B'), (7, 9, 'H'),
-    # Row 10 — corpo
-    (3, 10, 'H'), (4, 10, 'B'), (5, 10, 'B'), (6, 10, 'B'), (7, 10, 'B'), (8, 10, 'H'),
-    # Row 11 — pernas
-    (3, 11, 'H'), (4, 11, 'H'), (5, 11, 'H'), (6, 11, 'H'), (7, 11, 'H'), (8, 11, 'H'),
+    # Grade 10x8 — rosto do robô sorridente (sem corpo)
+    # 'B' = face fill, 'E' = eye, 'S' = smile, 'A' = antenna, 'H' = head border
+    # Row 0 — antenas
+    (3, 0, 'A'), (4, 0, 'A'), (7, 0, 'A'), (8, 0, 'A'),
+    # Row 1 — topo cabeça
+    (2, 1, 'H'), (3, 1, 'H'), (4, 1, 'H'), (5, 1, 'H'), (6, 1, 'H'), (7, 1, 'H'), (8, 1, 'H'), (9, 1, 'H'),
+    # Row 2 — cabeça superior
+    (1, 2, 'H'), (2, 2, 'B'), (3, 2, 'B'), (4, 2, 'B'), (5, 2, 'B'), (6, 2, 'B'), (7, 2, 'B'), (8, 2, 'B'), (9, 2, 'B'), (10, 2, 'H'),
+    # Row 3 — olhos
+    (1, 3, 'H'), (2, 3, 'B'), (3, 3, 'E'), (4, 3, 'E'), (5, 3, 'B'), (6, 3, 'B'), (7, 3, 'E'), (8, 3, 'E'), (9, 3, 'B'), (10, 3, 'H'),
+    # Row 4 — entre olhos e boca
+    (1, 4, 'H'), (2, 4, 'B'), (3, 4, 'B'), (4, 4, 'B'), (5, 4, 'B'), (6, 4, 'B'), (7, 4, 'B'), (8, 4, 'B'), (9, 4, 'B'), (10, 4, 'H'),
+    # Row 5 — sorriso
+    (1, 5, 'H'), (2, 5, 'B'), (3, 5, 'S'), (4, 5, 'B'), (5, 5, 'B'), (6, 5, 'B'), (7, 5, 'B'), (8, 5, 'S'), (9, 5, 'B'), (10, 5, 'H'),
+    # Row 6 — sorriso inferior
+    (1, 6, 'H'), (2, 6, 'B'), (3, 6, 'B'), (4, 6, 'S'), (5, 6, 'S'), (6, 6, 'S'), (7, 6, 'S'), (8, 6, 'B'), (9, 6, 'B'), (10, 6, 'H'),
+    # Row 7 — queixo
+    (2, 7, 'H'), (3, 7, 'H'), (4, 7, 'H'), (5, 7, 'H'), (6, 7, 'H'), (7, 7, 'H'), (8, 7, 'H'), (9, 7, 'H'),
 ]
 
 ROBOT_COLORS = {
@@ -208,7 +295,7 @@ ROBOT_COLORS = {
 
 def draw_robot_pixel(surface, cx, cy, pixel_size=3, t=0.0):
     """Desenha o robô sorridente em pixel art centralizado em (cx, cy)."""
-    grid_w, grid_h = 12, 12
+    grid_w, grid_h = 12, 8
     offset_x = cx - (grid_w * pixel_size) // 2
     offset_y = cy - (grid_h * pixel_size) // 2
 
@@ -231,10 +318,10 @@ def draw_robot_pixel(surface, cx, cy, pixel_size=3, t=0.0):
 class Satellite:
     def __init__(self, earth):
         self.earth = earth
-        self.orbit_radius = 260
+        self.orbit_radius = 340
         self.angle = 0.0
         self.orbit_speed = 0.3  # radianos por segundo
-        self.body_size = 48  # tamanho do corpo do cubesat
+        self.body_size = 76  # tamanho do corpo do cubesat
         self.trail = []  # rastro orbital
 
     def update(self, dt):
@@ -342,7 +429,7 @@ class Satellite:
         pygame.draw.rect(surface, C_ACCENT_CYAN, body_rect, 1, border_radius=4)
 
         # ── Robô sorridente dentro do corpo ──
-        draw_robot_pixel(surface, ix, iy, pixel_size=3, t=t)
+        draw_robot_pixel(surface, ix, iy, pixel_size=5, t=t)
 
         # ── Antena no topo ──
         ant_height = 14
@@ -464,7 +551,7 @@ class DashboardPanel:
 
         if title:
             # Header bar
-            header_rect = pygame.Rect(rect.x, rect.y, rect.width, 28)
+            header_rect = pygame.Rect(rect.x, rect.y, rect.width, 36)
             h_surf = pygame.Surface((header_rect.width, header_rect.height), pygame.SRCALPHA)
             pygame.draw.rect(h_surf, (*C_PANEL_HEADER, 220),
                              (0, 0, header_rect.width, header_rect.height),
@@ -474,107 +561,105 @@ class DashboardPanel:
             # Indicador luminoso
             glow = int(180 + 75 * math.sin(t * 2))
             pygame.draw.circle(surface, (0, glow, int(glow * 0.8)),
-                               (rect.x + 14, rect.y + 14), 4)
+                               (rect.x + 16, rect.y + 18), 5)
 
             title_surf = FONT_SMALL.render(title, True, C_ACCENT_CYAN)
-            surface.blit(title_surf, (rect.x + 24, rect.y + 7))
+            surface.blit(title_surf, (rect.x + 28, rect.y + 9))
 
     def _draw_left_panel(self, surface, t, satellite):
         """Painel esquerdo: Telemetria e status."""
-        panel_rect = pygame.Rect(10, 50, 260, HEIGHT - 110)
+        panel_rect = pygame.Rect(25, 55, 320, HEIGHT - 120)
         self._draw_panel_bg(surface, panel_rect, "◆ TELEMETRIA", t)
 
-        y = panel_rect.y + 38
-        x = panel_rect.x + 15
+        y = panel_rect.y + 46
+        x = panel_rect.x + 18
+        content_w = panel_rect.width - 36
 
         # Status da sessão
-        self._draw_metric(surface, x, y, "STATUS", self.session_status,
-                          C_ACCENT_GREEN if self.session_status == "NOMINAL" else C_ACCENT_RED)
-        y += 30
+        self._draw_metric_stacked(surface, x, y, "STATUS", self.session_status,
+                                  C_ACCENT_GREEN if self.session_status == "NOMINAL" else C_ACCENT_RED)
+        y += 42
 
-        self._draw_metric(surface, x, y, "ALGORITMO PQC", self.pqc_algorithm, C_ACCENT_PURPLE)
-        y += 30
+        self._draw_metric_stacked(surface, x, y, "ALGORITMO PQC", self.pqc_algorithm, C_ACCENT_PURPLE)
+        y += 42
 
-        # Posição orbital
+        # Posição orbital (lado a lado, labels curtos)
+        half_w = content_w // 2
         sat_x, sat_y = satellite.get_position()
-        self._draw_metric(surface, x, y, "POS X", f"{sat_x:.1f}", C_TEXT_PRIMARY)
-        y += 22
-        self._draw_metric(surface, x, y, "POS Y", f"{sat_y:.1f}", C_TEXT_PRIMARY)
-        y += 22
-        self._draw_metric(surface, x, y, "ÂNGULO", f"{math.degrees(satellite.angle):.1f}°", C_TEXT_PRIMARY)
-        y += 30
+        self._draw_metric_inline(surface, x, y, "X", f"{sat_x:.0f}", C_TEXT_PRIMARY)
+        self._draw_metric_inline(surface, x + half_w, y, "Y", f"{sat_y:.0f}", C_TEXT_PRIMARY)
+        y += 28
+        self._draw_metric_inline(surface, x, y, "ÂNG", f"{math.degrees(satellite.angle):.1f}°", C_TEXT_PRIMARY)
+        y += 34
 
         # Separador
-        pygame.draw.line(surface, C_PANEL_BORDER, (x, y), (x + 220, y), 1)
+        pygame.draw.line(surface, C_PANEL_BORDER, (x, y), (x + content_w, y), 1)
         y += 12
 
         # Estatísticas de falha
-        section_title = FONT_SMALL.render("── INJEÇÃO DE FALHAS ──", True, C_ACCENT_ORANGE)
+        section_title = FONT_SMALL.render("── FALHAS ──", True, C_ACCENT_ORANGE)
         surface.blit(section_title, (x, y))
-        y += 22
+        y += 26
 
-        self._draw_metric(surface, x, y, "INJEÇÕES", str(self.fault_injections), C_ACCENT_ORANGE)
-        y += 22
-        self._draw_metric(surface, x, y, "DETECTADOS", str(self.detected_errors), C_ACCENT_GREEN)
-        y += 22
-        self._draw_metric(surface, x, y, "SILENCIOSOS", str(self.silent_failures),
-                          C_ACCENT_RED if self.silent_failures > 0 else C_TEXT_DIM)
-        y += 30
+        self._draw_metric_inline(surface, x, y, "INJ", str(self.fault_injections), C_ACCENT_ORANGE)
+        self._draw_metric_inline(surface, x + content_w // 3, y, "DET", str(self.detected_errors), C_ACCENT_GREEN)
+        self._draw_metric_inline(surface, x + 2 * content_w // 3, y, "SIL", str(self.silent_failures),
+                                 C_ACCENT_RED if self.silent_failures > 0 else C_TEXT_DIM)
+        y += 34
 
         # Separador
-        pygame.draw.line(surface, C_PANEL_BORDER, (x, y), (x + 220, y), 1)
+        pygame.draw.line(surface, C_PANEL_BORDER, (x, y), (x + content_w, y), 1)
         y += 12
 
         # Barra de integridade visual
         section_title2 = FONT_SMALL.render("── INTEGRIDADE ──", True, C_ACCENT_GREEN)
         surface.blit(section_title2, (x, y))
-        y += 22
+        y += 26
 
         total = max(1, self.fault_injections)
         integrity = 1.0 - (self.silent_failures / total)
-        bar_w = 220
-        bar_h = 12
+        bar_w = content_w - 60
+        bar_h = 16
 
         # Fundo da barra
-        pygame.draw.rect(surface, (30, 30, 50), (x, y, bar_w, bar_h), border_radius=3)
+        pygame.draw.rect(surface, (30, 30, 50), (x, y, bar_w, bar_h), border_radius=4)
 
         # Barra de integridade
         fill_w = int(bar_w * integrity)
         bar_color = C_ACCENT_GREEN if integrity > 0.7 else (C_ACCENT_ORANGE if integrity > 0.4 else C_ACCENT_RED)
         if fill_w > 0:
-            pygame.draw.rect(surface, bar_color, (x, y, fill_w, bar_h), border_radius=3)
+            pygame.draw.rect(surface, bar_color, (x, y, fill_w, bar_h), border_radius=4)
 
         # Porcentagem
-        pct_text = FONT_SMALL.render(f"{integrity * 100:.0f}%", True, C_TEXT_PRIMARY)
-        surface.blit(pct_text, (x + bar_w + 8, y - 1))
-        y += 30
+        pct_text = FONT_BODY.render(f"{integrity * 100:.0f}%", True, C_TEXT_PRIMARY)
+        surface.blit(pct_text, (x + bar_w + 10, y - 1))
+        y += 34
 
         # Uptime
         uptime_str = time.strftime("%H:%M:%S", time.gmtime(self.uptime))
-        self._draw_metric(surface, x, y, "UPTIME", uptime_str, C_TEXT_DIM)
-        y += 30
+        self._draw_metric_inline(surface, x, y, "UP", uptime_str, C_TEXT_DIM)
+        y += 34
 
         # Velocidade orbital visual
         speed_label = FONT_SMALL.render("VEL. ORBITAL", True, C_TEXT_DIM)
         surface.blit(speed_label, (x, y))
-        # Gauge animada
         gauge_x = x
-        gauge_y = y + 18
-        gauge_w = 220
-        gauge_h = 6
-        pygame.draw.rect(surface, (30, 30, 50), (gauge_x, gauge_y, gauge_w, gauge_h), border_radius=2)
-        # Indicador oscilante
+        gauge_y = y + 24
+        gauge_w = content_w
+        gauge_h = 8
+        pygame.draw.rect(surface, (30, 30, 50), (gauge_x, gauge_y, gauge_w, gauge_h), border_radius=3)
         indicator_pos = int(gauge_w * (0.5 + 0.3 * math.sin(t * satellite.orbit_speed * 3)))
-        pygame.draw.rect(surface, C_ACCENT_CYAN, (gauge_x + indicator_pos - 3, gauge_y - 2, 6, gauge_h + 4),
-                         border_radius=2)
+        pygame.draw.rect(surface, C_ACCENT_CYAN, (gauge_x + indicator_pos - 4, gauge_y - 3, 8, gauge_h + 6),
+                         border_radius=3)
 
     def _draw_right_panel(self, surface, t):
         """Painel direito: Log de comandos e entrada."""
-        panel_rect = pygame.Rect(WIDTH - 370, 50, 360, HEIGHT - 110)
+        panel_rect = pygame.Rect(WIDTH - 430, 55, 405, HEIGHT - 120)
         self._draw_panel_bg(surface, panel_rect, "◆ CONSOLE DE COMANDOS", t)
 
-        y = panel_rect.y + 38
-        x = panel_rect.x + 12
+        y = panel_rect.y + 46
+        x = panel_rect.x + 15
+        content_w = panel_rect.width - 30
 
         # Log de comandos
         for entry in self.command_history[-10:]:
@@ -584,7 +669,7 @@ class DashboardPanel:
 
             # Comando
             cmd_surf = FONT_SMALL.render(entry["cmd"][:18], True, C_TEXT_PRIMARY)
-            surface.blit(cmd_surf, (x + 70, y))
+            surface.blit(cmd_surf, (x + 90, y))
 
             # Status com cor
             status = entry["status"]
@@ -598,73 +683,78 @@ class DashboardPanel:
                 s_color = C_ACCENT_ORANGE
 
             status_surf = FONT_SMALL.render(status[:16], True, s_color)
-            surface.blit(status_surf, (x + 215, y))
+            surface.blit(status_surf, (x + 260, y))
 
-            y += 20
+            y += 28
 
         # Separador antes do input
-        sep_y = panel_rect.y + panel_rect.height - 80
-        pygame.draw.line(surface, C_PANEL_BORDER, (x, sep_y), (x + 330, sep_y), 1)
+        sep_y = panel_rect.y + panel_rect.height - 95
+        pygame.draw.line(surface, C_PANEL_BORDER, (x, sep_y), (x + content_w, sep_y), 1)
 
         # Comandos disponíveis (hint)
-        hint_y = sep_y + 8
-        hint_text = "CMDS: INJECT_FAULT | BIT_FLIP | PING | PQC_STATUS"
+        hint_y = sep_y + 10
+        hint_text = "CMDS: INJECT_FAULT | BIT_FLIP | PING"
         hint_surf = FONT_SMALL.render(hint_text, True, C_TEXT_DIM)
         surface.blit(hint_surf, (x, hint_y))
+        hint_text2 = "PQC_STATUS | CRC_CHECK | RESET_SESSION"
+        hint_surf2 = FONT_SMALL.render(hint_text2, True, C_TEXT_DIM)
+        surface.blit(hint_surf2, (x, hint_y + 22))
 
         # Campo de input
-        input_y = panel_rect.y + panel_rect.height - 45
-        input_rect = pygame.Rect(x, input_y, 330, 30)
+        input_y = panel_rect.y + panel_rect.height - 50
+        input_rect = pygame.Rect(x, input_y, content_w, 36)
 
         # Fundo do input
         input_bg_color = (25, 30, 55) if self.input_active else (18, 20, 40)
-        pygame.draw.rect(surface, input_bg_color, input_rect, border_radius=4)
+        pygame.draw.rect(surface, input_bg_color, input_rect, border_radius=5)
         border_color = C_ACCENT_CYAN if self.input_active else C_PANEL_BORDER
-        pygame.draw.rect(surface, border_color, input_rect, 1, border_radius=4)
+        pygame.draw.rect(surface, border_color, input_rect, 1, border_radius=5)
 
         # Prompt
         prompt = FONT_CMD.render("❯ ", True, C_ACCENT_CYAN)
-        surface.blit(prompt, (x + 6, input_y + 6))
+        surface.blit(prompt, (x + 8, input_y + 8))
 
         # Texto digitado
         text_surf = FONT_CMD.render(self.input_text, True, C_TEXT_PRIMARY)
-        surface.blit(text_surf, (x + 24, input_y + 6))
+        surface.blit(text_surf, (x + 28, input_y + 8))
 
         # Cursor piscante
         if self.input_active and int(self.cursor_blink * 2) % 2 == 0:
-            cursor_x = x + 24 + text_surf.get_width() + 2
-            pygame.draw.line(surface, C_ACCENT_CYAN, (cursor_x, input_y + 5),
-                             (cursor_x, input_y + 24), 2)
+            cursor_x = x + 28 + text_surf.get_width() + 2
+            pygame.draw.line(surface, C_ACCENT_CYAN, (cursor_x, input_y + 6),
+                             (cursor_x, input_y + 28), 2)
 
     def _draw_top_bar(self, surface, t):
         """Barra superior com título e status global."""
-        bar_surf = pygame.Surface((WIDTH, 42), pygame.SRCALPHA)
-        pygame.draw.rect(bar_surf, (*C_PANEL_BG, 220), (0, 0, WIDTH, 42))
-        pygame.draw.line(bar_surf, C_PANEL_BORDER, (0, 41), (WIDTH, 41), 1)
+        bar_h = 50
+        bar_surf = pygame.Surface((WIDTH, bar_h), pygame.SRCALPHA)
+        pygame.draw.rect(bar_surf, (*C_PANEL_BG, 220), (0, 0, WIDTH, bar_h))
+        pygame.draw.line(bar_surf, C_PANEL_BORDER, (0, bar_h - 1), (WIDTH, bar_h - 1), 1)
         surface.blit(bar_surf, (0, 0))
 
         # Título principal
         title = FONT_HEADER.render("PQC-SAT", True, C_ACCENT_CYAN)
-        surface.blit(title, (WIDTH // 2 - 200, 10))
+        surface.blit(title, (WIDTH // 2 - 220, 12))
 
-        subtitle = FONT_SMALL.render("Mission Control Dashboard · UFF Cibersegurança", True, C_TEXT_DIM)
-        surface.blit(subtitle, (WIDTH // 2 - 200 + title.get_width() + 15, 14))
+        subtitle = FONT_SMALL.render("Mission Control · UFF Cibersegurança", True, C_TEXT_DIM)
+        surface.blit(subtitle, (WIDTH // 2 - 220 + title.get_width() + 15, 16))
 
         # Indicador de conexão
         conn_pulse = int(180 + 75 * math.sin(t * 3))
-        pygame.draw.circle(surface, (0, conn_pulse, 0), (WIDTH - 120, 21), 5)
+        pygame.draw.circle(surface, (0, conn_pulse, 0), (WIDTH - 150, 25), 6)
         conn_text = FONT_SMALL.render("LINK ATIVO", True, C_ACCENT_GREEN)
-        surface.blit(conn_text, (WIDTH - 108, 14))
+        surface.blit(conn_text, (WIDTH - 136, 17))
 
         # Clock
         clock_text = FONT_SMALL.render(time.strftime("%H:%M:%S"), True, C_TEXT_DIM)
-        surface.blit(clock_text, (WIDTH - 240, 14))
+        surface.blit(clock_text, (WIDTH - 290, 17))
 
     def _draw_bottom_bar(self, surface, t):
         """Barra inferior com informações secundárias."""
-        bar_y = HEIGHT - 30
-        bar_surf = pygame.Surface((WIDTH, 30), pygame.SRCALPHA)
-        pygame.draw.rect(bar_surf, (*C_PANEL_BG, 200), (0, 0, WIDTH, 30))
+        bar_h = 36
+        bar_y = HEIGHT - bar_h
+        bar_surf = pygame.Surface((WIDTH, bar_h), pygame.SRCALPHA)
+        pygame.draw.rect(bar_surf, (*C_PANEL_BG, 200), (0, 0, WIDTH, bar_h))
         pygame.draw.line(bar_surf, C_PANEL_BORDER, (0, 0), (WIDTH, 0), 1)
         surface.blit(bar_surf, (0, bar_y))
 
@@ -676,25 +766,32 @@ class DashboardPanel:
             f"CRC: HABILITADO",
             f"SEED: 42",
         ]
-        x = 20
+        x = 25
         for item in items:
             color = C_TEXT_DIM
             if "CONECTADO" in item:
                 color = C_ACCENT_GREEN
             surf = FONT_SMALL.render(item, True, color)
-            surface.blit(surf, (x, bar_y + 8))
-            x += surf.get_width() + 30
+            surface.blit(surf, (x, bar_y + 9))
+            x += surf.get_width() + 35
 
             # Separador
-            if x < WIDTH - 100:
-                pygame.draw.line(surface, C_PANEL_BORDER, (x - 15, bar_y + 6), (x - 15, bar_y + 22), 1)
+            if x < WIDTH - 150:
+                pygame.draw.line(surface, C_PANEL_BORDER, (x - 18, bar_y + 7), (x - 18, bar_y + 27), 1)
 
-    def _draw_metric(self, surface, x, y, label, value, value_color):
-        """Desenha uma métrica label: value."""
+    def _draw_metric_stacked(self, surface, x, y, label, value, value_color):
+        """Desenha métrica com label em cima e valor embaixo."""
         label_surf = FONT_SMALL.render(label, True, C_TEXT_DIM)
         value_surf = FONT_BODY.render(str(value), True, value_color)
         surface.blit(label_surf, (x, y))
-        surface.blit(value_surf, (x + 130, y - 1))
+        surface.blit(value_surf, (x, y + 18))
+
+    def _draw_metric_inline(self, surface, x, y, label, value, value_color):
+        """Desenha métrica com label curto + valor na mesma linha."""
+        label_surf = FONT_SMALL.render(label, True, C_TEXT_DIM)
+        value_surf = FONT_BODY.render(str(value), True, value_color)
+        surface.blit(label_surf, (x, y + 1))
+        surface.blit(value_surf, (x + label_surf.get_width() + 8, y))
 
 
 # ─── Partículas de poeira cósmica ────────────────────────────────
@@ -736,6 +833,101 @@ class CosmicDust:
             surface.blit(s, (int(p['x']) - size - 1, int(p['y']) - size - 1))
 
 
+# ─── Estrelas Cadentes ────────────────────────────────────────────
+class ShootingStars:
+    """Estrelas cadentes ocasionais e sutis."""
+
+    def __init__(self):
+        self.meteors = []
+        self.spawn_timer = 0.0
+        self.next_spawn = random.uniform(2.0, 6.0)  # segundos até a próxima
+
+    def update(self, dt):
+        self.spawn_timer += dt
+
+        # Spawnar nova estrela cadente
+        if self.spawn_timer >= self.next_spawn:
+            self.spawn_timer = 0.0
+            self.next_spawn = random.uniform(3.0, 8.0)
+            self._spawn()
+
+        # Atualizar existentes
+        for m in self.meteors:
+            m['x'] += m['vx'] * dt
+            m['y'] += m['vy'] * dt
+            m['life'] -= dt
+
+        # Remover mortas
+        self.meteors = [m for m in self.meteors if m['life'] > 0]
+
+    def _spawn(self):
+        # Posição inicial aleatória nas bordas superiores
+        side = random.choice(['top', 'right'])
+        if side == 'top':
+            x = random.randint(100, WIDTH - 100)
+            y = random.randint(-20, 50)
+        else:
+            x = random.randint(WIDTH - 200, WIDTH + 20)
+            y = random.randint(50, HEIGHT // 2)
+
+        # Direção: diagonal para baixo-esquerda
+        angle = random.uniform(math.pi * 0.55, math.pi * 0.72)
+        speed = random.uniform(250, 500)
+        life = random.uniform(0.8, 1.8)
+        self.meteors.append({
+            'x': x, 'y': y,
+            'vx': math.cos(angle) * speed,
+            'vy': math.sin(angle) * speed,
+            'life': life,
+            'max_life': life,
+            'length': random.randint(80, 180),
+            'brightness': random.randint(200, 255),
+        })
+
+    def draw(self, surface):
+        for m in self.meteors:
+            alpha_ratio = m['life'] / m['max_life']
+            # Calcular posição da cauda
+            speed = math.sqrt(m['vx'] ** 2 + m['vy'] ** 2)
+            if speed < 1:
+                continue
+            dx = -m['vx'] / speed * m['length']
+            dy = -m['vy'] / speed * m['length']
+
+            head_x, head_y = int(m['x']), int(m['y'])
+            tail_x, tail_y = int(m['x'] + dx), int(m['y'] + dy)
+
+            # Linha principal com fade — mais grossa e visível
+            b = max(0, min(255, int(m['brightness'] * alpha_ratio)))
+            b2 = max(0, min(255, int(b * 0.85)))
+
+            # Trilha secundária (mais larga, translúcida)
+            trail_s = pygame.Surface((abs(head_x - tail_x) + 20, abs(head_y - tail_y) + 20), pygame.SRCALPHA)
+            ox = min(head_x, tail_x) - 10
+            oy = min(head_y, tail_y) - 10
+            pygame.draw.line(trail_s, (b, b, b2, max(0, min(255, int(60 * alpha_ratio)))),
+                             (head_x - ox, head_y - oy), (tail_x - ox, tail_y - oy), 5)
+            surface.blit(trail_s, (ox, oy))
+
+            # Linha central brilhante
+            pygame.draw.line(surface, (b, b, b2),
+                             (head_x, head_y), (tail_x, tail_y), 3)
+
+            # Glow na cabeça — maior
+            glow_size = max(0, min(14, int(7 * alpha_ratio)))
+            if glow_size > 0:
+                b3 = max(0, min(255, int(b * 0.8)))
+                ga = max(0, min(255, int(180 * alpha_ratio)))
+                glow_s = pygame.Surface((glow_size * 6, glow_size * 6), pygame.SRCALPHA)
+                pygame.draw.circle(glow_s, (b, b, b3, ga),
+                                   (glow_size * 3, glow_size * 3), glow_size)
+                # Segundo halo maior e mais difuso
+                ga2 = max(0, min(255, int(50 * alpha_ratio)))
+                pygame.draw.circle(glow_s, (b, b, b3, ga2),
+                                   (glow_size * 3, glow_size * 3), glow_size * 2)
+                surface.blit(glow_s, (head_x - glow_size * 3, head_y - glow_size * 3))
+
+
 # ─── Loop Principal ──────────────────────────────────────────────
 def main():
     global WIDTH, HEIGHT, screen
@@ -745,6 +937,7 @@ def main():
     satellite = Satellite(earth)
     dashboard = DashboardPanel()
     dust = CosmicDust(50)
+    shooting_stars = ShootingStars()
 
     running = True
     t = 0.0
@@ -759,7 +952,7 @@ def main():
                 running = False
             elif event.type == pygame.VIDEORESIZE:
                 WIDTH, HEIGHT = event.w, event.h
-                screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
+                screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN | pygame.DOUBLEBUF)
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_q and (pygame.key.get_mods() & pygame.KMOD_CTRL):
                     running = False
@@ -769,6 +962,7 @@ def main():
         satellite.update(dt)
         dashboard.update(dt)
         dust.update(dt)
+        shooting_stars.update(dt)
 
         # ── Desenho ──
         screen.fill(C_SPACE_BG)
@@ -785,6 +979,7 @@ def main():
 
         stars.draw(screen, t)
         dust.draw(screen)
+        shooting_stars.draw(screen)
         earth.draw(screen, t)
         satellite.draw(screen, t)
         dashboard.draw(screen, t, satellite)
