@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pio/
+
+# Session exports are generated artifacts.
+logs/*.csv
+
+# Local hardware backups can contain full firmware images.
+backups/*.bin

@@ -1,0 +1,1668 @@
+/*
+  PQC-SAT firmware for RoboCore BlackBoard Wisdom.
+
+  Goal for this stage:
+  - own the serial bridge protocol used by the notebook;
+  - expose a reproducible inventory of the Wisdom board;
+  - test every onboard feature;
+  - run a small payload fault/CRC32 experiment without pretending ML-KEM exists.
+
+  Crypto and radiation experiments are later stages.
+*/
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <Wire.h>
+
+#if defined(CONFIG_BT_ENABLED)
+#include "esp_bt.h"
+#endif
+
+// ---- Protocol ---------------------------------------------------------------
+static constexpr uint32_t SERIAL_BAUD = 115200;
+static constexpr size_t MAX_FRAME_LEN = 256;
+static constexpr size_t MAX_FIELDS = 14;
+static constexpr size_t MAX_EXPERIMENT_PAYLOAD = 96;
+
+// ---- BlackBoard Wisdom pin map ---------------------------------------------
+static constexpr int PIN_I2C_SDA = 21;
+static constexpr int PIN_I2C_SCL = 22;
+
+static constexpr int PIN_BAR_100 = 17;
+static constexpr int PIN_BAR_75 = 16;
+static constexpr int PIN_BAR_50 = 4;
+static constexpr int PIN_BAR_25 = 13;
+static constexpr int BAR_PINS[] = {PIN_BAR_25, PIN_BAR_50, PIN_BAR_75, PIN_BAR_100};
+static constexpr size_t BAR_PIN_COUNT = sizeof(BAR_PINS) / sizeof(BAR_PINS[0]);
+
+static constexpr int PIN_RGB_R = 19;
+static constexpr int PIN_RGB_G = 23;
+static constexpr int PIN_RGB_B = 18;
+static constexpr int RGB_CH_R = 0;
+static constexpr int RGB_CH_G = 1;
+static constexpr int RGB_CH_B = 2;
+static constexpr int RGB_PWM_FREQ = 5000;
+static constexpr int RGB_PWM_BITS = 8;
+
+static constexpr int PIN_SERVO_SIGNAL = 25;
+static constexpr int SERVO_CH = 4;
+static constexpr int SERVO_PWM_FREQ = 50;
+static constexpr int SERVO_PWM_BITS = 16;
+
+static constexpr int PIN_RELAY_SIGNAL = 33;
+static constexpr int PIN_BUTTON = 27;
+static constexpr int PIN_IR = 26;
+static constexpr int PIN_SOUND = 36;  // VP / A36
+static constexpr int PIN_POT = 39;    // VN / A39
+static constexpr int PIN_ACCEL_INT1 = 34;
+static constexpr int PIN_ACCEL_INT2 = 35;
+
+#if !defined(LED_BUILTIN)
+#define LED_BUILTIN 2
+#endif
+
+// ---- I2C addresses ----------------------------------------------------------
+static constexpr uint8_t ADDR_APDS9960 = 0x39;
+static constexpr uint8_t ADDR_HTU21D = 0x40;
+static constexpr uint8_t ADDR_OLED_PRIMARY = 0x3C;
+static constexpr uint8_t ADDR_OLED_SECONDARY = 0x3D;
+static constexpr uint8_t ADDR_MMA8452_PRIMARY = 0x1D;
+static constexpr uint8_t ADDR_MMA8452_SECONDARY = 0x1C;
+
+static constexpr uint8_t OLED_WIDTH = 128;
+static constexpr uint8_t OLED_HEIGHT = 64;
+static constexpr size_t OLED_BUFFER_SIZE = (OLED_WIDTH * OLED_HEIGHT) / 8;
+
+// ---- State ------------------------------------------------------------------
+static char rx_buffer[MAX_FRAME_LEN + 1];
+static size_t rx_len = 0;
+
+static uint32_t command_count = 0;
+static uint32_t error_count = 0;
+static uint32_t telemetry_seq = 0;
+static uint32_t boot_cpu_mhz = 0;
+
+static const char *active_profile = "BASELINE";
+static bool builtin_led_state = false;
+static bool relay_state = false;
+static bool rgb_common_anode = false;
+static bool bar_active_low = false;
+static uint8_t rgb_r = 0;
+static uint8_t rgb_g = 0;
+static uint8_t rgb_b = 0;
+static uint8_t bar_level = 0;
+static uint8_t bar_percent = 0;
+static int servo_angle = -1;
+
+static bool apds_present = false;
+static bool htu_present = false;
+static bool oled_present = false;
+static bool mma_present = false;
+static uint8_t oled_addr = 0;
+static uint8_t mma_addr = 0;
+static uint8_t oled_buffer[OLED_BUFFER_SIZE];
+
+struct RobotPixel {
+  uint8_t col;
+  uint8_t row;
+  char key;
+};
+
+// Same 12x8 pixel-art robot map used by dashboard.py, rendered in monochrome.
+static constexpr RobotPixel ROBOT_PIXELS[] = {
+    {3, 0, 'A'}, {4, 0, 'A'}, {7, 0, 'A'}, {8, 0, 'A'},
+    {2, 1, 'H'}, {3, 1, 'H'}, {4, 1, 'H'}, {5, 1, 'H'}, {6, 1, 'H'}, {7, 1, 'H'}, {8, 1, 'H'}, {9, 1, 'H'},
+    {1, 2, 'H'}, {2, 2, 'B'}, {3, 2, 'B'}, {4, 2, 'B'}, {5, 2, 'B'}, {6, 2, 'B'}, {7, 2, 'B'}, {8, 2, 'B'}, {9, 2, 'B'}, {10, 2, 'H'},
+    {1, 3, 'H'}, {2, 3, 'B'}, {3, 3, 'E'}, {4, 3, 'E'}, {5, 3, 'B'}, {6, 3, 'B'}, {7, 3, 'E'}, {8, 3, 'E'}, {9, 3, 'B'}, {10, 3, 'H'},
+    {1, 4, 'H'}, {2, 4, 'B'}, {3, 4, 'B'}, {4, 4, 'B'}, {5, 4, 'B'}, {6, 4, 'B'}, {7, 4, 'B'}, {8, 4, 'B'}, {9, 4, 'B'}, {10, 4, 'H'},
+    {1, 5, 'H'}, {2, 5, 'B'}, {3, 5, 'S'}, {4, 5, 'B'}, {5, 5, 'B'}, {6, 5, 'B'}, {7, 5, 'B'}, {8, 5, 'S'}, {9, 5, 'B'}, {10, 5, 'H'},
+    {1, 6, 'H'}, {2, 6, 'B'}, {3, 6, 'B'}, {4, 6, 'S'}, {5, 6, 'S'}, {6, 6, 'S'}, {7, 6, 'S'}, {8, 6, 'B'}, {9, 6, 'B'}, {10, 6, 'H'},
+    {2, 7, 'H'}, {3, 7, 'H'}, {4, 7, 'H'}, {5, 7, 'H'}, {6, 7, 'H'}, {7, 7, 'H'}, {8, 7, 'H'}, {9, 7, 'H'},
+};
+static constexpr size_t ROBOT_PIXEL_COUNT = sizeof(ROBOT_PIXELS) / sizeof(ROBOT_PIXELS[0]);
+
+// ---- Small helpers ----------------------------------------------------------
+static void disable_radios() {
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+
+#if defined(CONFIG_BT_ENABLED)
+  btStop();
+#endif
+}
+
+static void begin_result(const char *request_id, const char *status) {
+  Serial.print("V1|");
+  Serial.print(request_id);
+  Serial.print("|RESULT|");
+  Serial.print(status);
+}
+
+static void print_kv(const char *key, const char *value) {
+  Serial.print("|");
+  Serial.print(key);
+  Serial.print("=");
+  Serial.print(value);
+}
+
+static void print_kv_u32(const char *key, uint32_t value) {
+  Serial.print("|");
+  Serial.print(key);
+  Serial.print("=");
+  Serial.print(value);
+}
+
+static void print_kv_i32(const char *key, int32_t value) {
+  Serial.print("|");
+  Serial.print(key);
+  Serial.print("=");
+  Serial.print(value);
+}
+
+static void print_kv_bool(const char *key, bool value) {
+  print_kv(key, value ? "1" : "0");
+}
+
+static void end_result() {
+  Serial.println();
+}
+
+static void print_error(const char *request_id, const char *code, const char *detail) {
+  error_count++;
+  begin_result(request_id, "ERROR");
+  print_kv("code", code);
+  print_kv("detail", detail);
+  end_result();
+}
+
+static bool is_token_safe(const char *value) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  for (const char *p = value; *p != '\0'; ++p) {
+    if (*p == '|' || *p == '\r' || *p == '\n') {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void uppercase_ascii(char *value) {
+  for (char *p = value; *p != '\0'; ++p) {
+    if (*p >= 'a' && *p <= 'z') {
+      *p = static_cast<char>(*p - 'a' + 'A');
+    }
+  }
+}
+
+static bool parse_u8(const char *value, uint8_t *out) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  char *end = nullptr;
+  long parsed = strtol(value, &end, 10);
+  if (*end != '\0' || parsed < 0 || parsed > 255) {
+    return false;
+  }
+  *out = static_cast<uint8_t>(parsed);
+  return true;
+}
+
+static bool parse_int_range(const char *value, int min_value, int max_value, int *out) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  char *end = nullptr;
+  long parsed = strtol(value, &end, 10);
+  if (*end != '\0' || parsed < min_value || parsed > max_value) {
+    return false;
+  }
+  *out = static_cast<int>(parsed);
+  return true;
+}
+
+static bool parse_u8_auto(const char *value, uint8_t *out) {
+  if (value == nullptr || value[0] == '\0') {
+    return false;
+  }
+  char *end = nullptr;
+  long parsed = strtol(value, &end, 0);
+  if (*end != '\0') {
+    parsed = strtol(value, &end, 16);
+  }
+  if (*end != '\0' || parsed < 0 || parsed > 255) {
+    return false;
+  }
+  *out = static_cast<uint8_t>(parsed);
+  return true;
+}
+
+static bool is_single_bit_mask(uint8_t value) {
+  return value != 0 && (value & static_cast<uint8_t>(value - 1U)) == 0;
+}
+
+static int hex_nibble(char c) {
+  if (c >= '0' && c <= '9') {
+    return c - '0';
+  }
+  if (c >= 'a' && c <= 'f') {
+    return c - 'a' + 10;
+  }
+  if (c >= 'A' && c <= 'F') {
+    return c - 'A' + 10;
+  }
+  return -1;
+}
+
+static bool parse_hex_payload(const char *hex, uint8_t *out, size_t max_len, size_t *out_len) {
+  if (hex == nullptr) {
+    return false;
+  }
+  const size_t hex_len = strlen(hex);
+  if (hex_len == 0 || (hex_len % 2U) != 0 || hex_len / 2U > max_len) {
+    return false;
+  }
+  for (size_t i = 0; i < hex_len; i += 2) {
+    const int hi = hex_nibble(hex[i]);
+    const int lo = hex_nibble(hex[i + 1]);
+    if (hi < 0 || lo < 0) {
+      return false;
+    }
+    out[i / 2U] = static_cast<uint8_t>((hi << 4) | lo);
+  }
+  *out_len = hex_len / 2U;
+  return true;
+}
+
+static uint32_t crc32_bytes(const uint8_t *data, size_t len) {
+  uint32_t crc = 0xFFFFFFFFUL;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= data[i];
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      const uint32_t mask = static_cast<uint32_t>(-(static_cast<int32_t>(crc & 1U)));
+      crc = (crc >> 1) ^ (0xEDB88320UL & mask);
+    }
+  }
+  return ~crc;
+}
+
+static void print_kv_hex_u8(const char *key, uint8_t value) {
+  char buffer[5];
+  snprintf(buffer, sizeof(buffer), "0x%02X", value);
+  print_kv(key, buffer);
+}
+
+static void print_kv_hex_u32(const char *key, uint32_t value) {
+  char buffer[11];
+  snprintf(buffer, sizeof(buffer), "0x%08lX", static_cast<unsigned long>(value));
+  print_kv(key, buffer);
+}
+
+static size_t split_fields(char *line, char *fields[], size_t max_fields) {
+  if (line == nullptr || line[0] == '\0' || max_fields == 0) {
+    return 0;
+  }
+
+  size_t count = 1;
+  fields[0] = line;
+
+  for (char *p = line; *p != '\0'; ++p) {
+    if (*p == '|') {
+      if (count >= max_fields) {
+        return 0;
+      }
+      *p = '\0';
+      fields[count++] = p + 1;
+    }
+  }
+
+  for (size_t i = 0; i < count; ++i) {
+    if (!is_token_safe(fields[i])) {
+      return 0;
+    }
+  }
+
+  return count;
+}
+
+// ---- I2C helpers ------------------------------------------------------------
+static bool i2c_present(uint8_t address) {
+  Wire.beginTransmission(address);
+  return Wire.endTransmission() == 0;
+}
+
+static bool i2c_read_reg8(uint8_t address, uint8_t reg, uint8_t *value) {
+  Wire.beginTransmission(address);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) {
+    return false;
+  }
+  if (Wire.requestFrom(static_cast<int>(address), 1) != 1) {
+    return false;
+  }
+  *value = Wire.read();
+  return true;
+}
+
+static bool i2c_write_reg8(uint8_t address, uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(address);
+  Wire.write(reg);
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
+
+static void refresh_peripheral_presence() {
+  apds_present = i2c_present(ADDR_APDS9960);
+  htu_present = i2c_present(ADDR_HTU21D);
+
+  if (i2c_present(ADDR_OLED_PRIMARY)) {
+    oled_present = true;
+    oled_addr = ADDR_OLED_PRIMARY;
+  } else if (i2c_present(ADDR_OLED_SECONDARY)) {
+    oled_present = true;
+    oled_addr = ADDR_OLED_SECONDARY;
+  } else {
+    oled_present = false;
+    oled_addr = 0;
+  }
+
+  if (i2c_present(ADDR_MMA8452_PRIMARY)) {
+    mma_present = true;
+    mma_addr = ADDR_MMA8452_PRIMARY;
+  } else if (i2c_present(ADDR_MMA8452_SECONDARY)) {
+    mma_present = true;
+    mma_addr = ADDR_MMA8452_SECONDARY;
+  } else {
+    mma_present = false;
+    mma_addr = 0;
+  }
+}
+
+// ---- Board outputs ----------------------------------------------------------
+static void apply_rgb() {
+  const uint8_t out_r = rgb_common_anode ? (255 - rgb_r) : rgb_r;
+  const uint8_t out_g = rgb_common_anode ? (255 - rgb_g) : rgb_g;
+  const uint8_t out_b = rgb_common_anode ? (255 - rgb_b) : rgb_b;
+  ledcWrite(RGB_CH_R, out_r);
+  ledcWrite(RGB_CH_G, out_g);
+  ledcWrite(RGB_CH_B, out_b);
+}
+
+static void set_rgb(uint8_t r, uint8_t g, uint8_t b) {
+  rgb_r = r;
+  rgb_g = g;
+  rgb_b = b;
+  apply_rgb();
+}
+
+static void set_builtin_indicator(bool enabled) {
+  builtin_led_state = enabled;
+  digitalWrite(LED_BUILTIN, enabled ? HIGH : LOW);
+}
+
+static void set_main_led_rgb(uint8_t r, uint8_t g, uint8_t b) {
+  set_builtin_indicator(r != 0 || g != 0 || b != 0);
+  set_rgb(r, g, b);
+}
+
+static bool color_from_name(const char *name, uint8_t *r, uint8_t *g, uint8_t *b) {
+  if (strcmp(name, "WHITE") == 0 || strcmp(name, "ON") == 0) {
+    *r = 255;
+    *g = 255;
+    *b = 255;
+  } else if (strcmp(name, "RED") == 0) {
+    *r = 255;
+    *g = 0;
+    *b = 0;
+  } else if (strcmp(name, "GREEN") == 0) {
+    *r = 0;
+    *g = 255;
+    *b = 0;
+  } else if (strcmp(name, "BLUE") == 0) {
+    *r = 0;
+    *g = 0;
+    *b = 255;
+  } else if (strcmp(name, "CYAN") == 0) {
+    *r = 0;
+    *g = 255;
+    *b = 255;
+  } else if (strcmp(name, "MAGENTA") == 0) {
+    *r = 255;
+    *g = 0;
+    *b = 255;
+  } else if (strcmp(name, "YELLOW") == 0) {
+    *r = 255;
+    *g = 180;
+    *b = 0;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+static void rgb_test_pattern() {
+  const uint8_t saved_r = rgb_r;
+  const uint8_t saved_g = rgb_g;
+  const uint8_t saved_b = rgb_b;
+  const bool saved_builtin = builtin_led_state;
+
+  set_main_led_rgb(255, 0, 0);
+  delay(120);
+  set_main_led_rgb(0, 255, 0);
+  delay(120);
+  set_main_led_rgb(0, 0, 255);
+  delay(120);
+  set_main_led_rgb(255, 255, 255);
+  delay(120);
+  set_rgb(saved_r, saved_g, saved_b);
+  set_builtin_indicator(saved_builtin);
+}
+
+static void apply_bargraph() {
+  for (size_t i = 0; i < BAR_PIN_COUNT; ++i) {
+    const bool enabled = i < bar_level;
+    digitalWrite(BAR_PINS[i], enabled == bar_active_low ? LOW : HIGH);
+  }
+}
+
+static void set_bar_level(uint8_t level) {
+  if (level > BAR_PIN_COUNT) {
+    level = BAR_PIN_COUNT;
+  }
+  bar_level = level;
+  bar_percent = static_cast<uint8_t>(level * 25U);
+  apply_bargraph();
+}
+
+static void set_bar_percent(uint8_t percent) {
+  if (percent > 100) {
+    percent = 100;
+  }
+  bar_percent = percent;
+  bar_level = static_cast<uint8_t>((static_cast<uint16_t>(percent) * BAR_PIN_COUNT + 99U) / 100U);
+  if (bar_level > BAR_PIN_COUNT) {
+    bar_level = BAR_PIN_COUNT;
+  }
+  apply_bargraph();
+}
+
+static void bargraph_test_pattern() {
+  const uint8_t saved_level = bar_level;
+  const uint8_t saved_percent = bar_percent;
+  for (uint8_t level = 0; level <= BAR_PIN_COUNT; ++level) {
+    set_bar_level(level);
+    delay(100);
+  }
+  for (int level = static_cast<int>(BAR_PIN_COUNT) - 1; level >= 0; --level) {
+    set_bar_level(static_cast<uint8_t>(level));
+    delay(80);
+  }
+  bar_level = saved_level;
+  bar_percent = saved_percent;
+  apply_bargraph();
+}
+
+static void set_relay(bool enabled) {
+  relay_state = enabled;
+  digitalWrite(PIN_RELAY_SIGNAL, enabled ? HIGH : LOW);
+}
+
+static void set_servo_angle(int angle) {
+  if (angle < 0) {
+    ledcWrite(SERVO_CH, 0);
+    servo_angle = -1;
+    return;
+  }
+  if (angle > 180) {
+    angle = 180;
+  }
+  const uint32_t pulse_us = 500 + (static_cast<uint32_t>(angle) * 2000UL) / 180UL;
+  const uint32_t duty = (pulse_us * ((1UL << SERVO_PWM_BITS) - 1UL)) / 20000UL;
+  ledcWrite(SERVO_CH, duty);
+  servo_angle = angle;
+}
+
+// ---- OLED minimal SSD1306 support ------------------------------------------
+static bool oled_command(uint8_t command) {
+  if (!oled_present) {
+    return false;
+  }
+  Wire.beginTransmission(oled_addr);
+  Wire.write(0x00);
+  Wire.write(command);
+  return Wire.endTransmission() == 0;
+}
+
+static bool oled_command2(uint8_t command, uint8_t value) {
+  return oled_command(command) && oled_command(value);
+}
+
+static bool oled_data_chunk(uint8_t value, size_t count) {
+  if (!oled_present) {
+    return false;
+  }
+  while (count > 0) {
+    const size_t chunk = min(static_cast<size_t>(16), count);
+    Wire.beginTransmission(oled_addr);
+    Wire.write(0x40);
+    for (size_t i = 0; i < chunk; ++i) {
+      Wire.write(value);
+    }
+    if (Wire.endTransmission() != 0) {
+      return false;
+    }
+    count -= chunk;
+  }
+  return true;
+}
+
+static bool oled_data_buffer_chunk(const uint8_t *data, size_t count) {
+  if (!oled_present) {
+    return false;
+  }
+  size_t offset = 0;
+  while (offset < count) {
+    const size_t chunk = min(static_cast<size_t>(16), count - offset);
+    Wire.beginTransmission(oled_addr);
+    Wire.write(0x40);
+    for (size_t i = 0; i < chunk; ++i) {
+      Wire.write(data[offset + i]);
+    }
+    if (Wire.endTransmission() != 0) {
+      return false;
+    }
+    offset += chunk;
+  }
+  return true;
+}
+
+static void oled_clear_buffer() {
+  memset(oled_buffer, 0, sizeof(oled_buffer));
+}
+
+static void oled_set_pixel(int x, int y, bool on = true) {
+  if (x < 0 || x >= OLED_WIDTH || y < 0 || y >= OLED_HEIGHT) {
+    return;
+  }
+  const size_t index = static_cast<size_t>(x) + (static_cast<size_t>(y) / 8U) * OLED_WIDTH;
+  const uint8_t mask = 1U << (static_cast<uint8_t>(y) & 7U);
+  if (on) {
+    oled_buffer[index] |= mask;
+  } else {
+    oled_buffer[index] &= ~mask;
+  }
+}
+
+static void oled_fill_rect(int x, int y, int w, int h, bool on = true) {
+  for (int yy = y; yy < y + h; ++yy) {
+    for (int xx = x; xx < x + w; ++xx) {
+      oled_set_pixel(xx, yy, on);
+    }
+  }
+}
+
+static void oled_draw_rect(int x, int y, int w, int h, bool on = true) {
+  for (int xx = x; xx < x + w; ++xx) {
+    oled_set_pixel(xx, y, on);
+    oled_set_pixel(xx, y + h - 1, on);
+  }
+  for (int yy = y; yy < y + h; ++yy) {
+    oled_set_pixel(x, yy, on);
+    oled_set_pixel(x + w - 1, yy, on);
+  }
+}
+
+static void oled_draw_hline(int x, int y, int w, bool on = true) {
+  for (int xx = x; xx < x + w; ++xx) {
+    oled_set_pixel(xx, y, on);
+  }
+}
+
+static void oled_draw_vline(int x, int y, int h, bool on = true) {
+  for (int yy = y; yy < y + h; ++yy) {
+    oled_set_pixel(x, yy, on);
+  }
+}
+
+static bool oled_flush_buffer() {
+  if (!oled_present) {
+    return false;
+  }
+  for (uint8_t page = 0; page < 8; ++page) {
+    oled_command(0xB0 | page);
+    oled_command(0x00);
+    oled_command(0x10);
+    if (!oled_data_buffer_chunk(&oled_buffer[static_cast<size_t>(page) * OLED_WIDTH], OLED_WIDTH)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool oled_clear() {
+  if (!oled_present) {
+    return false;
+  }
+  oled_clear_buffer();
+  for (uint8_t page = 0; page < 8; ++page) {
+    oled_command(0xB0 | page);
+    oled_command(0x00);
+    oled_command(0x10);
+    if (!oled_data_chunk(0x00, 128)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void oled_draw_robot_satellite_icon() {
+  oled_clear_buffer();
+
+  // Solar panels.
+  oled_draw_rect(8, 24, 24, 18);
+  oled_draw_rect(96, 24, 24, 18);
+  oled_draw_vline(16, 24, 18);
+  oled_draw_vline(24, 24, 18);
+  oled_draw_vline(104, 24, 18);
+  oled_draw_vline(112, 24, 18);
+  oled_draw_hline(8, 30, 24);
+  oled_draw_hline(8, 36, 24);
+  oled_draw_hline(96, 30, 24);
+  oled_draw_hline(96, 36, 24);
+
+  // CubeSat body and connection arms.
+  oled_draw_hline(32, 33, 9);
+  oled_draw_hline(87, 33, 9);
+  oled_draw_rect(39, 14, 50, 38);
+  oled_draw_rect(42, 17, 44, 32);
+
+  // Antenna and status beacon.
+  oled_draw_vline(64, 7, 7);
+  oled_set_pixel(63, 6);
+  oled_set_pixel(64, 5);
+  oled_set_pixel(65, 6);
+
+  // Pixel-art robot from dashboard.py, scaled to 3x3 pixels.
+  static constexpr int robot_x = 46;
+  static constexpr int robot_y = 22;
+  static constexpr int scale = 3;
+  for (size_t i = 0; i < ROBOT_PIXEL_COUNT; ++i) {
+    const RobotPixel &p = ROBOT_PIXELS[i];
+    oled_fill_rect(robot_x + p.col * scale, robot_y + p.row * scale, scale, scale, true);
+  }
+
+  // Re-open a few monochrome details so eyes/smile remain readable on OLED.
+  oled_fill_rect(robot_x + 3 * scale + 1, robot_y + 3 * scale + 1, scale - 1, scale - 1, false);
+  oled_fill_rect(robot_x + 7 * scale + 1, robot_y + 3 * scale + 1, scale - 1, scale - 1, false);
+  oled_draw_hline(robot_x + 4 * scale, robot_y + 6 * scale + 1, 4 * scale);
+
+  // Minimal orbit cue.
+  for (int x = 28; x <= 100; x += 6) {
+    const int y = 58 + ((x / 6) % 2);
+    oled_set_pixel(x, y);
+    oled_set_pixel(x + 1, y);
+  }
+}
+
+static bool oled_show_standby_icon() {
+  if (!oled_present) {
+    return false;
+  }
+  oled_draw_robot_satellite_icon();
+  return oled_flush_buffer();
+}
+
+static bool oled_test_pattern() {
+  if (!oled_present) {
+    return false;
+  }
+  for (uint8_t page = 0; page < 8; ++page) {
+    oled_command(0xB0 | page);
+    oled_command(0x00);
+    oled_command(0x10);
+    for (uint8_t block = 0; block < 8; ++block) {
+      Wire.beginTransmission(oled_addr);
+      Wire.write(0x40);
+      for (uint8_t i = 0; i < 16; ++i) {
+        Wire.write(((block + page) % 2 == 0) ? 0xAA : 0x55);
+      }
+      if (Wire.endTransmission() != 0) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static bool oled_init() {
+  if (!oled_present) {
+    return false;
+  }
+  delay(20);
+  oled_command(0xAE);
+  oled_command2(0xD5, 0x80);
+  oled_command2(0xA8, 0x3F);
+  oled_command2(0xD3, 0x00);
+  oled_command(0x40);
+  oled_command2(0x8D, 0x14);
+  oled_command2(0x20, 0x00);
+  oled_command(0xA1);
+  oled_command(0xC8);
+  oled_command2(0xDA, 0x12);
+  oled_command2(0x81, 0x7F);
+  oled_command2(0xD9, 0xF1);
+  oled_command2(0xDB, 0x40);
+  oled_command(0xA4);
+  oled_command(0xA6);
+  oled_command(0xAF);
+  return oled_show_standby_icon();
+}
+
+// ---- Sensors ----------------------------------------------------------------
+static bool htu21d_read_temperature_c(float *temperature_c) {
+  if (!htu_present) {
+    return false;
+  }
+  Wire.beginTransmission(ADDR_HTU21D);
+  Wire.write(0xF3);  // trigger temperature measurement, no hold master
+  if (Wire.endTransmission() != 0) {
+    return false;
+  }
+  delay(60);
+  if (Wire.requestFrom(static_cast<int>(ADDR_HTU21D), 3) < 2) {
+    return false;
+  }
+  const uint16_t raw = (static_cast<uint16_t>(Wire.read()) << 8) | Wire.read();
+  *temperature_c = -46.85f + (175.72f * static_cast<float>(raw & 0xFFFC)) / 65536.0f;
+  return true;
+}
+
+static bool htu21d_read_humidity(float *humidity_pct) {
+  if (!htu_present) {
+    return false;
+  }
+  Wire.beginTransmission(ADDR_HTU21D);
+  Wire.write(0xF5);  // trigger humidity measurement, no hold master
+  if (Wire.endTransmission() != 0) {
+    return false;
+  }
+  delay(35);
+  if (Wire.requestFrom(static_cast<int>(ADDR_HTU21D), 3) < 2) {
+    return false;
+  }
+  const uint16_t raw = (static_cast<uint16_t>(Wire.read()) << 8) | Wire.read();
+  *humidity_pct = -6.0f + (125.0f * static_cast<float>(raw & 0xFFFC)) / 65536.0f;
+  return true;
+}
+
+static bool mma8452_init() {
+  if (!mma_present) {
+    return false;
+  }
+  uint8_t whoami = 0;
+  if (!i2c_read_reg8(mma_addr, 0x0D, &whoami)) {
+    return false;
+  }
+  i2c_write_reg8(mma_addr, 0x2A, 0x00);  // standby
+  i2c_write_reg8(mma_addr, 0x0E, 0x00);  // +/- 2g
+  i2c_write_reg8(mma_addr, 0x2A, 0x01);  // active
+  return whoami == 0x2A;
+}
+
+static int16_t sign_extend_12(uint16_t value) {
+  value &= 0x0FFF;
+  if (value & 0x0800) {
+    value |= 0xF000;
+  }
+  return static_cast<int16_t>(value);
+}
+
+static bool mma8452_read_xyz_mg(int16_t *x_mg, int16_t *y_mg, int16_t *z_mg) {
+  if (!mma_present) {
+    return false;
+  }
+  Wire.beginTransmission(mma_addr);
+  Wire.write(0x01);
+  if (Wire.endTransmission(false) != 0) {
+    return false;
+  }
+  if (Wire.requestFrom(static_cast<int>(mma_addr), 6) != 6) {
+    return false;
+  }
+  const uint16_t x_raw = ((static_cast<uint16_t>(Wire.read()) << 8) | Wire.read()) >> 4;
+  const uint16_t y_raw = ((static_cast<uint16_t>(Wire.read()) << 8) | Wire.read()) >> 4;
+  const uint16_t z_raw = ((static_cast<uint16_t>(Wire.read()) << 8) | Wire.read()) >> 4;
+  *x_mg = static_cast<int16_t>((static_cast<int32_t>(sign_extend_12(x_raw)) * 1000L) / 1024L);
+  *y_mg = static_cast<int16_t>((static_cast<int32_t>(sign_extend_12(y_raw)) * 1000L) / 1024L);
+  *z_mg = static_cast<int16_t>((static_cast<int32_t>(sign_extend_12(z_raw)) * 1000L) / 1024L);
+  return true;
+}
+
+static bool apds9960_id(uint8_t *id) {
+  if (!apds_present) {
+    return false;
+  }
+  return i2c_read_reg8(ADDR_APDS9960, 0x92, id);
+}
+
+static bool apds9960_read_clear_light(uint16_t *clear_light) {
+  if (!apds_present) {
+    return false;
+  }
+  i2c_write_reg8(ADDR_APDS9960, 0x80, 0x03);  // PON + AEN
+  delay(120);
+  uint8_t low = 0;
+  uint8_t high = 0;
+  if (!i2c_read_reg8(ADDR_APDS9960, 0x94, &low) || !i2c_read_reg8(ADDR_APDS9960, 0x95, &high)) {
+    return false;
+  }
+  *clear_light = (static_cast<uint16_t>(high) << 8) | low;
+  return true;
+}
+
+static bool apds9960_read_proximity(uint8_t *proximity) {
+  if (!apds_present) {
+    return false;
+  }
+  i2c_write_reg8(ADDR_APDS9960, 0x80, 0x05);  // PON + PEN
+  delay(20);
+  return i2c_read_reg8(ADDR_APDS9960, 0x9C, proximity);
+}
+
+// ---- Board setup ------------------------------------------------------------
+static void configure_board_io() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  set_builtin_indicator(false);
+
+  for (size_t i = 0; i < BAR_PIN_COUNT; ++i) {
+    pinMode(BAR_PINS[i], OUTPUT);
+    digitalWrite(BAR_PINS[i], LOW);
+  }
+
+  pinMode(PIN_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_IR, INPUT);
+  pinMode(PIN_ACCEL_INT1, INPUT);
+  pinMode(PIN_ACCEL_INT2, INPUT);
+  pinMode(PIN_RELAY_SIGNAL, OUTPUT);
+  digitalWrite(PIN_RELAY_SIGNAL, LOW);
+
+  analogReadResolution(12);
+
+  ledcSetup(RGB_CH_R, RGB_PWM_FREQ, RGB_PWM_BITS);
+  ledcSetup(RGB_CH_G, RGB_PWM_FREQ, RGB_PWM_BITS);
+  ledcSetup(RGB_CH_B, RGB_PWM_FREQ, RGB_PWM_BITS);
+  ledcAttachPin(PIN_RGB_R, RGB_CH_R);
+  ledcAttachPin(PIN_RGB_G, RGB_CH_G);
+  ledcAttachPin(PIN_RGB_B, RGB_CH_B);
+  set_rgb(0, 0, 0);
+
+  ledcSetup(SERVO_CH, SERVO_PWM_FREQ, SERVO_PWM_BITS);
+  ledcAttachPin(PIN_SERVO_SIGNAL, SERVO_CH);
+  set_servo_angle(-1);
+}
+
+static void print_boot_event() {
+  Serial.print("V1|0|EVENT|BOOT|node=PQC-SAT-WISDOM|proto=V1|baud=");
+  Serial.print(SERIAL_BAUD);
+  Serial.println("|crypto=none|fault=payload_crc32|board=BlackBoard-Wisdom");
+}
+
+// ---- Command handlers -------------------------------------------------------
+static bool apply_profile(const char *profile_name) {
+  if (strcmp(profile_name, "BASELINE") == 0) {
+    const bool ok = setCpuFrequencyMhz(boot_cpu_mhz);
+    if (ok) {
+      active_profile = "BASELINE";
+    }
+    disable_radios();
+    return ok;
+  }
+
+  if (strcmp(profile_name, "OBC-1U-LIMITED") == 0) {
+    const bool ok = setCpuFrequencyMhz(80);
+    if (ok) {
+      active_profile = "OBC-1U-LIMITED";
+    }
+    disable_radios();
+    return ok;
+  }
+
+  return false;
+}
+
+static void send_hello(const char *request_id) {
+  begin_result(request_id, "OK");
+  print_kv("node", "PQC-SAT-WISDOM");
+  print_kv("board", "BlackBoard-Wisdom");
+  print_kv("proto", "V1");
+  print_kv("transport", "uart");
+  print_kv("crypto", "none");
+  print_kv("fault", "payload_crc32");
+  end_result();
+}
+
+static void send_ping(const char *request_id) {
+  begin_result(request_id, "OK");
+  print_kv("pong", "1");
+  print_kv_u32("seq", command_count);
+  print_kv_u32("uptime_ms", millis());
+  end_result();
+}
+
+static void send_status(const char *request_id) {
+  begin_result(request_id, "OK");
+  print_kv("profile", active_profile);
+  print_kv("chip", ESP.getChipModel());
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  print_kv_u32("flash", ESP.getFlashChipSize());
+  print_kv("radio", "off");
+  print_kv("fault", "payload_crc32");
+  end_result();
+}
+
+static void send_peripherals(const char *request_id) {
+  refresh_peripheral_presence();
+  begin_result(request_id, "OK");
+  print_kv_bool("oled", oled_present);
+  print_kv_bool("apds9960", apds_present);
+  print_kv_bool("htu21d", htu_present);
+  print_kv_bool("mma8452", mma_present);
+  print_kv("i2c", "sda21_scl22");
+  end_result();
+}
+
+static void send_telemetry(const char *request_id) {
+  telemetry_seq++;
+  begin_result(request_id, "OK");
+  print_kv_u32("seq", telemetry_seq);
+  print_kv_u32("uptime_ms", millis());
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("pot", analogRead(PIN_POT));
+  print_kv_u32("sound", analogRead(PIN_SOUND));
+  print_kv_bool("button", digitalRead(PIN_BUTTON) == LOW);
+  print_kv_bool("relay", relay_state);
+  end_result();
+}
+
+static void handle_fault(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 7) {
+    print_error(request_id, "BAD_ARGS", "expected_guard_payloadhex_index_mask");
+    return;
+  }
+
+  char *guard = fields[3];
+  uppercase_ascii(guard);
+  if (strcmp(guard, "NONE") != 0 && strcmp(guard, "CRC32") != 0) {
+    print_error(request_id, "BAD_GUARD", "expected_NONE_or_CRC32");
+    return;
+  }
+
+  uint8_t payload[MAX_EXPERIMENT_PAYLOAD];
+  size_t payload_len = 0;
+  if (!parse_hex_payload(fields[4], payload, sizeof(payload), &payload_len)) {
+    print_error(request_id, "BAD_PAYLOAD", "expected_even_hex_payload");
+    return;
+  }
+
+  int byte_index = 0;
+  if (!parse_int_range(fields[5], 0, static_cast<int>(payload_len) - 1, &byte_index)) {
+    print_error(request_id, "BAD_INDEX", "outside_payload");
+    return;
+  }
+
+  uint8_t bit_mask = 0;
+  if (!parse_u8_auto(fields[6], &bit_mask) || !is_single_bit_mask(bit_mask)) {
+    print_error(request_id, "BAD_MASK", "expected_single_bit");
+    return;
+  }
+
+  const uint32_t started = micros();
+  const uint8_t before_byte = payload[byte_index];
+  const uint32_t crc_before = crc32_bytes(payload, payload_len);
+  payload[byte_index] ^= bit_mask;
+  const uint8_t after_byte = payload[byte_index];
+  const uint32_t crc_after = crc32_bytes(payload, payload_len);
+  const uint32_t elapsed_us = micros() - started;
+
+  const char *result = "OK";
+  if (after_byte != before_byte) {
+    result = (strcmp(guard, "CRC32") == 0 && crc_after != crc_before) ? "DETECTED_GUARD" : "SILENT";
+  }
+
+  begin_result(request_id, "OK");
+  print_kv("result", result);
+  print_kv("guard", guard);
+  print_kv_u32("payload_len", payload_len);
+  print_kv_u32("byte_index", static_cast<uint32_t>(byte_index));
+  print_kv_hex_u8("bit_mask", bit_mask);
+  print_kv_hex_u8("before_byte", before_byte);
+  print_kv_hex_u8("after_byte", after_byte);
+  print_kv_hex_u32("crc_before", crc_before);
+  print_kv_hex_u32("crc_after", crc_after);
+  print_kv_u32("elapsed_us", elapsed_us);
+  end_result();
+}
+
+static void handle_features(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count == 3) {
+    begin_result(request_id, "OK");
+    print_kv("groups", "CORE,I2C,GPIO,ANALOG,EXPANSION");
+    end_result();
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  begin_result(request_id, "OK");
+  if (strcmp(fields[3], "CORE") == 0) {
+    print_kv("cpu", "ESP32-D0WD");
+    print_kv("usb", "CP2102");
+    print_kv("flash", "4MB");
+  } else if (strcmp(fields[3], "I2C") == 0) {
+    print_kv("bus", "SDA21,SCL22");
+    print_kv("dev", "OLED,APDS9960,HTU21D,MMA8452,BRIICK");
+  } else if (strcmp(fields[3], "GPIO") == 0) {
+    print_kv("dev", "BARGRAPH,RGB,BUTTON,IR,RELAY,SERVO");
+  } else if (strcmp(fields[3], "ANALOG") == 0) {
+    print_kv("dev", "POT_A39,SOUND_A36");
+  } else if (strcmp(fields[3], "EXPANSION") == 0) {
+    print_kv("dev", "BRIICK_I2C,RELAY_D33,SERVO_D25");
+  } else {
+    print_kv("groups", "CORE,I2C,GPIO,ANALOG,EXPANSION");
+  }
+  end_result();
+}
+
+static void handle_boardmap(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count == 3) {
+    begin_result(request_id, "OK");
+    print_kv("groups", "I2C,GPIO,ANALOG,EXPANSION");
+    end_result();
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  begin_result(request_id, "OK");
+  if (strcmp(fields[3], "I2C") == 0) {
+    print_kv("sda", "21");
+    print_kv("scl", "22");
+    print_kv("addr", "OLED3C,APDS39,HTU40,MMA1D");
+  } else if (strcmp(fields[3], "GPIO") == 0) {
+    print_kv("bar", "17,16,4,13");
+    print_kv("rgb", "R19,G23,B18");
+    print_kv("button", "27");
+    print_kv("ir", "26");
+  } else if (strcmp(fields[3], "ANALOG") == 0) {
+    print_kv("pot", "39");
+    print_kv("sound", "36");
+  } else if (strcmp(fields[3], "EXPANSION") == 0) {
+    print_kv("servo", "25");
+    print_kv("relay", "33");
+    print_kv("briick", "I2C");
+  } else {
+    print_kv("groups", "I2C,GPIO,ANALOG,EXPANSION");
+  }
+  end_result();
+}
+
+static void handle_i2c_scan(const char *request_id) {
+  char addrs[128];
+  addrs[0] = '\0';
+  uint8_t count = 0;
+
+  for (uint8_t addr = 1; addr < 127; ++addr) {
+    if (i2c_present(addr)) {
+      char chunk[8];
+      snprintf(chunk, sizeof(chunk), "%s%02X", count == 0 ? "" : ",", addr);
+      strncat(addrs, chunk, sizeof(addrs) - strlen(addrs) - 1);
+      count++;
+      if (strlen(addrs) > 110) {
+        break;
+      }
+    }
+  }
+
+  begin_result(request_id, "OK");
+  print_kv_u32("count", count);
+  print_kv("addr_hex", count == 0 ? "none" : addrs);
+  end_result();
+}
+
+static void handle_profile(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 4) {
+    print_error(request_id, "BAD_ARGS", "expected_profile");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  if (!apply_profile(fields[3])) {
+    print_error(request_id, "BAD_PROFILE", "unsupported_or_rejected");
+    return;
+  }
+
+  begin_result(request_id, "OK");
+  print_kv("profile", active_profile);
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  print_kv("radio", "off");
+  end_result();
+}
+
+static void handle_led(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 4) {
+    print_error(request_id, "BAD_ARGS", "expected_on_off_toggle_color_test");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  if (strcmp(fields[3], "ON") == 0) {
+    set_main_led_rgb(255, 255, 255);
+  } else if (strcmp(fields[3], "OFF") == 0) {
+    set_main_led_rgb(0, 0, 0);
+  } else if (strcmp(fields[3], "TOGGLE") == 0) {
+    if (rgb_r != 0 || rgb_g != 0 || rgb_b != 0 || builtin_led_state) {
+      set_main_led_rgb(0, 0, 0);
+    } else {
+      set_main_led_rgb(255, 255, 255);
+    }
+  } else if (strcmp(fields[3], "TEST") == 0) {
+    rgb_test_pattern();
+  } else {
+    uint8_t r = 0, g = 0, b = 0;
+    if (!color_from_name(fields[3], &r, &g, &b)) {
+      print_error(request_id, "BAD_LED_MODE", "expected_on_off_toggle_color_test");
+      return;
+    }
+    set_main_led_rgb(r, g, b);
+  }
+
+  begin_result(request_id, "OK");
+  print_kv("led", builtin_led_state ? "on" : "off");
+  print_kv("target", "builtin_plus_rgb");
+  print_kv_u32("r", rgb_r);
+  print_kv_u32("g", rgb_g);
+  print_kv_u32("b", rgb_b);
+  end_result();
+}
+
+static void handle_rgb(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count == 4) {
+    uppercase_ascii(fields[3]);
+    if (strcmp(fields[3], "COMMON_ANODE") == 0) {
+      rgb_common_anode = true;
+      apply_rgb();
+    } else if (strcmp(fields[3], "COMMON_CATHODE") == 0) {
+      rgb_common_anode = false;
+      apply_rgb();
+    } else if (strcmp(fields[3], "OFF") == 0) {
+      set_rgb(0, 0, 0);
+    } else if (strcmp(fields[3], "TEST") == 0) {
+      rgb_test_pattern();
+    } else {
+      print_error(request_id, "BAD_RGB_MODE", "expected_r_g_b_mode_or_test");
+      return;
+    }
+  } else if (field_count == 6) {
+    uint8_t r = 0, g = 0, b = 0;
+    if (!parse_u8(fields[3], &r) || !parse_u8(fields[4], &g) || !parse_u8(fields[5], &b)) {
+      print_error(request_id, "BAD_RGB_VALUE", "expected_0_255");
+      return;
+    }
+    set_rgb(r, g, b);
+  } else {
+    print_error(request_id, "BAD_ARGS", "expected_rgb_values");
+    return;
+  }
+
+  begin_result(request_id, "OK");
+  print_kv_u32("r", rgb_r);
+  print_kv_u32("g", rgb_g);
+  print_kv_u32("b", rgb_b);
+  print_kv("mode", rgb_common_anode ? "common_anode" : "common_cathode");
+  end_result();
+}
+
+static void handle_bargraph(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count < 4 || field_count > 5) {
+    print_error(request_id, "BAD_ARGS", "expected_level_percent_mode_test");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  if (field_count == 4) {
+    if (strcmp(fields[3], "OFF") == 0) {
+      set_bar_level(0);
+    } else if (strcmp(fields[3], "ON") == 0) {
+      set_bar_level(4);
+    } else if (strcmp(fields[3], "TEST") == 0) {
+      bargraph_test_pattern();
+    } else if (strcmp(fields[3], "ACTIVE_LOW") == 0) {
+      bar_active_low = true;
+      apply_bargraph();
+    } else if (strcmp(fields[3], "ACTIVE_HIGH") == 0) {
+      bar_active_low = false;
+      apply_bargraph();
+    } else {
+      int value = 0;
+      if (!parse_int_range(fields[3], 0, 100, &value)) {
+        print_error(request_id, "BAD_BAR_VALUE", "expected_0_4_or_0_100");
+        return;
+      }
+      if (value <= 4) {
+        set_bar_level(static_cast<uint8_t>(value));
+      } else {
+        set_bar_percent(static_cast<uint8_t>(value));
+      }
+    }
+  } else {
+    uppercase_ascii(fields[4]);
+    if (strcmp(fields[3], "LEVEL") == 0) {
+      int level = 0;
+      if (!parse_int_range(fields[4], 0, 4, &level)) {
+        print_error(request_id, "BAD_LEVEL", "expected_0_4");
+        return;
+      }
+      set_bar_level(static_cast<uint8_t>(level));
+    } else if (strcmp(fields[3], "PERCENT") == 0) {
+      int percent = 0;
+      if (!parse_int_range(fields[4], 0, 100, &percent)) {
+        print_error(request_id, "BAD_PERCENT", "expected_0_100");
+        return;
+      }
+      set_bar_percent(static_cast<uint8_t>(percent));
+    } else {
+      print_error(request_id, "BAD_BAR_MODE", "expected_LEVEL_PERCENT");
+      return;
+    }
+  }
+
+  begin_result(request_id, "OK");
+  print_kv_u32("level", bar_level);
+  print_kv_u32("percent", bar_percent);
+  print_kv("pins", "13,4,16,17");
+  print_kv("mode", bar_active_low ? "active_low" : "active_high");
+  end_result();
+}
+
+static void handle_relay(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 4) {
+    print_error(request_id, "BAD_ARGS", "expected_on_off_toggle");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  if (strcmp(fields[3], "ON") == 0) {
+    set_relay(true);
+  } else if (strcmp(fields[3], "OFF") == 0) {
+    set_relay(false);
+  } else if (strcmp(fields[3], "TOGGLE") == 0) {
+    set_relay(!relay_state);
+  } else {
+    print_error(request_id, "BAD_RELAY_MODE", "expected_on_off_toggle");
+    return;
+  }
+
+  begin_result(request_id, "OK");
+  print_kv("relay", relay_state ? "on" : "off");
+  print_kv_u32("pin", PIN_RELAY_SIGNAL);
+  end_result();
+}
+
+static void handle_servo(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 4) {
+    print_error(request_id, "BAD_ARGS", "expected_angle_or_detach");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  if (strcmp(fields[3], "DETACH") == 0 || strcmp(fields[3], "OFF") == 0) {
+    set_servo_angle(-1);
+  } else {
+    int angle = 0;
+    if (!parse_int_range(fields[3], 0, 180, &angle)) {
+      print_error(request_id, "BAD_ANGLE", "expected_0_180");
+      return;
+    }
+    set_servo_angle(angle);
+  }
+
+  begin_result(request_id, "OK");
+  print_kv_i32("angle", servo_angle);
+  print_kv_u32("pin", PIN_SERVO_SIGNAL);
+  end_result();
+}
+
+static void handle_analog(const char *request_id, size_t field_count, char *fields[]) {
+  begin_result(request_id, "OK");
+  if (field_count == 3) {
+    print_kv_u32("pot", analogRead(PIN_POT));
+    print_kv_u32("sound", analogRead(PIN_SOUND));
+  } else {
+    uppercase_ascii(fields[3]);
+    if (strcmp(fields[3], "POT") == 0) {
+      print_kv_u32("pot", analogRead(PIN_POT));
+    } else if (strcmp(fields[3], "SOUND") == 0) {
+      print_kv_u32("sound", analogRead(PIN_SOUND));
+    } else {
+      print_kv("valid", "POT,SOUND");
+    }
+  }
+  end_result();
+}
+
+static void handle_digital(const char *request_id, size_t field_count, char *fields[]) {
+  begin_result(request_id, "OK");
+  if (field_count == 3) {
+    print_kv_bool("button", digitalRead(PIN_BUTTON) == LOW);
+    print_kv_bool("ir", digitalRead(PIN_IR) == HIGH);
+    print_kv_bool("accel_int1", digitalRead(PIN_ACCEL_INT1) == HIGH);
+    print_kv_bool("accel_int2", digitalRead(PIN_ACCEL_INT2) == HIGH);
+  } else {
+    uppercase_ascii(fields[3]);
+    if (strcmp(fields[3], "BUTTON") == 0) {
+      print_kv_bool("button", digitalRead(PIN_BUTTON) == LOW);
+    } else if (strcmp(fields[3], "IR") == 0) {
+      print_kv_bool("ir", digitalRead(PIN_IR) == HIGH);
+    } else {
+      print_kv("valid", "BUTTON,IR");
+    }
+  }
+  end_result();
+}
+
+static void handle_sensor_read(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 4) {
+    print_error(request_id, "BAD_ARGS", "expected_TEMP_HUM_ACCEL_APDS");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  if (strcmp(fields[3], "TEMP_HUM") == 0) {
+    float temp = 0.0f;
+    float hum = 0.0f;
+    if (!htu21d_read_temperature_c(&temp) || !htu21d_read_humidity(&hum)) {
+      print_error(request_id, "SENSOR_UNAVAILABLE", "htu21d");
+      return;
+    }
+    begin_result(request_id, "OK");
+    print_kv_i32("temp_c_x100", static_cast<int32_t>(temp * 100.0f));
+    print_kv_i32("hum_x100", static_cast<int32_t>(hum * 100.0f));
+    end_result();
+  } else if (strcmp(fields[3], "ACCEL") == 0) {
+    int16_t x = 0, y = 0, z = 0;
+    if (!mma8452_read_xyz_mg(&x, &y, &z)) {
+      print_error(request_id, "SENSOR_UNAVAILABLE", "mma8452");
+      return;
+    }
+    begin_result(request_id, "OK");
+    print_kv_i32("x_mg", x);
+    print_kv_i32("y_mg", y);
+    print_kv_i32("z_mg", z);
+    end_result();
+  } else if (strcmp(fields[3], "APDS") == 0) {
+    uint8_t id = 0;
+    uint16_t clear_light = 0;
+    uint8_t prox = 0;
+    if (!apds9960_id(&id)) {
+      print_error(request_id, "SENSOR_UNAVAILABLE", "apds9960");
+      return;
+    }
+    apds9960_read_clear_light(&clear_light);
+    apds9960_read_proximity(&prox);
+    begin_result(request_id, "OK");
+    print_kv_u32("id", id);
+    print_kv_u32("clear", clear_light);
+    print_kv_u32("prox", prox);
+    end_result();
+  } else {
+    print_error(request_id, "BAD_SENSOR", "expected_TEMP_HUM_ACCEL_APDS");
+  }
+}
+
+static void handle_oled(const char *request_id, size_t field_count, char *fields[]) {
+  refresh_peripheral_presence();
+  if (!oled_present) {
+    print_error(request_id, "OLED_UNAVAILABLE", "not_detected");
+    return;
+  }
+  if (field_count != 4) {
+    print_error(request_id, "BAD_ARGS", "expected_CLEAR_TEST_INIT");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  bool ok = false;
+  if (strcmp(fields[3], "INIT") == 0) {
+    ok = oled_init();
+  } else if (strcmp(fields[3], "CLEAR") == 0) {
+    ok = oled_clear();
+  } else if (strcmp(fields[3], "TEST") == 0) {
+    ok = oled_test_pattern();
+  } else if (strcmp(fields[3], "STANDBY") == 0) {
+    ok = oled_show_standby_icon();
+  } else {
+    print_error(request_id, "BAD_OLED_CMD", "expected_INIT_CLEAR_TEST_STANDBY");
+    return;
+  }
+
+  if (!ok) {
+    print_error(request_id, "OLED_ERROR", "i2c_write_failed");
+    return;
+  }
+
+  begin_result(request_id, "OK");
+  print_kv("oled", fields[3]);
+  print_kv_u32("addr", oled_addr);
+  end_result();
+}
+
+static void reset_stats(const char *request_id) {
+  command_count = 0;
+  error_count = 0;
+  telemetry_seq = 0;
+  begin_result(request_id, "OK");
+  print_kv_u32("commands", 0);
+  print_kv_u32("errors", 0);
+  print_kv_u32("telemetry_seq", 0);
+  end_result();
+}
+
+static void send_help_detail(const char *request_id, const char *command) {
+  begin_result(request_id, "OK");
+  if (strcmp(command, "HELLO") == 0) {
+    print_kv("usage", "HELLO");
+    print_kv("does", "identifica placa e protocolo");
+  } else if (strcmp(command, "PING") == 0) {
+    print_kv("usage", "PING");
+    print_kv("does", "testa ida e volta UART");
+  } else if (strcmp(command, "STATUS") == 0) {
+    print_kv("usage", "STATUS");
+    print_kv("does", "cpu heap flash perfil radio");
+  } else if (strcmp(command, "TELEMETRY") == 0) {
+    print_kv("usage", "TELEMETRY");
+    print_kv("does", "uptime heap pot som botao rele");
+  } else if (strcmp(command, "FAULT") == 0) {
+    print_kv("usage", "FAULT NONE|CRC32 payload_hex index mask");
+    print_kv("does", "aplica bit-flip e compara CRC32");
+  } else if (strcmp(command, "PERIPHERALS") == 0) {
+    print_kv("usage", "PERIPHERALS");
+    print_kv("does", "detecta OLED APDS HTU MMA");
+  } else if (strcmp(command, "I2C_SCAN") == 0) {
+    print_kv("usage", "I2C_SCAN");
+    print_kv("does", "varre I2C SDA21 SCL22");
+  } else if (strcmp(command, "FEATURES") == 0) {
+    print_kv("usage", "FEATURES CORE I2C GPIO ANALOG EXPANSION");
+    print_kv("does", "lista recursos por grupo");
+  } else if (strcmp(command, "BOARDMAP") == 0) {
+    print_kv("usage", "BOARDMAP I2C GPIO ANALOG EXPANSION");
+    print_kv("does", "mostra pinos e enderecos");
+  } else if (strcmp(command, "SENSOR_READ") == 0) {
+    print_kv("usage", "SENSOR_READ TEMP_HUM ACCEL APDS");
+    print_kv("does", "le sensores I2C");
+  } else if (strcmp(command, "ANALOG") == 0) {
+    print_kv("usage", "ANALOG POT SOUND");
+    print_kv("does", "le entradas analogicas");
+  } else if (strcmp(command, "DIGITAL") == 0) {
+    print_kv("usage", "DIGITAL BUTTON IR");
+    print_kv("does", "le entradas digitais");
+  } else if (strcmp(command, "RGB") == 0) {
+    print_kv("usage", "RGB R G B OFF TEST COMMON_ANODE COMMON_CATHODE");
+    print_kv("does", "controla LED RGB onboard");
+  } else if (strcmp(command, "BARGRAPH") == 0) {
+    print_kv("usage", "BARGRAPH 0..4 0..100 LEVEL n PERCENT n TEST");
+    print_kv("does", "controla LEDs de porcentagem");
+  } else if (strcmp(command, "LED") == 0) {
+    print_kv("usage", "LED ON OFF TOGGLE TEST WHITE RED GREEN BLUE");
+    print_kv("does", "controla indicador principal e RGB");
+  } else if (strcmp(command, "RELAY") == 0) {
+    print_kv("usage", "RELAY ON OFF TOGGLE");
+    print_kv("does", "controla saida D33");
+  } else if (strcmp(command, "SERVO") == 0) {
+    print_kv("usage", "SERVO 0..180 DETACH");
+    print_kv("does", "gera PWM no D25");
+  } else if (strcmp(command, "OLED") == 0) {
+    print_kv("usage", "OLED INIT CLEAR TEST STANDBY");
+    print_kv("does", "controla display e icone standby");
+  } else if (strcmp(command, "PROFILE") == 0) {
+    print_kv("usage", "PROFILE BASELINE OBC-1U-LIMITED");
+    print_kv("does", "altera perfil de CPU");
+  } else if (strcmp(command, "RESET_STATS") == 0) {
+    print_kv("usage", "RESET_STATS");
+    print_kv("does", "zera contadores");
+  } else if (strcmp(command, "HELP") == 0) {
+    print_kv("usage", "HELP [COMMAND]");
+    print_kv("does", "lista comandos ou detalhe");
+  } else {
+    print_kv("usage", "HELP [COMMAND]");
+    print_kv("valid", "HELP sem argumento lista grupos");
+  }
+  end_result();
+}
+
+static void send_help(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count >= 4) {
+    uppercase_ascii(fields[3]);
+    send_help_detail(request_id, fields[3]);
+    return;
+  }
+
+  begin_result(request_id, "OK");
+  print_kv("usage", "HELP [COMMAND]");
+  print_kv("cmd1", "HELLO,PING,STATUS,TELEMETRY,FAULT,PERIPHERALS");
+  print_kv("cmd2", "I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ,ANALOG,DIGITAL");
+  print_kv("cmd3", "RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS");
+  print_kv("cmd4", "HELP");
+  end_result();
+}
+
+static void process_frame(char *line) {
+  char *fields[MAX_FIELDS] = {0};
+  const size_t field_count = split_fields(line, fields, MAX_FIELDS);
+
+  if (field_count < 3) {
+    print_error("0", "BAD_FRAME", "expected_v1_request_command");
+    return;
+  }
+
+  if (strcmp(fields[0], "V1") != 0) {
+    print_error(fields[1], "BAD_VERSION", "expected_v1");
+    return;
+  }
+
+  const char *request_id = fields[1];
+  char *command = fields[2];
+  uppercase_ascii(command);
+  command_count++;
+
+  if (strcmp(command, "HELLO") == 0) {
+    send_hello(request_id);
+  } else if (strcmp(command, "PING") == 0) {
+    send_ping(request_id);
+  } else if (strcmp(command, "STATUS") == 0) {
+    send_status(request_id);
+  } else if (strcmp(command, "TELEMETRY") == 0) {
+    send_telemetry(request_id);
+  } else if (strcmp(command, "FAULT") == 0) {
+    handle_fault(request_id, field_count, fields);
+  } else if (strcmp(command, "PERIPHERALS") == 0) {
+    send_peripherals(request_id);
+  } else if (strcmp(command, "I2C_SCAN") == 0) {
+    handle_i2c_scan(request_id);
+  } else if (strcmp(command, "FEATURES") == 0) {
+    handle_features(request_id, field_count, fields);
+  } else if (strcmp(command, "BOARDMAP") == 0) {
+    handle_boardmap(request_id, field_count, fields);
+  } else if (strcmp(command, "PROFILE") == 0) {
+    handle_profile(request_id, field_count, fields);
+  } else if (strcmp(command, "LED") == 0) {
+    handle_led(request_id, field_count, fields);
+  } else if (strcmp(command, "RGB") == 0) {
+    handle_rgb(request_id, field_count, fields);
+  } else if (strcmp(command, "BARGRAPH") == 0) {
+    handle_bargraph(request_id, field_count, fields);
+  } else if (strcmp(command, "RELAY") == 0) {
+    handle_relay(request_id, field_count, fields);
+  } else if (strcmp(command, "SERVO") == 0) {
+    handle_servo(request_id, field_count, fields);
+  } else if (strcmp(command, "ANALOG") == 0) {
+    handle_analog(request_id, field_count, fields);
+  } else if (strcmp(command, "DIGITAL") == 0) {
+    handle_digital(request_id, field_count, fields);
+  } else if (strcmp(command, "SENSOR_READ") == 0) {
+    handle_sensor_read(request_id, field_count, fields);
+  } else if (strcmp(command, "OLED") == 0) {
+    handle_oled(request_id, field_count, fields);
+  } else if (strcmp(command, "RESET_STATS") == 0) {
+    reset_stats(request_id);
+  } else if (strcmp(command, "HELP") == 0) {
+    send_help(request_id, field_count, fields);
+  } else {
+    print_error(request_id, "UNKNOWN_COMMAND", command);
+  }
+}
+
+void setup() {
+  Serial.begin(SERIAL_BAUD);
+  delay(300);
+
+  boot_cpu_mhz = ESP.getCpuFreqMHz();
+  disable_radios();
+  configure_board_io();
+
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire.setClock(100000);
+  refresh_peripheral_presence();
+  mma8452_init();
+  oled_init();
+
+  print_boot_event();
+}
+
+void loop() {
+  while (Serial.available() > 0) {
+    const char c = static_cast<char>(Serial.read());
+
+    if (c == '\r') {
+      continue;
+    }
+
+    if (c == '\n') {
+      rx_buffer[rx_len] = '\0';
+      if (rx_len > 0) {
+        process_frame(rx_buffer);
+      }
+      rx_len = 0;
+      continue;
+    }
+
+    if (rx_len >= MAX_FRAME_LEN) {
+      rx_len = 0;
+      error_count++;
+      Serial.println("V1|0|EVENT|RX_OVERFLOW|limit=256");
+      continue;
+    }
+
+    rx_buffer[rx_len++] = c;
+  }
+}
