@@ -7,6 +7,20 @@ Referência principal: [ROADMAP.md](ROADMAP.md).
 Substituir o sorteio de resultados por mutação real de bytes e usar o evento
 resultante para acionar os efeitos visuais.
 
+## Estado atual
+
+Implementada no dashboard atual:
+
+- `ExperimentEngine` sem dependência direta de Pygame;
+- payload fixo `PQC-SAT|TEMP=24.5|STATUS=OK`;
+- `FaultSpec` com `byte_index` e `bit_mask`;
+- eventos com seed, trial, modo, guardião, bytes antes/depois, CRC antes/depois
+  e resultado;
+- `INJECT_FAULT` classifica `SILENT` por mutação real com guardião `NONE`;
+- `BIT_FLIP [index mask]` aceita posição e máscara manuais;
+- `CRC_CHECK` usa o mesmo engine com guardião `CRC32`;
+- efeitos visuais e contadores são derivados do evento.
+
 ## Pré-condição
 
 Definir uma mensagem curta e estável, por exemplo:
@@ -22,7 +36,7 @@ payload = bytearray(b"PQC-SAT|TEMP=24.5|STATUS=OK")
    - copia o valor original;
    - aplica `data[index] ^= mask`;
    - retorna evento estruturado.
-2. Usar `DashboardPanel.fault_rng`, nunca o RNG visual.
+2. Usar RNG própria do `ExperimentEngine`, nunca o RNG visual.
 3. Definir campos mínimos:
 
 ```text
@@ -60,7 +74,7 @@ guard, result, uptime, mode
 
 ## Aceite
 
-- [ ] Não existe `random.random() < taxa` para classificar falhas.
-- [ ] Cada comando gera um evento inspecionável.
-- [ ] O efeito visual corresponde ao `result` do evento.
-- [ ] O dashboard continua funcionando em modo headless e fullscreen.
+- [x] Não existe `random.random() < taxa` para classificar falhas.
+- [x] Cada comando gera um evento inspecionável.
+- [x] O efeito visual corresponde ao `result` do evento.
+- [x] O dashboard continua funcionando em modo headless e fullscreen.

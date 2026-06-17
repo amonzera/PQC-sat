@@ -23,6 +23,17 @@ Flash: 4 MB
 MAC: a8:42:e3:73:8f:a0
 ```
 
+Estado validado em 2026-06-17 com o firmware do projeto:
+
+```text
+HELLO: node=PQC-SAT-WISDOM, fault=payload_crc32
+STATUS BASELINE: cpu_mhz=240, heap=233556, flash=4194304
+PROFILE OBC-1U-LIMITED: cpu_mhz=80
+PROFILE BASELINE: cpu_mhz=240
+FAULT NONE ... 0 0x01: result=SILENT
+FAULT CRC32 ... 0 0x01: result=DETECTED_GUARD
+```
+
 A pagina oficial da RoboCore descreve a Wisdom como uma placa com processador
 Xtensa dual-core 32-bit LX6 (ESP32) com 520 KB SRAM, alimentacao/programacao
 via micro USB e interface USB-Serial SiliconLabs CP2102. Tambem lista sensores
@@ -210,6 +221,8 @@ Sequencia curta de verificacao para a demonstracao:
 PING
 STATUS
 TELEMETRY
+FAULT NONE 5051432D5341547C54454D503D32342E357C5354415455533D4F4B 0 0x01
+FAULT CRC32 5051432D5341547C54454D503D32342E357C5354415455533D4F4B 0 0x01
 OLED STANDBY
 SENSOR_READ ACCEL
 RGB TEST
@@ -241,7 +254,9 @@ Para o projeto PQC-SAT, o caminho mais direto e cientificamente controlado e:
 1. preservar o backup atual;
 2. gravar o firmware serial do projeto;
 3. validar bridge, inventario, I2C, entradas, sensores e atuadores;
-4. so depois integrar CRC, falhas e criptografia.
+4. manter `FAULT NONE|CRC32` como base de radiacao simulada de payload;
+5. integrar ML-KEM-512/Kyber512 validado e medido antes de expor comandos PQC
+   no dashboard.
 
 O risco de brick permanente e baixo porque o bootloader ROM do ESP32 respondeu
 de forma confiavel. O risco real e sobrescrever o ambiente original da

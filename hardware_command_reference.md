@@ -40,6 +40,7 @@ python3 tools/serial_console.py --commands
 | `PING` | `PING` | Confirma que a placa esta respondendo. |
 | `STATUS` | `STATUS` | Mostra perfil, CPU, heap, flash e radio. |
 | `TELEMETRY` | `TELEMETRY` | Atualiza telemetria real da Wisdom no painel. |
+| `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Comando serial tecnico usado para validar bit-flip e CRC32 na placa. No dashboard, use `INJECT_FAULT` e `CRC_CHECK`. |
 | `SENSOR_READ` | `SENSOR_READ TEMP_HUM` | Mostra temperatura e umidade. |
 | `SENSOR_READ` | `SENSOR_READ ACCEL` | Mostra movimento/orientacao pelo acelerometro. |
 | `SENSOR_READ` | `SENSOR_READ APDS` | Mostra luz/proximidade pelo APDS-9960. |
@@ -47,6 +48,21 @@ python3 tools/serial_console.py --commands
 | `LED` | `LED TEST`, `LED WHITE`, `LED RED`, `LED GREEN`, `LED BLUE`, `LED OFF` | Controla o indicador principal. |
 | `RGB` | `RGB TEST`, `RGB R G B`, `RGB OFF` | Controla o LED RGB para efeitos visuais. |
 | `BARGRAPH` | `BARGRAPH TEST`, `BARGRAPH 0`, `BARGRAPH 25`, `BARGRAPH 50`, `BARGRAPH 75`, `BARGRAPH 100` | Mostra progresso nos LEDs de porcentagem. |
+
+## Comandos PQC planejados
+
+Estes comandos ainda **não** devem aparecer no `HELP` do dashboard. Eles
+entram no firmware apenas depois de o backend ML-KEM-512/Kyber512 compilar,
+passar vetor conhecido e reportar métricas na Wisdom.
+
+| Comando | Uso previsto | Observação |
+|---|---|---|
+| `PQC_INFO` | `PQC_INFO` | Variante, parâmetros, fonte, commit, licença, tamanhos e backend. |
+| `PQC_KAT` | `PQC_KAT` | Executa vetor conhecido e retorna status, tempo e métricas. |
+| `PQC_KEYGEN` | `PQC_KEYGEN` | Mede geração de chaves sem imprimir chave completa. |
+| `PQC_ENCAP` | `PQC_ENCAP` | Encapsula para chave pública de teste e retorna digest curto. |
+| `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext de teste e retorna digest curto. |
+| `PQC_BENCH` | `PQC_BENCH n` | Executa `n` iterações e retorna tempo, heap, heap mínimo e resets. |
 
 ## Comandos completos de bancada
 
@@ -56,6 +72,7 @@ python3 tools/serial_console.py --commands
 | `PING` | `PING` | Teste de ida e volta UART com `uptime_ms`. |
 | `STATUS` | `STATUS` | Estado do ESP32: perfil, chip, CPU, heap, flash e radio. |
 | `TELEMETRY` | `TELEMETRY` | Snapshot de uptime, CPU, heap, potenciometro, som, botao e rele. |
+| `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Aplica bit-flip em payload hexadecimal e retorna `result`, byte antes/depois, CRC32 antes/depois e `elapsed_us`. |
 | `PERIPHERALS` | `PERIPHERALS` | Detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C. |
 | `I2C_SCAN` | `I2C_SCAN` | Varre o barramento I2C em SDA21/SCL22. |
 | `FEATURES` | `FEATURES`, `FEATURES CORE`, `FEATURES I2C`, `FEATURES GPIO`, `FEATURES ANALOG`, `FEATURES EXPANSION` | Lista grupos de recursos conhecidos pela firmware. |

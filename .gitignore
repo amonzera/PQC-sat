@@ -5,7 +5,7 @@ venv/
 .pio/
 
 # Session exports are generated artifacts.
-logs/*.csv
+logs/
 
 # Local hardware backups can contain full firmware images.
 backups/*.bin

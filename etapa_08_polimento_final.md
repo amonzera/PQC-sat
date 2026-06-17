@@ -42,7 +42,7 @@ py_compile
 import headless
 testes do ExperimentEngine
 testes de CRC
-replay de CSV
+replay de JSON
 demo simulada completa
 demo hardware completa, se disponível
 30 minutos de execução
@@ -69,7 +69,7 @@ Roteiro de 20 minutos:
 0-5 min   contexto e hipótese
 5-8 min   explicar payload, fault e guard
 8-10 min  executar demo
-10-15 min interpretar CSV/timeline
+10-15 min interpretar JSON/timeline
 15-18 min conectar com ML-KEM/ESP32
 18-20 min limitações e perguntas
 ```
@@ -89,7 +89,7 @@ Roteiro de 20 minutos:
 - [ ] Dependências reproduzíveis.
 - [ ] UI não mostra hardware inexistente.
 - [ ] Campanha reproduzível.
-- [ ] CSV auditável.
+- [ ] JSON auditável.
 - [ ] Demo A/B cronometrada.
 - [ ] Projetor validado.
 - [ ] Slides e roteiro revisados.

@@ -2,8 +2,9 @@
 
 Este diretorio contem o firmware do projeto para a RoboCore BlackBoard Wisdom.
 Ele implementa o bridge serial `V1`, inventario da placa e comandos de bancada
-para exercitar os perifericos integrados sem ainda executar criptografia,
-injecao de falhas ou campanha de radiacao.
+para exercitar os perifericos integrados. Nesta etapa, ele tambem executa um
+experimento pequeno de payload com bit-flip e CRC32, ainda sem criptografia
+real nem campanha completa de radiacao.
 
 O objetivo desta etapa e dominar a comunicacao ESP32/notebook e preservar o
 potencial da Wisdom para a demonstracao: sensores, atuadores, OLED, entradas
@@ -141,6 +142,8 @@ Sequencia curta para validar a demonstracao apos upload:
 PING
 STATUS
 TELEMETRY
+FAULT NONE 5051432D5341547C54454D503D32342E357C5354415455533D4F4B 0 0x01
+FAULT CRC32 5051432D5341547C54454D503D32342E357C5354415455533D4F4B 0 0x01
 SENSOR_READ ACCEL
 OLED STANDBY
 LED TEST
@@ -155,11 +158,34 @@ Para a sequencia completa de bancada, use `../hardware_command_reference.md`.
 
 - O sketch usa Arduino/PlatformIO para destravar o transporte rapidamente.
 - O backend criptografico aparece como `crypto=none`.
-- A injecao de falhas aparece como `fault=none`.
+- A injecao de falhas implementada e somente de payload serial, reportada
+  como `fault=payload_crc32`.
 - OLED tem suporte minimo de inicializacao, limpeza, padrao de teste e standby
   com o icone pixel-art do robo/satelite usado no dashboard; texto no display
   fica para uma biblioteca grafica ou driver proprio posterior.
 - APDS-9960 e MMA8452 usam leituras diretas de registradores suficientes para
   bancada; calibracao fina fica para a etapa de sensores.
-- A validacao completa depende de gravar em uma placa real; neste repositorio
-  os testes automatizados cobrem o parser Python do protocolo.
+- O nucleo `FAULT` foi validado em placa real para `NONE` e `CRC32`; os testes
+  automatizados cobrem o parser Python e o engine deterministico do dashboard.
+
+## Proximo incremento
+
+O proximo marco do firmware e instalar um backend real de ML-KEM-512, ou
+Kyber512 rotulado corretamente se for usado como fallback inicial. Antes de
+expor isso no dashboard, a placa deve passar KAT/vetor conhecido e reportar
+tempo, `heap`, `min_heap`, flash e perfil operacional.
+
+Comandos planejados para essa fase:
+
+```text
+PQC_INFO
+PQC_KAT
+PQC_KEYGEN
+PQC_ENCAP
+PQC_DECAP
+PQC_BENCH n
+```
+
+Nenhum comando deve imprimir chaves privadas, segredos completos ou material
+criptografico suficiente para reconstruir a sessao; use tamanhos, status,
+tempos e digests curtos.

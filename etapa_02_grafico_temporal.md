@@ -6,6 +6,22 @@ Referência principal: [ROADMAP.md](ROADMAP.md).
 
 Exibir a evolução da campanha sem criar uma segunda fonte de métricas.
 
+## Estado atual
+
+Parcialmente implementada no painel esquerdo:
+
+- coleção de eventos vem de `ExperimentEngine.events`;
+- pontos da timeline usam cor derivada de `result`;
+- último evento recebe destaque;
+- contadores de `SILENT`, detecções e total são derivados do log de eventos.
+
+Ainda falta:
+
+- legenda explícita;
+- separação visual entre cenários A/B;
+- teste automatizado do limite da janela;
+- validação de layout em 1920x1080 e 1366x768.
+
 ## Pré-requisito
 
 Etapa 01 concluída com eventos estruturados.
@@ -45,7 +61,7 @@ Etapa 01 concluída com eventos estruturados.
 
 ## Aceite
 
-- [ ] Timeline usa os eventos da Etapa 01.
-- [ ] Não há contadores paralelos divergentes.
+- [x] Timeline usa os eventos da Etapa 01.
+- [x] Não há contadores paralelos divergentes.
 - [ ] Legenda permanece visível.
 - [ ] Layout validado em 1920x1080 e 1366x768.

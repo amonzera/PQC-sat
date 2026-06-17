@@ -51,10 +51,10 @@ HELP_HINT_LINES = (
     "Ex.: RGB 0 255 0, BARGRAPH 75, SENSOR_READ ACCEL",
 )
 DEMO_HELP_LINES = (
-    "Comandos da demo:",
+    "Comandos disponíveis:",
     "  HELP - mostra esta lista",
     "  PING - testa comunicação",
-    "  STATUS - CPU, heap e rádio",
+    "  STATUS - CPU, RAM e rádio",
     "  TELEMETRY - sensores rápidos",
     "  SENSOR_READ ACCEL - movimento",
     "  SENSOR_READ TEMP_HUM - temp/umidade",
@@ -71,7 +71,7 @@ DEMO_HELP_LINES = (
     "  INJECT_FAULT - injeta falha",
     "  BIT_FLIP [i m] - falha manual",
     "  CRC_CHECK - falha com CRC32",
-    "  PQC_STATUS - estado PQC simulado",
+    "  PQC_STATUS - alvo PQC na placa",
     "  RESET_SESSION - zera sessão",
 )
 
@@ -753,7 +753,7 @@ class DashboardPanel:
         self.input_active = True
         self.cursor_blink = 0
         self.session_status = "SIMULADO"
-        self.pqc_algorithm = "ML-KEM-768 (MODELO)"
+        self.pqc_algorithm = "ML-KEM-512 (PENDENTE)"
         self.fault_injections = 0
         self.silent_failures = 0
         self.detected_errors = 0
@@ -769,7 +769,7 @@ class DashboardPanel:
         self.effect_color = C_ACCENT_CYAN
         self._append_history("SYS_INIT", "OK")
         self._append_history("MODE_SELECT", "SIMULADO")
-        self._append_history("PQC_BACKEND", "MODELO")
+        self._append_history("PQC_BACKEND", "ALVO 512")
 
         if self.serial_client is not None:
             self.serial_status = "INICIANDO SERIAL"
@@ -822,7 +822,7 @@ class DashboardPanel:
         elif command_name == "BIT_FLIP":
             status = self._run_experiment_command("NONE", parts[1:])
         elif cmd_upper == "PQC_STATUS":
-            status = "SOMENTE SIM"
+            status = "PQC PENDENTE"
         elif cmd_upper == "RESET_SESSION":
             self.experiment.reset()
             self.last_fault_event = None
@@ -1164,7 +1164,7 @@ class DashboardPanel:
             surface.blit(val, (x, y))
             y += 20
 
-            for key in ("uptime_ms", "heap", "pot", "sound"):
+            for key in ("cpu_mhz", "heap", "min_heap", "flash", "elapsed_us", "radio"):
                 if key in self.hardware_payload and y < panel_rect.bottom - 18:
                     text = FONT_LABEL.render(f"{key}: {self.hardware_payload[key]}", True, C_TEXT_DIM)
                     surface.blit(text, (x, y))
@@ -1410,7 +1410,7 @@ class DashboardPanel:
         items = [
             f"FPS: {int(clock.get_fps())}",
             esp32_item,
-            "PQC: MODELO ML-KEM-768",
+            "PQC: ALVO ML-KEM-512",
             f"GUARD: {self.guard_mode}",
             f"SEED: {SIMULATION_SEED}",
         ]

@@ -6,6 +6,23 @@ Referência principal: [ROADMAP.md](ROADMAP.md).
 
 Comparar proteção ausente e proteção leve usando bytes e verificações reais.
 
+## Estado atual
+
+Parcialmente implementada:
+
+- `CRC_CHECK` calcula CRC32 antes e depois da mutação;
+- `INJECT_FAULT` representa o cenário `NONE`;
+- o firmware ESP32 aceita `FAULT NONE|CRC32 payload_hex index mask` e retorna
+  `SILENT` ou `DETECTED_GUARD` com CRC antes/depois;
+- testes cobrem single-bit em payload curto no engine Python.
+
+Ainda falta para concluir a etapa:
+
+- reaplicar exatamente a mesma campanha nos cenários A e B;
+- registrar overhead agregado de `prepare`/`verify`;
+- exportar os dois cenários no mesmo JSON;
+- documentar limitações no relatório final.
+
 ## Escopo mínimo
 
 O MVP compara:
@@ -88,7 +105,7 @@ confirmação de chave. Registre separadamente:
 
 ## Aceite
 
-- [ ] Resultados vêm de comparação real.
+- [x] Resultados vêm de comparação real.
 - [ ] Mesma campanha é usada em A e B.
-- [ ] Overhead é medido, não inventado.
+- [ ] Overhead agregado é medido, não inventado.
 - [ ] Limitações do mecanismo aparecem no relatório.

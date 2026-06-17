@@ -1,6 +1,6 @@
 # Roadmap consolidado - PQC-SAT
 
-Versão revisada em 2026-06-09.
+Versão revisada em 2026-06-17.
 
 ## 1. Visão geral
 
@@ -8,9 +8,12 @@ O PQC-SAT deve demonstrar, em uma atividade de aproximadamente 20 minutos,
 que segurança embarcada depende tanto do algoritmo criptográfico quanto da
 integridade da implementação e do protocolo.
 
-A interface visual já existe. O experimento mensurável ainda não existe.
-Portanto, a prioridade não é adicionar mais animação: é construir uma cadeia
-de evidências reproduzível por baixo do dashboard.
+A interface visual já existe e o primeiro experimento mensurável também: o
+dashboard muta um payload determinístico, registra eventos e compara os
+cenários `NONE` e `CRC32`. A prioridade agora é instalar um backend PQC real
+na placa, começando por ML-KEM-512, e medir o custo disso sem perder a
+campanha de bit-flips, checksum ativável/desativável e exportação auditável em
+JSON.
 
 ## 2. Baseline auditado
 
@@ -19,16 +22,17 @@ de evidências reproduzível por baixo do dashboard.
 | Dashboard Pygame | Funcional |
 | Modo fullscreen | Funcional |
 | Console | Funcional |
-| Sorteio provisório de falhas | Funcional, apenas para UI |
+| Sorteio provisório de falhas | Removido do caminho de classificação |
 | Seed isolada do experimento | Funcional |
-| Mutação real de bytes | Ausente |
+| Mutação real de bytes | Funcional no dashboard |
 | ML-KEM real | Ausente |
-| CRC/checksum real | Ausente |
-| ESP32/serial | Ausente |
-| CSV/timeline/demo | Ausente |
+| CRC/checksum real | CRC32 funcional no dashboard e no firmware |
+| ESP32/serial | Funcional com `HELLO`, `STATUS`, sensores, OLED e `FAULT` |
+| JSON/timeline/demo | Timeline parcial; JSON e demo A/B ausentes |
 
-O dashboard não deve ser usado para gerar conclusões enquanto os resultados
-forem sorteados.
+O dashboard já pode demonstrar `SILENT` versus `DETECTED_GUARD` em payload.
+Ele ainda não deve ser usado como coleta final enquanto não houver JSON,
+campanha A/B com os mesmos fault specs e replay documentado.
 
 ## 3. Gate 0 - protocolo experimental
 
@@ -110,7 +114,7 @@ Dashboard Pygame
     |     +-- classifica resultados
     |     +-- produz eventos
     |
-    +-- visualização / timeline / CSV
+    +-- visualização / timeline / JSON
     |
     +-- SerialBridge opcional
           |
@@ -157,32 +161,54 @@ O experimento deve executar também um baseline a 240 MHz. Isso permite separar
 A numeração dos documentos representa áreas de entrega, não uma dependência
 linear rígida.
 
+### Trilha PQC na placa
+
+1. [Etapa 04](etapa_04_firmware_esp32.md): escolher implementação, licença e
+   commit; compilar ML-KEM-512 na Wisdom.
+2. Executar KAT/vetor conhecido e expor `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`,
+   `PQC_ENCAP`, `PQC_DECAP` e `PQC_BENCH` apenas depois de funcionarem.
+3. Medir tempo, heap, heap mínimo e flash nos perfis `BASELINE` e
+   `OBC-1U-LIMITED`.
+4. Integrar os resultados no dashboard sem exportar segredos completos.
+
 ### Trilha software demonstrável
 
-1. [Etapa 01](etapa_01_efeitos_visuais_falha.md): núcleo determinístico e
-   efeitos de falha.
-2. [Etapa 02](etapa_02_grafico_temporal.md): timeline baseada em eventos.
-3. [Etapa 03](etapa_03_exportacao_csv.md): CSV auditável.
-4. [Etapa 06](etapa_06_guardiao_integridade.md): guardião real no simulador.
-5. [Etapa 07](etapa_07_modo_apresentacao.md): campanha A/B automatizada.
+1. [Etapa 06](etapa_06_guardiao_integridade.md): formalizar cenário A/B com
+   os mesmos fault specs para `NONE` e `CRC32`.
+2. [Etapa 03](etapa_03_exportacao_json.md): JSON auditável dos eventos,
+   métricas de hardware e bateria de testes.
+3. [Etapa 07](etapa_07_modo_apresentacao.md): campanha A/B automatizada.
+4. [Etapa 08](etapa_08_polimento_final.md): robustez, projetor e roteiro.
 
-Essa trilha gera uma entrega didática completa sem depender do hardware.
+Etapas 01 e parte da 02 já estão implementadas. A trilha PQC passa a ser o
+próximo corte técnico, mas a demo deve continuar separando dado medido,
+simulação e pendência.
 
 ### Trilha hardware
 
-1. [Etapa 04](etapa_04_firmware_esp32.md): spike de viabilidade na placa real.
-2. [Etapa 05](etapa_05_bridge_serial.md): bridge para protocolo congelado.
-3. [Etapa 06](etapa_06_guardiao_integridade.md): integração do guardião e
-   medições reais.
+1. Manter [Etapa 04](etapa_04_firmware_esp32.md) e
+   [Etapa 05](etapa_05_bridge_serial.md) estáveis.
+2. Usar `FAULT NONE|CRC32 payload_hex index mask` apenas como validação real
+   do experimento de payload na Wisdom.
+3. Medir `PROFILE BASELINE` e `PROFILE OBC-1U-LIMITED` antes de qualquer
+   afirmação de limitação operacional.
 
-### Fechamento
+### Fora do caminho crítico
 
-1. [Etapa 08](etapa_08_polimento_final.md): robustez, projetor, slides,
-   roteiro e relatório.
+- radiação física;
+- corrupção de estado interno do KEM;
+- ML-KEM-768 ou ML-KEM-1024;
+- otimizações multicore além do necessário para a apresentação.
+
+Esses itens continuam válidos como extensão. O núcleo agora é: Wisdom
+conectada, ML-KEM-512 medido, bit-flips manuais, checksum ativável/desativável
+e coleta JSON.
 
 ## 7. Etapas e critérios
 
 ### Etapa 01 - núcleo e efeitos visuais
+
+Estado: **implementada**.
 
 Entregas:
 
@@ -201,6 +227,8 @@ Aceite:
 
 ### Etapa 02 - timeline
 
+Estado: **parcialmente implementada**.
+
 Entregas:
 
 - timeline limitada por quantidade de eventos;
@@ -214,7 +242,9 @@ Aceite:
 - reset visual não apaga indevidamente dados da campanha;
 - não há overflow do painel.
 
-### Etapa 03 - CSV
+### Etapa 03 - JSON
+
+Estado: **não implementada**.
 
 Entregas:
 
@@ -222,16 +252,21 @@ Entregas:
 - schema versionado;
 - seed, modo, alvo, posição e máscara;
 - resumo derivado dos eventos;
+- amostras de hardware com CPU, heap, heap mínimo, flash, perfil e tempo;
+- proxy de energia explicitamente rotulado enquanto não houver medidor real;
 - auto-save opcional.
 
 Aceite:
 
-- o CSV permite reproduzir cada mutação;
+- o JSON permite reproduzir cada mutação;
 - exportar não altera a campanha;
 - falha de escrita aparece na interface;
 - `RESET_SESSION` não destrói resultados já registrados sem confirmação.
 
 ### Etapa 04 - firmware
+
+Estado: **implementada para transporte, periféricos e payload/CRC32; pendente
+para criptografia real**.
 
 Primeiro deve ser registrado:
 
@@ -258,16 +293,17 @@ elapsed_us
 
 Uma referência do projeto usa Kyber512-90s, ESP-IDF e ESP32-S3. Outra
 implementa ML-KEM-512 em ESP32 no SBSeg 2025. Isso demonstra viabilidade
-relacionada, mas não equivale a ML-KEM-768 pronto para a placa e o framework
-deste projeto. `pqm4` é direcionado a Cortex-M4.
+relacionada, mas não equivale a uma biblioteca pronta para a Wisdom e o
+framework deste projeto. `pqm4` é direcionado a Cortex-M4.
 
 O spike deve implementar nesta ordem:
 
 1. `PING` e framing serial;
 2. mutação de payload + CRC32;
-3. backend criptográfico no host ou ESP32;
-4. KAT;
-5. somente então integração com a demo.
+3. ML-KEM-512 na placa ou fallback identificado de Kyber512;
+4. KAT/vetor conhecido;
+5. benchmark de KEM nos dois perfis;
+6. somente então integração com a demo.
 
 Fallback aceitável:
 
@@ -284,6 +320,8 @@ Fallback inaceitável:
 
 ### Etapa 05 - bridge serial
 
+Estado: **implementada para a demo atual**.
+
 Requisitos:
 
 - `pygame.init()` e display dentro de `main()`;
@@ -295,11 +333,11 @@ Requisitos:
 - fechamento idempotente;
 - protocolo com versão e `request_id`.
 
-Formato sugerido:
+Formato implementado para experimento de payload:
 
 ```text
-PC>  V1|17|FAULT|payload|12|04
-ESP> V1|17|RESULT|DETECTED_GUARD|elapsed_us=83
+PC>  V1|17|FAULT|CRC32|payload_hex|12|0x04
+ESP> V1|17|RESULT|OK|result=DETECTED_GUARD|elapsed_us=83
 ```
 
 Aceite:
@@ -310,6 +348,8 @@ Aceite:
 - modo simulado não depende de pyserial.
 
 ### Etapa 06 - guardião
+
+Estado: **parcialmente implementada**.
 
 Implementação mínima:
 
@@ -336,6 +376,8 @@ Aceite:
 - nenhuma taxa é hard-coded como resultado científico.
 
 ### Etapa 07 - modo apresentação
+
+Estado: **não implementada**.
 
 A demo automatizada é um segmento de cerca de 45-60 segundos dentro da aula
 de 20 minutos.
@@ -368,32 +410,21 @@ falha conhecida nos cenários testados".
 
 ## 8. Cronograma sugerido
 
-### Semana 1
+### Próximos cortes
 
-- Gate 0;
-- Etapa 01;
-- testes do engine;
-- Etapa 02.
-
-### Semana 2
-
-- Etapa 03;
-- Etapa 06 no simulador;
-- Etapa 07;
-- primeira demo completa sem hardware.
-
-### Semana 3
-
-- inventário da placa;
-- Etapa 04;
-- decisão go/no-go para ML-KEM no ESP32;
-- protocolo serial.
-
-### Semana 4
-
-- Etapa 05 e integração, se o spike passar;
-- Etapa 08;
-- slides, roteiro, relatório e ensaio.
+1. Preparar o backend ML-KEM-512/Kyber512: fonte, commit, licença, KAT e
+   comandos seriais mínimos.
+2. Compilar e medir na Wisdom em `BASELINE` e `OBC-1U-LIMITED`.
+3. Ligar bit-flip manual ao fluxo PQC: payload primeiro, ciphertext depois do
+   KEM estável.
+4. Implementar checksum ativável/desativável no fluxo de campanha.
+5. Implementar `EXPORT_JSON`, `SAVE_SESSION` e `RUN_BATTERY`, com `logs/`
+   ignorado por git.
+6. Criar `CampaignRunner` para reaplicar a mesma lista de fault specs em
+   cenário A (`NONE`) e B (`CRC32`).
+7. Ajustar a timeline para separar A/B e mostrar totais calculados.
+8. Implementar `DEMO`, `DEMO_PAUSE`, `DEMO_STOP` e overlay derivado dos dados.
+9. Validar projetor, resolução e roteiro.
 
 ## 9. Riscos e decisões
 
@@ -404,7 +435,7 @@ falha conhecida nos cenários testados".
 | Cinco amostras geram conclusão fraca | Usar campanha determinística maior na coleta e subconjunto visual na demo. |
 | Serial perde ou reordena respostas | `request_id`, timeout e parser estrito. |
 | Layout não cabe no projetor | Testar duas resoluções e reduzir conteúdo, não a fonte indiscriminadamente. |
-| Resultado simulado é confundido com medição | Campo `mode` em UI e CSV. |
+| Resultado simulado é confundido com medição | Campo `mode` em UI e JSON. |
 | Limite artificial é tratado como característica de todo CubeSat | Nomear o perfil e comparar com o baseline sem limitação. |
 
 ## 10. Entrega final
@@ -414,7 +445,7 @@ falha conhecida nos cenários testados".
 - dashboard funcional sem hardware;
 - campanha reproduzível;
 - comparação A/B baseada em bytes;
-- CSV;
+- JSON;
 - demo automatizada;
 - documentação das limitações;
 - slides e roteiro.

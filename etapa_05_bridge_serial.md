@@ -112,7 +112,7 @@ Pendencias conhecidas:
 - valide números antes de converter;
 - ignore campos extras apenas se a versão permitir;
 - nunca execute texto serial como código;
-- não exponha segredos completos no console/CSV.
+- não exponha segredos completos no console/JSON.
 
 ## Testes
 

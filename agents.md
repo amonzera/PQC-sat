@@ -9,13 +9,13 @@ PQC-SAT é uma demonstração didática sobre:
 - falhas transitórias simuladas em um sistema embarcado;
 - diferença entre corrupção silenciosa e erro detectado;
 - uso de mecanismos leves de integridade;
-- integração opcional com uma sessão ML-KEM em ESP32.
+- integração com uma sessão ML-KEM-512 em ESP32.
 
 O projeto tem duas camadas que não podem ser confundidas:
 
 1. **Baseline atual**: dashboard Pygame em modo simulado.
-2. **Arquitetura alvo**: campanha determinística, exportação, firmware e bridge
-   serial.
+2. **Arquitetura alvo**: campanha determinística, exportação JSON, firmware e
+   bridge serial.
 
 Nunca apresente uma funcionalidade planejada como concluída.
 
@@ -47,14 +47,15 @@ implementar.
   console visual para a ESP32 sem bloquear o loop Pygame;
 - seed exclusiva para os resultados de falha (`42`);
 - indicadores explícitos de modo simulado.
+- mutação real de payload com CRC32 no dashboard e no firmware via
+  `FAULT NONE|CRC32 payload_hex index mask`.
 
 ### Não implementado
 
-- operação ML-KEM real;
-- mutação real de payload/ciphertext;
-- CRC/checksum funcional;
-- gráfico temporal;
-- CSV;
+- operação ML-KEM-512 real;
+- mutação real de ciphertext ML-KEM;
+- campanha A/B completa com a mesma lista de fault specs;
+- exportação JSON e bateria de testes;
 - modo de apresentação;
 - slides e roteiro final.
 
@@ -75,13 +76,14 @@ implementar.
 |---|---|
 | Serial | pyserial 3.5+ opcional |
 | Firmware | ESP-IDF preferencialmente; Arduino somente se a biblioteca escolhida suportar |
-| PQC | implementação portada e validada de ML-KEM/Kyber; decisão depende da placa real |
+| PQC | ML-KEM-512 na Wisdom; Kyber512 identificado apenas como fallback rotulado |
 
 `pqm4` é voltado a ARM Cortex-M4 e não deve ser tratado como drop-in para
 ESP32 Xtensa. `liboqs` é útil para prototipagem no host, mas não há no projeto
 uma integração pronta com Arduino/ESP32. Há referências de Kyber512-90s e
 ML-KEM-512 em ESP32; nenhuma dispensa validar a placa, o framework, a variante
-e os vetores conhecidos usados neste projeto.
+e os vetores conhecidos usados neste projeto. Não chame Kyber pré-FIPS de
+ML-KEM/FIPS 203.
 
 ## 5. Regras de implementação
 
@@ -161,14 +163,13 @@ compilação.
 
 ## 8. Próxima ordem de trabalho
 
-1. Etapa 01: substituir sorteio por um núcleo determinístico de mutação e
-   adicionar efeitos visuais.
-2. Etapas 02 e 03: timeline e CSV usando eventos do núcleo.
-3. Etapa 06 em modo simulado: guardião calculado sobre bytes reais.
+1. Etapa 04: portar/instalar ML-KEM-512 na placa, registrar fonte/commit/licença
+   e validar KAT.
+2. Etapa 06: ligar bit-flips manuais e checksum ativável/desativável ao fluxo
+   de payload e, depois do KEM estável, ao ciphertext.
+3. Etapa 03: exportação JSON e bateria de testes com eventos e métricas de
+   hardware.
 4. Etapa 07: demo com a mesma campanha nos cenários A e B.
-5. Etapa 04: spike de viabilidade na placa ESP32 real.
-6. Etapa 05: bridge serial após congelar e testar o protocolo.
-7. Etapa 06 em hardware: integrar medições reais.
-8. Etapa 08: testes, projetor, slides, roteiro e relatório.
+5. Etapa 08: testes, projetor, slides, roteiro e relatório.
 
-Última revisão: 2026-06-09.
+Última revisão: 2026-06-17.

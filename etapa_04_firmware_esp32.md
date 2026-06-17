@@ -26,8 +26,9 @@ license
 
 Uma referência usa Kyber512-90s, ESP-IDF 5.0 e ESP32-S3. Outra demonstra
 ML-KEM-512 em ESP32 no SBSeg 2025. Elas são pontos de partida concretos, mas
-não fornecem automaticamente ML-KEM-768 para a placa e o framework deste
-projeto. `pqm4` é voltado a ARM Cortex-M4, não ao Xtensa do ESP32 clássico.
+não fornecem automaticamente uma biblioteca pronta para a placa e o framework
+deste projeto. O primeiro alvo operacional é ML-KEM-512; `pqm4` é voltado a
+ARM Cortex-M4, não ao Xtensa do ESP32 clássico.
 
 ## Perfil OBC didático
 
@@ -77,9 +78,9 @@ Escopo implementado inicialmente:
 
 - protocolo serial `V1|request_id|COMMAND|arg`;
 - respostas `V1|request_id|RESULT|status|key=value`;
-- comandos `HELLO`, `PING`, `STATUS`, `TELEMETRY`, `PROFILE`, `LED`,
+- comandos `HELLO`, `PING`, `STATUS`, `TELEMETRY`, `FAULT`, `PROFILE`, `LED`,
   `RESET_STATS` e `HELP`;
-- `crypto=none` e `fault=none` reportados explicitamente;
+- `crypto=none` e `fault=payload_crc32` reportados explicitamente;
 - Wi-Fi e Bluetooth desativados no boot do sketch;
 - perfil `OBC-1U-LIMITED` tentando fixar CPU em 80 MHz;
 - perfil `BASELINE` retornando a frequencia observada no boot;
@@ -96,18 +97,21 @@ Escopo atual do firmware Wisdom:
 - controle dos conectores de rele `D33` e servo `D25`;
 - deteccao I2C de OLED, APDS-9960, HTU21D e MMA8452QT;
 - leitura direta de HTU21D, MMA8452QT e APDS-9960;
+- comando `FAULT NONE|CRC32 payload_hex index mask` para mutacao real de
+  payload e comparacao de CRC32;
 - suporte minimo ao OLED SSD1306 para inicializacao, limpeza, padrao de teste
   e standby com icone pixel-art do robo/satelite usado no dashboard;
-- build PlatformIO validado sem gravar: 48.164 bytes de RAM estimada e
-  893.061 bytes de flash.
+- build PlatformIO validado e gravado em `/dev/ttyUSB0`: 49.188 bytes de RAM
+  estimada e 898.341 bytes de flash;
+- validacao real em placa: `HELLO`, `STATUS`, `FAULT NONE ... 0 0x01` e
+  `FAULT CRC32 ... 0 0x01`.
+- perfis validados em placa: `PROFILE OBC-1U-LIMITED` reportou 80 MHz e
+  `PROFILE BASELINE` reportou 240 MHz.
 
 Pendencias antes de considerar a etapa concluida:
 
-- gravar em uma placa real;
 - validar na placa real os comandos de perifericos apos upload;
-- confirmar se `PROFILE OBC-1U-LIMITED` e `PROFILE BASELINE` sao aceitos pela
-  placa especifica;
-- medir os campos de heap/flash reportados por `STATUS`;
+- medir comandos de perifericos com a placa em bancada depois da limpeza;
 - congelar ou substituir o framework antes do backend criptografico.
 
 ### Marco 1 - transporte
@@ -129,6 +133,12 @@ Pendencias antes de considerar a etapa concluida:
 
 ### Marco 3 - backend criptográfico
 
+Estado: **próximo marco de implementação**.
+
+Objetivo imediato: executar ML-KEM-512 na Wisdom, com variante, fonte, commit
+e licença registrados. Se a primeira porta viável for Kyber512 pré-FIPS, ela
+deve ser rotulada como Kyber512 e não como ML-KEM/FIPS 203.
+
 Escolher uma opção e rotular corretamente:
 
 1. ML-KEM conforme FIPS 203;
@@ -137,6 +147,21 @@ Escolher uma opção e rotular corretamente:
 4. emulador didático explicitamente marcado.
 
 Não chamar AES, hash ou bytes aleatórios de ML-KEM.
+
+Comandos seriais planejados para entrar somente depois de cada função existir:
+
+| Comando | Função |
+|---|---|
+| `PQC_INFO` | Reporta variante, parâmetros, fonte, commit, licença, tamanhos e backend. |
+| `PQC_KAT` | Executa vetor conhecido e retorna apenas status, tempo e métricas. |
+| `PQC_KEYGEN` | Mede geração de chaves sem imprimir chave completa. |
+| `PQC_ENCAP` | Encapsula para chave pública de teste e retorna digest curto do segredo. |
+| `PQC_DECAP` | Decapsula ciphertext de teste e retorna digest curto do segredo. |
+| `PQC_BENCH n` | Executa `n` iterações e retorna tempo, heap, heap mínimo e resets. |
+
+O dashboard só deve expor esses comandos no `HELP` da demonstração quando eles
+tiverem sido testados na placa. Até lá, `PQC_STATUS` permanece como indicador
+de alvo pendente.
 
 ### Marco 4 - validação
 
@@ -214,10 +239,10 @@ telemetria.
 
 ## Aceite
 
-- [ ] Inventário da placa registrado.
-- [ ] Perfis `BASELINE` e `OBC-1U-LIMITED` reproduzíveis.
+- [x] Inventário da placa registrado.
+- [x] Perfis `BASELINE` e `OBC-1U-LIMITED` reproduzíveis.
 - [x] Protocolo serial inicial funciona no codigo antes da PQC.
-- [ ] CRC32 funciona antes da PQC.
+- [x] CRC32 funciona antes da PQC.
 - [ ] Backend criptográfico identificado sem marketing indevido.
 - [ ] KAT e métricas anexados.
 - [ ] Fallback continua sendo tecnicamente honesto.

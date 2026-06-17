@@ -20,6 +20,7 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PING", "testa ida e volta UART e retorna uptime"),
     CommandInfo("STATUS", "mostra CPU, heap, flash, perfil e rádio"),
     CommandInfo("TELEMETRY", "lê uptime, heap, potenciômetro, som, botão e relé"),
+    CommandInfo("FAULT NONE|CRC32 payload_hex index mask", "aplica bit-flip em payload e compara CRC32"),
     CommandInfo("PERIPHERALS", "detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C"),
     CommandInfo("I2C_SCAN", "varre o barramento I2C SDA21/SCL22"),
     CommandInfo("FEATURES [CORE|I2C|GPIO|ANALOG|EXPANSION]", "lista grupos de recursos conhecidos"),
@@ -44,10 +45,10 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
 
 
 DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = (
-    CommandInfo("INJECT_FAULT", "executa a etapa simulada de injeção de falha"),
-    CommandInfo("BIT_FLIP", "executa uma etapa simulada de inversão de bit"),
-    CommandInfo("PQC_STATUS", "mostra que o backend PQC ainda é modelo"),
-    CommandInfo("CRC_CHECK", "mostra que CRC/guardião ainda não foi implementado"),
+    CommandInfo("INJECT_FAULT", "aplica bit-flip determinístico sem guardião"),
+    CommandInfo("BIT_FLIP [index mask]", "aplica bit-flip determinístico ou manual"),
+    CommandInfo("PQC_STATUS", "mostra alvo ML-KEM-512 pendente na placa"),
+    CommandInfo("CRC_CHECK", "aplica bit-flip e verifica CRC32 real"),
     CommandInfo("RESET_SESSION", "zera contadores simulados e reinicia a seed"),
     CommandInfo("HELP", "mostra a lista simples da demonstração"),
 )

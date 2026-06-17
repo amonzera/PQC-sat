@@ -9,21 +9,22 @@ pós-quântica em sistemas embarcados inspirados em CubeSats.
 O repositório contém hoje:
 
 - um dashboard fullscreen em Pygame;
-- uma simulação visual e probabilística de falhas;
+- um núcleo determinístico de mutação de payload com eventos auditáveis;
+- comparação didática entre payload sem guardião e payload com CRC32;
 - integração serial ESP32/notebook para comandos de bancada da Wisdom;
 - uma proposta acadêmica em DOCX;
 - um roadmap e especificações para as próximas etapas.
 
-O dashboard atual **não executa ML-KEM** e **não calcula CRC**. Esses itens
-continuam sendo objetivos do projeto, não funcionalidades concluídas. A
-interface identifica esse estado como `PQC: MODELO ML-KEM-768` e
-`CRC: INATIVO`.
+O dashboard atual **não executa ML-KEM**. O guardião CRC32 já existe para o
+experimento de payload; a criptografia pós-quântica real é o próximo marco
+técnico. A interface identifica esse estado como `PQC: ALVO ML-KEM-512` e
+`GUARD: NONE` ou `GUARD: CRC32`.
 
 A primeira integração real com a placa está em `firmware/`,
 `tools/serial_console.py` e no modo serial do `dashboard.py`: ela valida
 transporte serial, handshake, `PING`, `STATUS`, `TELEMETRY`, sensores,
 atuadores, OLED, troca de perfil operacional e inventário da placa, ainda com
-`crypto=none` e `fault=none`.
+`crypto=none` e `fault=payload_crc32`.
 
 ## Objetivo experimental
 
@@ -31,8 +32,8 @@ A entrega final deve comparar, com a mesma campanha determinística de falhas:
 
 1. dados sem proteção adicional;
 2. dados protegidos por um mecanismo leve de integridade;
-3. opcionalmente, uma sessão ML-KEM real em hardware, caso a viabilidade no
-   ESP32 disponível seja confirmada.
+3. uma sessão ML-KEM-512 real em hardware, depois de build, vetor conhecido e
+   medição de tempo/memória na Wisdom.
 
 Os resultados devem ser classificados com critérios observáveis, e não por
 percentuais inventados:
@@ -129,6 +130,7 @@ STATUS
 TELEMETRY
 OLED STANDBY
 SENSOR_READ ACCEL
+FAULT CRC32 5051432D534154 0 0x01
 LED TEST
 RGB TEST
 BARGRAPH 75
@@ -145,16 +147,15 @@ V1|request_id|RESULT|OK|key=value
 
 | Comando | Comportamento atual |
 |---|---|
-| `INJECT_FAULT` | Sorteia um resultado da simulação didática com seed isolada. |
-| `BIT_FLIP` | Variante simulada com outra probabilidade provisória. |
-| `PQC_STATUS` | Informa que o backend criptográfico ainda é simulado. |
-| `CRC_CHECK` | Informa que o CRC ainda não foi implementado. |
+| `INJECT_FAULT` | Aplica bit-flip determinístico no payload sem guardião; payload alterado aceito vira `SILENT`. |
+| `BIT_FLIP [index mask]` | Aplica bit-flip manual, por exemplo `BIT_FLIP 0 0x01`. |
+| `PQC_STATUS` | Informa que o alvo criptográfico é ML-KEM-512 na placa e que ainda está pendente. |
+| `CRC_CHECK` | Aplica bit-flip e compara CRC32 real; divergência vira `DETECTED_GUARD`. |
 | `RESET_SESSION` | Zera contadores e reinicia a seed da campanha. |
 | `HELP` | Exibe uma lista única com os comandos mais relevantes da demonstração. |
 
-As probabilidades atuais servem apenas para exercitar a interface. Elas devem
-ser substituídas por mutação real de bytes antes de qualquer coleta ou
-conclusão experimental.
+Os resultados desses comandos saem de bytes antes/depois e do CRC32, não de
+probabilidades. O backend PQC real ainda não está instalado no firmware.
 
 ## Comandos da demonstração ao vivo
 
@@ -179,15 +180,43 @@ curta e voltada para a apresentação:
 | `RGB OFF` | Apaga o RGB. |
 | `BARGRAPH TEST` | Anima LEDs de porcentagem. |
 | `BARGRAPH 75` | Mostra progresso visual em 75%. |
-| `INJECT_FAULT` | Injeta falha na simulação didática. |
-| `BIT_FLIP` | Inverte um bit no fluxo simulado. |
-| `PQC_STATUS` | Mostra estado do núcleo PQC simulado. |
+| `INJECT_FAULT` | Injeta falha determinística sem guardião. |
+| `BIT_FLIP [i m]` | Inverte um bit escolhido manualmente. |
+| `CRC_CHECK` | Demonstra detecção real por CRC32. |
+| `PQC_STATUS` | Mostra o alvo PQC e o estado da instalação na placa. |
 | `RESET_SESSION` | Zera a sessão da demonstração. |
 
 Comandos de bancada, inventário, debug e expansão ficam centralizados em
 [`hardware_command_reference.md`](hardware_command_reference.md). Eles podem
 ser usados pelo `tools/serial_console.py`, mas não aparecem como comandos da
 demonstração visual.
+
+## Próximas etapas
+
+Estado atual:
+
+- Etapa 01: concluída, com `ExperimentEngine`, eventos e efeitos reais.
+- Etapa 02: parcial, com timeline simples derivada dos eventos.
+- Etapa 04/05: funcionais para Wisdom, bridge serial e `FAULT` com CRC32.
+- Etapa 06: parcial, com CRC32 real por tentativa; falta campanha A/B formal.
+
+Próximos cortes, nesta ordem:
+
+1. Etapa 04: portar/instalar ML-KEM-512 na placa, com KAT e benchmark de
+   tempo, heap e flash nos perfis `BASELINE` e `OBC-1U-LIMITED`.
+2. Etapa 06: expandir a radiação simulada manual para bit-flips em payload e,
+   quando o KEM estiver pronto, ciphertext, mantendo checksum ativável ou
+   desativável.
+3. Etapa 03: implementar `EXPORT_JSON`, `SAVE_SESSION` e `RUN_BATTERY` para
+   salvar eventos e métricas de hardware em JSON versionado.
+4. Etapa 06: criar campanha A/B que reaplica os mesmos fault specs em `NONE`
+   e `CRC32`.
+5. Etapa 07: automatizar `DEMO`, pausa/parada e overlay calculado.
+6. Etapa 08: validar projetor, roteiro e robustez final.
+
+ML-KEM-512 deve entrar agora como experimento de bancada controlado. Ele só
+vira comando de demonstração depois que o firmware passar vetor conhecido,
+reportar métricas e não expor segredos completos no console ou no JSON.
 
 ## Estrutura
 
@@ -227,5 +256,6 @@ demonstração visual.
 Segatz e Al Hafiz avaliam Kyber512-90s em ESP-IDF e ESP32-S3. Azevedo,
 Lagrota e Ribeiro demonstram ML-KEM-512 em ESP32 no SBSeg 2025. Os dois
 trabalhos sustentam a viabilidade geral, mas nenhum deles deve ser tratado
-como uma biblioteca pronta de ML-KEM-768 para a placa e o framework ainda não
-identificados deste projeto.
+como uma biblioteca pronta para a placa e o framework deste projeto. O
+primeiro alvo operacional deste repositório é ML-KEM-512; ML-KEM-768 fica como
+extensão após a viabilidade medida.

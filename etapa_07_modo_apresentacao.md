@@ -11,9 +11,23 @@ minutos.
 
 - eventos reais;
 - timeline;
-- CSV;
+- JSON;
 - guardião no simulador;
 - comandos idempotentes.
+
+## Estado atual
+
+Não implementada. O dashboard já tem os comandos manuais necessários para uma
+demo guiada (`INJECT_FAULT`, `CRC_CHECK`, `BIT_FLIP`, `RESET_SESSION`), mas
+ainda não há máquina de estados automática para campanha A/B.
+
+Para o objetivo atual, o modo apresentação deve demonstrar:
+
+1. placa conectada e identificada;
+2. cenário A com `guard=NONE`;
+3. cenário B com `guard=CRC32`;
+4. mesma campanha de fault specs nos dois cenários;
+5. resultado final calculado a partir dos eventos.
 
 ## Sequência sugerida
 
@@ -45,11 +59,11 @@ participação da turma e discussão.
 
 ## Controles
 
-- `DEMO`;
-- `DEMO_PAUSE`;
-- `DEMO_RESUME`;
-- `DEMO_STOP`;
-- `DEMO_RESTART`.
+- `DEMO`: executa a campanha A/B curta;
+- `DEMO_PAUSE`: pausa o temporizador;
+- `DEMO_RESUME`: retoma;
+- `DEMO_STOP`: para sem apagar dados;
+- `DEMO_RESTART`: reinicia com a mesma seed.
 
 `ESC` fecha apenas o overlay, sem destruir os dados.
 
@@ -79,5 +93,5 @@ STOPPED
 - [ ] A e B usam a mesma campanha.
 - [ ] Overlay é derivado dos dados.
 - [ ] Demo pode ser pausada e interrompida.
-- [ ] CSV final contém os dois cenários.
+- [ ] JSON final contém os dois cenários.
 - [ ] Duração foi cronometrada.
