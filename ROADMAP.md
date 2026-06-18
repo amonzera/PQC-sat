@@ -1,6 +1,6 @@
 # Roadmap consolidado - PQC-SAT
 
-Versão revisada em 2026-06-17.
+Versão revisada em 2026-06-18.
 
 ## 1. Visão geral
 
@@ -11,10 +11,12 @@ integridade da implementação e do protocolo.
 A interface visual já existe e o primeiro experimento mensurável também: o
 dashboard muta um payload determinístico, registra eventos e compara os
 cenários `NONE` e `CRC32`. O backend PQC real já está instalado na Wisdom com
-ML-KEM-512 e medição inicial nos perfis `BASELINE` e `OBC-1U-LIMITED`. A
-prioridade agora é usar essa base para bit-flips em payload/ciphertext,
-checksum ativável/desativável, confirmação de chave e exportação auditável em
-JSON.
+ML-KEM-512 e medição nos perfis `BASELINE` e `OBC-1U-LIMITED`. O firmware
+também executa bit-flip manual em ciphertext ML-KEM e classifica o efeito com
+comparação de segredos ou confirmação HMAC-SHA256 da chave derivada. O modo
+`DEMO` automatiza a apresentação A/B. A etapa 8 já tem fechamento de software,
+roteiro e material-base; a prioridade restante é validação física em projetor,
+porta serial da sala e campanha prolongada antes da apresentação.
 
 ## 2. Baseline auditado
 
@@ -27,16 +29,65 @@ JSON.
 | Seed isolada do experimento | Funcional |
 | Mutação real de bytes | Funcional no dashboard |
 | ML-KEM real | Funcional na Wisdom com `mlkem-native` v1.1.0, commit `d2cae2b` |
-| Interface serial PQC | `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP` e `PQC_BENCH` funcionais |
-| Medição PQC na placa | `PQC_BENCH 5` medido em `BASELINE` e `OBC-1U-LIMITED`; `PQC_KAT` passou no perfil limitado |
+| Interface serial PQC | `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH` funcionais |
+| Medição PQC na placa | `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`; `PQC_KAT` passou no hardware gravado |
+| Falha em ciphertext ML-KEM | `PQC_FAULT index mask [CONFIRM|NONE]` validado na placa e exportado no JSON |
 | CRC/checksum real | CRC32 funcional no dashboard e no firmware |
 | ESP32/serial | Funcional com `HELLO`, `STATUS`, sensores, OLED e `FAULT` |
-| JSON/timeline/demo | Timeline, JSON e bateria A/B funcionais; demo visual automatizada ausente |
+| JSON/timeline/demo | Timeline, JSON, bateria A/B e `DEMO` visual automatizado funcionais |
+
+## 2.1 Histórico de implementação
+
+Este histórico deve ser usado para estudar a apresentação e para retomar o
+projeto sem reconstruir decisões antigas:
+
+- 2026-06-17: firmware Wisdom consolidado com transporte serial `V1`,
+  inventário de placa, sensores, atuadores, OLED standby, perfis
+  `BASELINE`/`OBC-1U-LIMITED`, `FAULT NONE|CRC32` e backend ML-KEM-512 real
+  via `mlkem-native`.
+- 2026-06-17: `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP` e
+  `PQC_BENCH 5` validados em placa nos perfis baseline e limitado.
+- 2026-06-18: dashboard ajustado para usar apenas blocos clicáveis ligados à
+  apresentação; comandos de bancada ficaram no terminal textual e em
+  `hardware_command_reference.md`.
+- 2026-06-18: métricas superiores do dashboard passaram a expor CPU, RAM
+  livre, flash, perfil, rádio e tempo do último comando perto da animação.
+- 2026-06-18: a métrica de CPU passou a mostrar também `% ativo` em janela
+  móvel de 5s, calculado por tempo de comando observado; a exportação JSON
+  passou para `pqc-sat-run-v2` e inclui métricas agregadas de CPU, PQC e
+  checksum.
+- 2026-06-18: `PQC_FAULT index mask [CONFIRM|NONE]` passou a corromper
+  ciphertext ML-KEM real, calcular confirmação HMAC-SHA256 e exportar
+  `KEY_MISMATCH`, `PROTOCOL_REJECT`, `key_confirmed` e `tag_match` sem revelar
+  segredos completos.
+- 2026-06-18: build PlatformIO da revisão com `PQC_FAULT` passou para
+  `robocore_wisdom_esp32`, com 56.556 bytes de RAM estimada e 914.229 bytes de
+  flash; a revisão foi gravada em `/dev/ttyUSB0` e verificada por hash.
+- 2026-06-18: validação real pós-upload: `PQC_KAT kat=pass`,
+  `PQC_FAULT 0 0x01 CONFIRM` retornou `PROTOCOL_REJECT`,
+  `PQC_FAULT 0 0x01 NONE` retornou `KEY_MISMATCH`, `PQC_BENCH 100` passou em
+  `BASELINE` e `OBC-1U-LIMITED`, e `FAULT CRC32` retornou
+  `DETECTED_GUARD`.
+- 2026-06-18: Etapa 07 implementada com comandos `DEMO`, `DEMO_PAUSE`,
+  `DEMO_RESUME`, `DEMO_STOP` e `DEMO_RESTART`, overlay derivado dos eventos,
+  snapshots A/B e exportação JSON cronometrada.
+- 2026-06-18: Etapa 08 implementada no software com splash opcional,
+  `--no-splash`, autosave no fechamento, cleanup com traceback preservado,
+  cache de superfícies grandes, métrica `HOST` na faixa superior, exportação
+  de métricas do processo e teste headless para 1920x1080 e 1366x768.
+- 2026-06-18: criado `APRESENTACAO_ROTEIRO.md` com cinco slides, roteiro de
+  20 minutos, sequência de comandos da demo, limites científicos e checklist
+  pré-apresentação.
+- 2026-06-18: verificação final detectou a Wisdom em `/dev/ttyUSB0` como
+  CP2102N/Silicon Labs, mas a abertura da porta foi bloqueada por permissões
+  `root:dialout` (`crw-rw----`). A validação de comandos reais depende de
+  `sudo chmod 666 /dev/ttyUSB0` temporário ou de adicionar o usuário ao grupo
+  `dialout` e reiniciar a sessão.
 
 O dashboard já pode demonstrar `SILENT` versus `DETECTED_GUARD` em payload,
-executar `RUN_BATTERY` A/B e exportar sessões em JSON. Ele ainda não deve ser
-usado como coleta final enquanto não houver replay documentado e roteiro de
-apresentação validado.
+executar `RUN_BATTERY` A/B, executar `DEMO` com overlay calculado e exportar
+sessões em JSON. A coleta técnica já existe; falta validar fisicamente o
+projetor, a serial no equipamento final e a campanha prolongada.
 
 ## 3. Gate 0 - protocolo experimental
 
@@ -147,7 +198,7 @@ O perfil inicial será:
 | RAM | Sem PSRAM; pico medido e limite de 256 KiB para aplicação + criptografia |
 | Flash da aplicação | Máximo de 1 MiB |
 | Rádio integrado | Wi-Fi e Bluetooth desativados |
-| Comunicação | UART; comandos curtos no firmware e respostas host de até 512 caracteres |
+| Comunicação | UART; comandos curtos no firmware e respostas host de até 1024 caracteres |
 | Telemetria | 1 Hz no modo nominal; eventos críticos imediatos |
 | Persistência local | Ring buffer de até 128 eventos; exportação completa no host |
 | Criptografia | Uma operação por vez; sem alocação dinâmica no caminho crítico |
@@ -169,10 +220,13 @@ linear rígida.
 
 ### Trilha PQC na placa
 
-1. [Etapa 04](etapa_04_firmware_esp32.md): manter `mlkem-native` v1.1.0
-   vendorizado como backend ML-KEM-512 da Wisdom.
-2. Manter `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP` e
-   `PQC_BENCH` como comandos de bancada, fora do `HELP` visual da demo.
+1. Manter `mlkem-native` v1.1.0 vendorizado como backend ML-KEM-512 da
+   Wisdom. A antiga Etapa 04 foi consolidada neste roadmap.
+2. Manter `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP`,
+   `PQC_FAULT` e `PQC_BENCH` como comandos de bancada, fora dos blocos
+   clicáveis da demo.
+   Eles podem ser digitados no terminal textual avançado quando a placa estiver
+   conectada.
 3. Manter `PQC_INFO` como fonte de alvo, backend, fonte, commit, licença,
    perfil, tempo e memória.
 4. Medição inicial de tempo, heap, heap mínimo e flash nos perfis `BASELINE` e
@@ -181,20 +235,21 @@ linear rígida.
 
 ### Trilha software demonstrável
 
-1. [Etapa 06](etapa_06_guardiao_integridade.md): expandir o guardião para
-   checksum ativável/desativável no fluxo de campanha e depois no ciphertext.
-2. [Etapa 07](etapa_07_modo_apresentacao.md): transformar `RUN_BATTERY` em
-   campanha visual automatizada.
-3. [Etapa 08](etapa_08_polimento_final.md): robustez, projetor e roteiro.
+1. Manter payload/CRC32 e ciphertext ML-KEM com confirmação de chave como
+   base de coleta. A antiga Etapa 06 foi consolidada neste roadmap.
+2. Manter `DEMO` como campanha visual automatizada. A antiga Etapa 07 foi
+   consolidada neste roadmap.
+3. [Etapa 08](etapa_08_polimento_final.md): robustez de software concluída;
+   validação física de projetor/30 minutos pendente.
 
-Etapas 01, 02 e 03 já estão implementadas e seus markdowns foram removidos. A
+Etapas 01 a 07 já estão implementadas e seus markdowns foram removidos. A
 trilha PQC agora possui backend real medido; a demo deve continuar separando
-dado medido, simulação e pendência.
+dado medido, simulação e pendência. Permanece apenas o checklist físico da
+Etapa 08.
 
 ### Trilha hardware
 
-1. Manter [Etapa 04](etapa_04_firmware_esp32.md) e
-   [Etapa 05](etapa_05_bridge_serial.md) estáveis.
+1. Manter firmware, bridge serial e comandos de bancada estáveis.
 2. Usar `FAULT NONE|CRC32 payload_hex index mask` apenas como validação real
    do experimento de payload na Wisdom.
 3. Medir `PROFILE BASELINE` e `PROFILE OBC-1U-LIMITED` antes de qualquer
@@ -261,6 +316,9 @@ Entregas:
 - schema versionado;
 - seed, modo, alvo, posição, máscara, `campaign_run_id` e
   `campaign_trial_id`;
+- overhead do guardião por evento: `guard_prepare_us`, `guard_verify_us` e
+  `guard_overhead_us`;
+- métricas agregadas: CPU ativo em janela de 5s, checksum e PQC;
 - resumo derivado dos eventos;
 - amostras de hardware com CPU, heap, heap mínimo, flash, perfil e tempo;
 - proxy de energia explicitamente rotulado enquanto não houver medidor real;
@@ -276,7 +334,7 @@ Aceite:
 ### Etapa 04 - firmware
 
 Estado: **implementada para transporte, periféricos, payload/CRC32,
-ML-KEM-512 real e medição inicial nos perfis baseline/limitado**.
+ML-KEM-512 real, `PQC_FAULT` e medição nos perfis baseline/limitado**.
 
 Primeiro deve ser registrado:
 
@@ -324,6 +382,19 @@ Medição real registrada em 2026-06-17:
 | `OBC-1U-LIMITED` | 80 MHz | `PQC_KAT` | `kat=pass`, `key_match=1`, `ss_crc32=0xD9DA8D6C`, `elapsed_us=39270` |
 | `OBC-1U-LIMITED` | 80 MHz | `PQC_BENCH 5` | `keygen_avg_us=10101`, `encap_avg_us=11778`, `decap_avg_us=15214`, `elapsed_us=187371`, `heap=202444`, `min_heap=198456` |
 
+Medição real pós-upload registrada em 2026-06-18:
+
+| Perfil | CPU | Comando | Resultado |
+|---|---:|---|---|
+| `BASELINE` | 240 MHz | `PQC_INFO` | `pqc_status=ready`, `pk=800`, `sk=1632`, `ct=768`, `ss=32`, `elapsed_us=21892`, `heap=201612`, `min_heap=197624`, `flash=4194304` |
+| `BASELINE` | 240 MHz | `PQC_KAT` | `kat=pass`, `key_match=1`, `ss_crc32=0xD9DA8D6C`, `elapsed_us=14117` |
+| `BASELINE` | 240 MHz | `PQC_FAULT 0 0x01 CONFIRM` | `result=PROTOCOL_REJECT`, `confirmation=HMAC-SHA256`, `key_match=0`, `tag_ready=1`, `confirm_us=960`, `elapsed_us=46579` |
+| `BASELINE` | 240 MHz | `PQC_FAULT 0 0x01 NONE` | `result=KEY_MISMATCH`, `confirmation=NONE`, `key_match=0`, `elapsed_us=35222` |
+| `BASELINE` | 240 MHz | `PQC_BENCH 100` | `ok=100`, `keygen_avg_us=3301`, `encap_avg_us=3864`, `decap_avg_us=4988`, `elapsed_us=1217337`, `heap=201512`, `min_heap=197624` |
+| `OBC-1U-LIMITED` | 80 MHz | `PQC_INFO` | `pqc_status=ready`, `pk=800`, `sk=1632`, `ct=768`, `ss=32`, `elapsed_us=24688`, `heap=201512`, `min_heap=197624`, `flash=4194304` |
+| `OBC-1U-LIMITED` | 80 MHz | `PQC_BENCH 100` | `ok=100`, `keygen_avg_us=10045`, `encap_avg_us=11769`, `decap_avg_us=15194`, `elapsed_us=3706253`, `heap=201512`, `min_heap=197624` |
+| `OBC-1U-LIMITED` | 80 MHz | `FAULT CRC32 5051432D534154 0 0x01` | `result=DETECTED_GUARD`, `crc_before=0xDFFEC3A1`, `crc_after=0x7989C815`, `elapsed_us=11` |
+
 Fallback aceitável:
 
 - emulador claramente rotulado;
@@ -368,7 +439,9 @@ Aceite:
 
 ### Etapa 06 - guardião
 
-Estado: **parcialmente implementada**.
+Estado: **implementada para payload, checksum ativável/desativável,
+ciphertext ML-KEM com confirmação de chave, overhead do guardião e exportação
+PQC**.
 
 Implementação mínima:
 
@@ -376,7 +449,23 @@ Implementação mínima:
 2. aplique a falha;
 3. compute novamente;
 4. compare;
-5. registre cobertura e overhead.
+5. registre cobertura, overhead e métricas PQC exportáveis.
+
+Implementado no dashboard:
+
+- `CHECKSUM ON|OFF|TOGGLE|STATUS`;
+- `GUARD NONE|CRC32`;
+- `INJECT_FAULT` e `BIT_FLIP` respeitando o guardião ativo;
+- `CRC_CHECK` como atalho de uma tentativa forçada com CRC32;
+- `PQC_FAULT index mask [CONFIRM|NONE]` no firmware para aplicar bit-flip em
+  ciphertext ML-KEM real;
+- confirmação de chave por HMAC-SHA256 usando o segredo derivado, com
+  `PROTOCOL_REJECT` quando os tags não batem;
+- eventos JSON com `guard_prepare_us`, `guard_verify_us` e
+  `guard_overhead_us` para medir overhead do CRC32 em vez de inventar custo;
+- amostras `PQC_*` exportadas em JSON com tempos, KAT, `key_match`,
+  tamanhos, `key_confirmed`, `tag_match` e CRCs curtos, sem segredos
+  completos.
 
 O firmware antigo proposto chamava `checkIntegrity()` sem inicializar os
 valores armazenados. Isso deve ser impedido por uma API explícita:
@@ -392,37 +481,52 @@ Aceite:
 - teste conhecido para cada checksum;
 - single-bit detectado em toda posição coberta;
 - campanhas multi-bit documentadas;
+- overhead do guardião medido por evento;
 - nenhuma taxa é hard-coded como resultado científico.
 
 ### Etapa 07 - modo apresentação
 
-Estado: **não implementada**.
+Estado: **implementada no dashboard**.
 
 A demo automatizada é um segmento de cerca de 45-60 segundos dentro da aula
 de 20 minutos.
 
-Requisitos:
+Implementado:
 
-- usa a mesma campanha em A e B;
-- número de tentativas configurável;
-- não depende de sorte favorável;
-- pausa, parada e reinício;
-- overlay calcula a conclusão a partir dos dados;
-- texto não afirma melhora se os resultados não sustentarem isso.
+- `DEMO [n]`, `DEMO_PAUSE`, `DEMO_RESUME`, `DEMO_STOP` e `DEMO_RESTART`;
+- estados `RUNNING_A`, `SNAPSHOT_A`, `RUNNING_B`, `RESULTS`, `PAUSED` e
+  `STOPPED`;
+- mesma lista de fault specs em A (`NONE`) e B (`CRC32`);
+- overlay calculado a partir dos eventos, com silenciosas em A, detectadas em
+  B, taxa de detecção e overhead médio do CRC32;
+- exportação JSON automática ao fim da demo;
+- testes automatizados para A/B, pausa, retomada e parada.
 
 ### Etapa 08 - fechamento
 
+Estado: **implementada no software; validação física pendente**.
+
 Entregas:
 
-- splash opcional com `--no-splash`;
-- help completo;
-- resumo e auto-save;
-- tratamento de exceções com cleanup, sem esconder traceback;
-- teste prolongado;
-- teste em projetor;
-- até cinco slides;
-- roteiro de 20 minutos;
-- limitações no relatório.
+- splash opcional com `--no-splash` implementado;
+- help completo mantido no terminal avançado, com comandos de dashboard e
+  firmware documentados;
+- resumo, auto-save no reset/fechamento e JSON versionado implementados;
+- tratamento de exceções com cleanup sem mascarar traceback implementado;
+- cache de superfícies grandes e métrica de memória/FPS do host implementados;
+- teste headless de layout em 1920x1080 e 1366x768 implementado;
+- roteiro de 20 minutos e base de até cinco slides em
+  `APRESENTACAO_ROTEIRO.md`;
+- limitações científicas registradas no README, roadmap e roteiro.
+
+Pendências físicas:
+
+- teste prolongado de 30 minutos;
+- teste no projetor real;
+- demo hardware completa se a porta serial estiver acessível no equipamento
+  usado na apresentação.
+- permissão atual observada: `/dev/ttyUSB0` existe, mas está restrita ao grupo
+  `dialout`; o usuário da sessão não conseguiu abrir a porta sem sudo.
 
 Não use a expressão "nenhum crash possível". O critério correto é "nenhuma
 falha conhecida nos cenários testados".
@@ -431,19 +535,21 @@ falha conhecida nos cenários testados".
 
 ### Próximos cortes
 
-1. Exportar resultados PQC no JSON de campanha sem segredos completos.
-2. Ligar bit-flip manual ao fluxo PQC: payload primeiro, ciphertext depois do
-   KEM estável.
-3. Implementar checksum ativável/desativável no fluxo de campanha.
-4. Promover `RUN_BATTERY` para `CampaignRunner` visual com replay documentado.
-5. Implementar `DEMO`, `DEMO_PAUSE`, `DEMO_STOP` e overlay derivado dos dados.
-6. Executar bateria PQC prolongada, validar projetor, resolução e roteiro.
+1. Validar `DEMO` em projetor, resolução e roteiro usando os dados já
+   coletados no hardware.
+2. Liberar ou corrigir permissão da porta serial no equipamento final e repetir
+   `PING`, `STATUS`, `PQC_INFO`, `PQC_KAT`, `PQC_FAULT` e `DEMO 5`.
+3. Executar uma campanha de 30 minutos e guardar o JSON gerado para planilha.
+4. Levar para o relatório/slides a distinção: checksum protege transporte,
+   confirmação de chave protege aceitação de sessão, e consumo de energia só
+   será afirmado se houver medição externa.
 
 ## 9. Riscos e decisões
 
 | Risco | Mitigação |
 |---|---|
 | Regressão de build/flash do ML-KEM na placa | Manter `mlkem-native` vendorizado, KAT host e build PlatformIO como validação obrigatória. |
+| Resposta serial grande de `PQC_FAULT` rejeitada no host | Limite de resposta do parser aumentado para 1024 caracteres e coberto por testes do protocolo. |
 | Biblioteca implementa Kyber antigo, não FIPS 203 | Identificar variante e não chamá-la de ML-KEM. |
 | Cinco amostras geram conclusão fraca | Usar campanha determinística maior na coleta e subconjunto visual na demo. |
 | Serial perde ou reordena respostas | `request_id`, timeout e parser estrito. |
@@ -455,7 +561,7 @@ falha conhecida nos cenários testados".
 
 ### Obrigatória
 
-- dashboard funcional sem hardware;
+- dashboard funcional sem hardware e com hardware conectado;
 - campanha reproduzível;
 - comparação A/B baseada em bytes;
 - JSON;
@@ -467,10 +573,14 @@ falha conhecida nos cenários testados".
 
 - ESP32 conectado por bridge serial;
 - ML-KEM-512 real;
-- medição inicial de tempo e memória no dispositivo.
+- `PQC_FAULT` real em ciphertext ML-KEM com confirmação de chave;
+- `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`;
+- medição de tempo e memória no dispositivo.
 
-O hardware agora sustenta a demonstração. A entrega final ainda depende de
-demo automatizada, coleta maior, roteiro e limites científicos explícitos.
+O hardware e o modo `DEMO` sustentam a demonstração. A entrega final ainda
+depende de validação física em projetor, porta serial e campanha prolongada.
+O roteiro, a base de slides e os limites científicos já estão documentados em
+`APRESENTACAO_ROTEIRO.md`.
 
 ## 11. Referências técnicas para decisões
 

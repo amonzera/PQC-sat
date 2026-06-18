@@ -40,7 +40,8 @@ implementar.
 - Terra, CubeSat, estrelas, nebulosa e partículas procedurais;
 - painel de telemetria e console;
 - comandos locais do dashboard: `INJECT_FAULT`, `BIT_FLIP`, `PQC_STATUS`,
-  `CRC_CHECK`, `EXPORT_JSON`, `SAVE_SESSION`, `RUN_BATTERY`,
+  `CRC_CHECK`, `EXPORT_JSON`, `SAVE_SESSION`, `RUN_BATTERY`, `DEMO`,
+  `DEMO_PAUSE`, `DEMO_RESUME`, `DEMO_STOP`, `DEMO_RESTART`,
   `RESET_SESSION` e `HELP`;
 - firmware serial `V1` para a RoboCore BlackBoard Wisdom;
 - bridge serial Python e console `tools/serial_console.py`;
@@ -53,19 +54,41 @@ implementar.
 - backend ML-KEM-512 real na Wisdom com `mlkem-native` v1.1.0, commit
   `d2cae2b`, vendorizado em `firmware/lib/mlkem_native`;
 - comandos PQC de bancada: `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`,
-  `PQC_DECAP` e `PQC_BENCH`; validação real em placa teve `PQC_KAT kat=pass`
-  e `PQC_DECAP key_match=1`;
-- medição inicial em placa: `PQC_BENCH 5` em `BASELINE` a 240 MHz retornou
-  `keygen_avg_us=3369`, `encap_avg_us=3878`, `decap_avg_us=5013`; em
-  `OBC-1U-LIMITED` a 80 MHz retornou `keygen_avg_us=10101`,
-  `encap_avg_us=11778`, `decap_avg_us=15214`;
+  `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH`; validação real em placa teve
+  `PQC_KAT kat=pass`, `PQC_FAULT CONFIRM result=PROTOCOL_REJECT` e
+  `PQC_FAULT NONE result=KEY_MISMATCH`;
+- medição em placa: `PQC_BENCH 100` em `BASELINE` a 240 MHz retornou
+  `ok=100`, `keygen_avg_us=3301`, `encap_avg_us=3864`,
+  `decap_avg_us=4988`; em `OBC-1U-LIMITED` a 80 MHz retornou `ok=100`,
+  `keygen_avg_us=10045`, `encap_avg_us=11769`, `decap_avg_us=15194`;
 - exportação JSON com eventos, resumo e amostras de hardware.
+- checksum ativável/desativável no dashboard por `CHECKSUM ON|OFF|TOGGLE` e
+  `GUARD NONE|CRC32`;
+- amostras `PQC_*` exportadas em JSON com timings, KAT, `key_match`,
+  `key_confirmed`, `tag_match`, tamanhos e CRCs curtos, sem segredos
+  completos;
+- eventos de payload exportam overhead do guardião em `guard_prepare_us`,
+  `guard_verify_us` e `guard_overhead_us`.
+- faixa superior mostra CPU em MHz e `% ativo` observado em janela móvel de
+  5s, além de métricas resumidas de PQC e checksum;
+- modo apresentação A/B implementado com `DEMO`, pausa, retomada, parada,
+  reinício, snapshots A/B, overlay calculado e exportação JSON.
+- `PQC_FAULT index mask [CONFIRM|NONE]` implementado no firmware para
+  corromper ciphertext ML-KEM real e classificar `KEY_MISMATCH` ou
+  `PROTOCOL_REJECT` por confirmação HMAC-SHA256 da chave derivada.
+- etapa 8 de software implementada com splash opcional, `--no-splash`,
+  autosave no fechamento, cleanup preservando traceback, cache de superfícies
+  grandes, métrica `HOST` no topo e testes headless para 1920x1080 e
+  1366x768;
+- roteiro de apresentação criado em `APRESENTACAO_ROTEIRO.md`, com cinco
+  slides, sequência de demo, limites científicos e checklist pré-apresentação.
 
 ### Não implementado
 
-- mutação real de ciphertext ML-KEM;
-- modo apresentação A/B completo com pausa, snapshots e overlay calculado;
-- slides e roteiro final.
+- validação física no projetor real;
+- campanha prolongada de 30 minutos antes da apresentação;
+- nova validação hardware se a permissão da porta serial estiver bloqueada no
+  equipamento final.
 
 ## 4. Stack
 
@@ -106,17 +129,19 @@ ML-KEM/FIPS 203.
 - Não bloqueie o loop principal com `sleep`, I/O serial ou criptografia longa.
 - Não carregue imagens, sons ou fontes externas sem decisão explícita.
 - Não mostre `ESP32 ONLINE`, `CRC ON` ou `ML-KEM ativo` sem evidência real.
-- O dashboard é a superfície da apresentação ao vivo. Mantenha nele apenas
-  comandos pertinentes ao roteiro visual e didático: falha manual, checksum,
-  telemetria essencial, exportação, bateria de demonstração e controles visuais
-  necessários. Comandos de bancada, inventário, debug, expansão de hardware,
-  endpoints técnicos ainda pendentes ou operações perigosas devem ficar fora do
-  `HELP` visual e fora do fluxo principal do dashboard.
+- O dashboard é a superfície da apresentação ao vivo. Mantenha como blocos
+  clicáveis apenas comandos pertinentes ao roteiro visual e didático: falha
+  manual, checksum, telemetria essencial, exportação, bateria de demonstração e
+  controles visuais necessários. O terminal textual do painel pode encaminhar
+  comandos avançados de firmware quando a placa estiver conectada, inclusive
+  bancada, inventário, debug e PQC técnico, desde que isso não vire botão ou
+  fluxo principal da apresentação.
 - Todo comando útil que não pertença à apresentação deve continuar registrado
   para uso técnico em outro lugar: `hardware_command_reference.md`,
   `tools/serial_console.py --all-commands`, documentação de etapa ou scripts de
   bancada. Não apague capacidade técnica só porque ela não aparece no
-  dashboard; apenas separe a superfície da demo da superfície de engenharia.
+  conjunto de botões; apenas separe a superfície visual da demo da superfície
+  textual de engenharia.
 - Resultados experimentais devem vir de bytes mutados e verificações reais.
 - Mantenha a aleatoriedade do experimento separada da aleatoriedade visual.
 - Trate `OBC-1U-LIMITED` como perfil experimental, não como especificação
@@ -170,6 +195,7 @@ Comandos mínimos antes de concluir uma alteração:
 ```bash
 python3 -m py_compile dashboard.py
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -c "import dashboard"
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -m unittest discover
 git diff --check
 ```
 
@@ -184,12 +210,7 @@ compilação.
 
 ## 8. Próxima ordem de trabalho
 
-1. Etapa 06: exportar amostras PQC no JSON da campanha sem expor segredos
-   completos.
-2. Etapa 06: ligar bit-flips manuais e checksum ativável/desativável ao fluxo
-   de payload e, depois do KEM estável, ao ciphertext.
-3. Etapa 07: demo com a mesma campanha nos cenários A e B.
-4. Etapa 04/08: bateria PQC prolongada, testes, projetor, slides, roteiro e
-   relatório.
+1. Validar fisicamente projetor, serial e campanha de 30 minutos.
+2. Atualizar relatório/slides finais com os resultados JSON medidos.
 
-Última revisão: 2026-06-17.
+Última revisão: 2026-06-18.

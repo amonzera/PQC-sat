@@ -67,14 +67,16 @@ class SerialProtocolTests(unittest.TestCase):
         self.assertIn("OLED INIT|CLEAR|TEST|STANDBY", full_rendered)
 
     def test_pqc_bench_commands_are_full_catalog_only(self):
-        for command_name in ("PQC_INFO", "PQC_KAT", "PQC_KEYGEN", "PQC_ENCAP", "PQC_DECAP", "PQC_BENCH"):
+        for command_name in ("PQC_INFO", "PQC_KAT", "PQC_KEYGEN", "PQC_ENCAP", "PQC_DECAP", "PQC_FAULT", "PQC_BENCH"):
             self.assertIn(command_name, FIRMWARE_COMMAND_NAMES)
             self.assertNotIn(command_name, DEMO_FIRMWARE_COMMAND_NAMES)
 
         full_rendered = "\n".join(command_help_lines(demo_only=False))
         demo_rendered = "\n".join(command_help_lines())
         self.assertIn("PQC_INFO", full_rendered)
+        self.assertIn("PQC_FAULT", full_rendered)
         self.assertNotIn("PQC_INFO", demo_rendered)
+        self.assertNotIn("PQC_FAULT", demo_rendered)
 
 
 if __name__ == "__main__":

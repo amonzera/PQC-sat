@@ -13,6 +13,9 @@
 #include <esp_system.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <string.h>
+
+#include "mbedtls/md.h"
 
 #include <mlkem_native.h>
 
@@ -35,6 +38,8 @@ static constexpr const char *PQC_STATUS = "ready";
 static constexpr const char *PQC_SOURCE = "pq-code-package/mlkem-native";
 static constexpr const char *PQC_COMMIT = "d2cae2b";
 static constexpr const char *PQC_LICENSE = "Apache2-ISC-MIT";
+static constexpr const char *PQC_CONFIRMATION = "HMAC-SHA256";
+static constexpr size_t PQC_CONFIRM_TAG_BYTES = 32;
 
 static_assert(CRYPTO_PUBLICKEYBYTES == 800, "unexpected ML-KEM-512 public key size");
 static_assert(CRYPTO_SECRETKEYBYTES == 1632, "unexpected ML-KEM-512 secret key size");
@@ -122,8 +127,11 @@ static uint8_t oled_buffer[OLED_BUFFER_SIZE];
 static uint8_t pqc_pk[CRYPTO_PUBLICKEYBYTES];
 static uint8_t pqc_sk[CRYPTO_SECRETKEYBYTES];
 static uint8_t pqc_ct[CRYPTO_CIPHERTEXTBYTES];
+static uint8_t pqc_fault_ct[CRYPTO_CIPHERTEXTBYTES];
 static uint8_t pqc_ss_enc[CRYPTO_BYTES];
 static uint8_t pqc_ss_dec[CRYPTO_BYTES];
+static uint8_t pqc_fault_tag_enc[PQC_CONFIRM_TAG_BYTES];
+static uint8_t pqc_fault_tag_dec[PQC_CONFIRM_TAG_BYTES];
 static bool pqc_keypair_ready = false;
 static bool pqc_ciphertext_ready = false;
 static bool pqc_shared_secret_ready = false;
@@ -1054,6 +1062,30 @@ static bool pqc_shared_secrets_match(const uint8_t *left, const uint8_t *right) 
   return diff == 0;
 }
 
+static bool bytes_equal_constant_time(const uint8_t *left, const uint8_t *right, size_t len) {
+  uint8_t diff = 0;
+  for (size_t i = 0; i < len; ++i) {
+    diff |= static_cast<uint8_t>(left[i] ^ right[i]);
+  }
+  return diff == 0;
+}
+
+static bool pqc_confirmation_tag(const uint8_t *shared_secret, uint8_t *out_tag) {
+  static constexpr const char transcript[] = "PQC-SAT|ML-KEM-512|KEY_CONFIRM|v1";
+  const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (info == nullptr) {
+    return false;
+  }
+  const int rc = mbedtls_md_hmac(
+      info,
+      shared_secret,
+      CRYPTO_BYTES,
+      reinterpret_cast<const unsigned char *>(transcript),
+      strlen(transcript),
+      out_tag);
+  return rc == 0;
+}
+
 static void print_pqc_sizes() {
   print_kv_u32("pk", CRYPTO_PUBLICKEYBYTES);
   print_kv_u32("sk", CRYPTO_SECRETKEYBYTES);
@@ -1195,6 +1227,127 @@ static void send_pqc_decap(const char *request_id) {
   end_result();
 }
 
+static void handle_pqc_fault(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count < 5 || field_count > 6) {
+    print_error(request_id, "BAD_ARGS", "expected_index_mask_confirm");
+    return;
+  }
+
+  int byte_index = 0;
+  if (!parse_int_range(fields[3], 0, static_cast<int>(CRYPTO_CIPHERTEXTBYTES) - 1, &byte_index)) {
+    print_error(request_id, "BAD_INDEX", "outside_ciphertext");
+    return;
+  }
+
+  uint8_t bit_mask = 0;
+  if (!parse_u8_auto(fields[4], &bit_mask) || !is_single_bit_mask(bit_mask)) {
+    print_error(request_id, "BAD_MASK", "expected_single_bit");
+    return;
+  }
+
+  bool confirmation_enabled = true;
+  if (field_count == 6) {
+    uppercase_ascii(fields[5]);
+    if (strcmp(fields[5], "CONFIRM") == 0 || strcmp(fields[5], "HMAC") == 0) {
+      confirmation_enabled = true;
+    } else if (strcmp(fields[5], "NONE") == 0) {
+      confirmation_enabled = false;
+    } else {
+      print_error(request_id, "BAD_CONFIRM", "expected_CONFIRM_or_NONE");
+      return;
+    }
+  }
+
+  const uint32_t started = micros();
+
+  uint32_t op_started = micros();
+  int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
+  const uint32_t keygen_us = micros() - op_started;
+  if (rc != 0) {
+    print_pqc_error_result(request_id, "fault_keygen", rc, micros() - started);
+    return;
+  }
+
+  op_started = micros();
+  rc = crypto_kem_enc(pqc_ct, pqc_ss_enc, pqc_pk);
+  const uint32_t encap_us = micros() - op_started;
+  if (rc != 0) {
+    print_pqc_error_result(request_id, "fault_encap", rc, micros() - started);
+    return;
+  }
+
+  const uint32_t ct_crc_before = crc32_bytes(pqc_ct, sizeof(pqc_ct));
+  memcpy(pqc_fault_ct, pqc_ct, sizeof(pqc_fault_ct));
+  const uint8_t before_byte = pqc_fault_ct[byte_index];
+  pqc_fault_ct[byte_index] ^= bit_mask;
+  const uint8_t after_byte = pqc_fault_ct[byte_index];
+  const uint32_t ct_crc_after = crc32_bytes(pqc_fault_ct, sizeof(pqc_fault_ct));
+
+  op_started = micros();
+  rc = crypto_kem_dec(pqc_ss_dec, pqc_fault_ct, pqc_sk);
+  const uint32_t decap_us = micros() - op_started;
+  if (rc != 0) {
+    print_pqc_error_result(request_id, "fault_decap", rc, micros() - started);
+    return;
+  }
+
+  const bool key_match = pqc_shared_secrets_match(pqc_ss_enc, pqc_ss_dec);
+  bool tag_match = false;
+  bool tag_ready = false;
+  uint32_t confirm_us = 0;
+
+  if (confirmation_enabled) {
+    op_started = micros();
+    const bool tag_a = pqc_confirmation_tag(pqc_ss_enc, pqc_fault_tag_enc);
+    const bool tag_b = pqc_confirmation_tag(pqc_ss_dec, pqc_fault_tag_dec);
+    confirm_us = micros() - op_started;
+    tag_ready = tag_a && tag_b;
+    tag_match = tag_ready && bytes_equal_constant_time(pqc_fault_tag_enc, pqc_fault_tag_dec, PQC_CONFIRM_TAG_BYTES);
+  }
+
+  const char *result = "OK";
+  if (confirmation_enabled) {
+    result = tag_match ? "OK" : "PROTOCOL_REJECT";
+  } else if (!key_match) {
+    result = "KEY_MISMATCH";
+  }
+
+  pqc_keypair_ready = true;
+  pqc_ciphertext_ready = true;
+  pqc_shared_secret_ready = key_match;
+
+  begin_result(request_id, "OK");
+  print_kv("op", "ciphertext_fault");
+  print_kv("target", "CIPHERTEXT");
+  print_kv("result", result);
+  print_kv("confirmation", confirmation_enabled ? PQC_CONFIRMATION : "NONE");
+  print_kv_bool("key_match", key_match);
+  print_kv_bool("key_confirmed", confirmation_enabled && tag_match);
+  print_kv_bool("tag_match", tag_match);
+  print_kv_bool("tag_ready", tag_ready);
+  print_kv_i32("dec_rc", rc);
+  print_kv_u32("byte_index", static_cast<uint32_t>(byte_index));
+  print_kv_hex_u8("bit_mask", bit_mask);
+  print_kv_hex_u8("before", before_byte);
+  print_kv_hex_u8("after", after_byte);
+  print_kv_hex_u32("ct_crc_before", ct_crc_before);
+  print_kv_hex_u32("ct_crc_after", ct_crc_after);
+  print_kv_hex_u32("ss_enc_crc32", crc32_bytes(pqc_ss_enc, sizeof(pqc_ss_enc)));
+  print_kv_hex_u32("ss_dec_crc32", crc32_bytes(pqc_ss_dec, sizeof(pqc_ss_dec)));
+  if (confirmation_enabled && tag_ready) {
+    print_kv_hex_u32("tag_enc_crc32", crc32_bytes(pqc_fault_tag_enc, sizeof(pqc_fault_tag_enc)));
+    print_kv_hex_u32("tag_dec_crc32", crc32_bytes(pqc_fault_tag_dec, sizeof(pqc_fault_tag_dec)));
+  }
+  print_kv_u32("keygen_us", keygen_us);
+  print_kv_u32("encap_us", encap_us);
+  print_kv_u32("decap_us", decap_us);
+  print_kv_u32("confirm_us", confirm_us);
+  print_kv_u32("elapsed_us", micros() - started);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  end_result();
+}
+
 static bool run_pqc_round(uint32_t *keygen_us, uint32_t *encap_us, uint32_t *decap_us, bool *key_match) {
   uint32_t started = micros();
   int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
@@ -1225,24 +1378,24 @@ static bool run_pqc_round(uint32_t *keygen_us, uint32_t *encap_us, uint32_t *dec
 }
 
 static void handle_pqc_bench(const char *request_id, size_t field_count, char *fields[]) {
-  uint8_t rounds = 3;
+  uint16_t rounds = 3;
   if (field_count >= 4) {
     int parsed = 0;
-    if (!parse_int_range(fields[3], 1, 20, &parsed)) {
-      print_error(request_id, "BAD_ARGS", "expected_1_to_20");
+    if (!parse_int_range(fields[3], 1, 100, &parsed)) {
+      print_error(request_id, "BAD_ARGS", "expected_1_to_100");
       return;
     }
-    rounds = static_cast<uint8_t>(parsed);
+    rounds = static_cast<uint16_t>(parsed);
   }
 
   const uint32_t started = micros();
   uint32_t total_keygen = 0;
   uint32_t total_encap = 0;
   uint32_t total_decap = 0;
-  uint8_t ok = 0;
+  uint16_t ok = 0;
   bool last_match = false;
 
-  for (uint8_t i = 0; i < rounds; ++i) {
+  for (uint16_t i = 0; i < rounds; ++i) {
     uint32_t keygen_us = 0;
     uint32_t encap_us = 0;
     uint32_t decap_us = 0;
@@ -1808,6 +1961,9 @@ static void send_help_detail(const char *request_id, const char *command) {
   } else if (strcmp(command, "PQC_DECAP") == 0) {
     print_kv("usage", "PQC_DECAP");
     print_kv("does", "decapsula ct armazenado e compara");
+  } else if (strcmp(command, "PQC_FAULT") == 0) {
+    print_kv("usage", "PQC_FAULT index mask CONFIRM|NONE");
+    print_kv("does", "bit-flip em ciphertext e confirmacao");
   } else if (strcmp(command, "PQC_BENCH") == 0) {
     print_kv("usage", "PQC_BENCH n");
     print_kv("does", "benchmark keygen encap decap");
@@ -1876,7 +2032,7 @@ static void send_help(const char *request_id, size_t field_count, char *fields[]
   begin_result(request_id, "OK");
   print_kv("usage", "HELP [COMMAND]");
   print_kv("cmd1", "HELLO,PING,STATUS,TELEMETRY,FAULT,PERIPHERALS");
-  print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_BENCH");
+  print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_FAULT,PQC_BENCH");
   print_kv("cmd3", "I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ,ANALOG,DIGITAL");
   print_kv("cmd4", "RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS");
   print_kv("cmd5", "HELP");
@@ -1922,6 +2078,8 @@ static void process_frame(char *line) {
     send_pqc_encap(request_id);
   } else if (strcmp(command, "PQC_DECAP") == 0) {
     send_pqc_decap(request_id);
+  } else if (strcmp(command, "PQC_FAULT") == 0) {
+    handle_pqc_fault(request_id, field_count, fields);
   } else if (strcmp(command, "PQC_BENCH") == 0) {
     handle_pqc_bench(request_id, field_count, fields);
   } else if (strcmp(command, "PERIPHERALS") == 0) {

@@ -162,22 +162,25 @@ Para a sequencia completa de bancada, use `../hardware_command_reference.md`.
   `mlkem-native` v1.1.0 vendorizado em `firmware/lib/mlkem_native`.
 - A interface PQC real existe: `PQC_INFO` reporta alvo, backend, variante,
   commit, licença, tamanhos e métricas; `PQC_KAT`, `PQC_KEYGEN`,
-  `PQC_ENCAP`, `PQC_DECAP` e `PQC_BENCH` executam na placa.
-- A injecao de falhas implementada e somente de payload serial, reportada
-  como `fault=payload_crc32`.
+  `PQC_ENCAP`, `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH` executam no firmware.
+- A injecao de falhas existe em dois caminhos: payload serial com
+  `FAULT NONE|CRC32 ...` e ciphertext ML-KEM com
+  `PQC_FAULT index mask [CONFIRM|NONE]`.
 - OLED tem suporte minimo de inicializacao, limpeza, padrao de teste e standby
   com o icone pixel-art do robo/satelite usado no dashboard; texto no display
   fica para uma biblioteca grafica ou driver proprio posterior.
 - APDS-9960 e MMA8452 usam leituras diretas de registradores suficientes para
   bancada; calibracao fina fica para a etapa de sensores.
-- O nucleo `FAULT` foi validado em placa real para `NONE` e `CRC32`; os testes
+- O nucleo `FAULT` foi validado em placa real para `NONE` e `CRC32`;
+  `PQC_FAULT` foi validado em placa real para `CONFIRM` e `NONE`; os testes
   automatizados cobrem o parser Python e o engine deterministico do dashboard.
 
 ## Proximo incremento
 
-O proximo marco do firmware e repetir o backend real de ML-KEM-512 com uma
-bateria maior, exportar as amostras no JSON da campanha e ligar a injecao de
-falhas ao fluxo PQC sem expor chave privada, segredo compartilhado completo ou
+O proximo marco do firmware e manter esta base estável enquanto a etapa de
+apresentação automatizada é implementada. Novas mudanças de firmware devem
+preservar `PQC_KAT`, `PQC_FAULT`, `PQC_BENCH 100` e `FAULT CRC32` como testes
+de regressão, sem expor chave privada, segredo compartilhado completo ou
 material suficiente para reconstruir a sessao.
 
 Sequencia minima de bancada:
@@ -188,18 +191,20 @@ PQC_KAT
 PQC_KEYGEN
 PQC_ENCAP
 PQC_DECAP
+PQC_FAULT 0 0x01 CONFIRM
 PQC_BENCH n
 ```
 
 Validação real em placa após upload:
 
 ```text
-PQC_INFO      pqc_backend=mlkem-native pqc_status=ready
-PQC_KAT       kat=pass ss_crc32=0xD9DA8D6C elapsed_us=14125
-PQC_KEYGEN    elapsed_us=3498
-PQC_ENCAP     elapsed_us=4059
-PQC_DECAP     key_match=1 elapsed_us=5202
-PQC_BENCH 2   keygen_avg_us=3420 encap_avg_us=3876 decap_avg_us=5015
+PQC_INFO                      pqc_backend=mlkem-native pqc_status=ready pk=800 sk=1632 ct=768 ss=32
+PQC_KAT                       kat=pass ss_crc32=0xD9DA8D6C elapsed_us=14117
+PQC_FAULT 0 0x01 CONFIRM      result=PROTOCOL_REJECT confirmation=HMAC-SHA256 key_match=0 confirm_us=960
+PQC_FAULT 0 0x01 NONE         result=KEY_MISMATCH confirmation=NONE key_match=0
+PQC_BENCH 100 BASELINE        ok=100 keygen_avg_us=3301 encap_avg_us=3864 decap_avg_us=4988
+PQC_BENCH 100 OBC-1U-LIMITED  ok=100 keygen_avg_us=10045 encap_avg_us=11769 decap_avg_us=15194
+FAULT CRC32 ... 0 0x01        result=DETECTED_GUARD crc_before=0xDFFEC3A1 crc_after=0x7989C815
 ```
 
 Medição comparativa registrada em 2026-06-17:
@@ -216,4 +221,4 @@ PQC_BENCH 5   keygen_avg_us=10101 encap_avg_us=11778 decap_avg_us=15214 elapsed_
 
 Nenhum comando imprime chaves privadas, segredos completos ou material
 criptografico suficiente para reconstruir a sessao; são usados tamanhos,
-status, tempos e digests curtos.
+status, tempos, CRCs curtos e tags resumidos de confirmação.

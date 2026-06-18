@@ -11,26 +11,26 @@ honesta sobre suas limitações.
 
 1. Inicialização:
    - argumentos antes do display (implementado);
-   - splash opcional;
-   - `--no-splash` para testes;
-   - mensagem clara de modo.
+   - splash opcional (implementado);
+   - `--no-splash` para testes (implementado);
+   - mensagem clara de modo (implementado).
 2. Help:
    - lista de comandos;
    - estado atual;
    - diferenças entre simulado e hardware.
 3. Cleanup:
-   - auto-save;
-   - fechar serial;
-   - `pygame.quit()`;
-   - traceback preservado em erro inesperado.
+   - auto-save (implementado no reset e no fechamento);
+   - fechar serial (implementado);
+   - `pygame.quit()` (implementado);
+   - traceback preservado em erro inesperado (implementado).
 4. Performance:
-   - cache de superfícies estáticas;
-   - evitar criar superfícies grandes a cada frame;
-   - medir FPS e uso de memória.
+   - cache de superfícies estáticas (implementado para nebulosa e overlay);
+   - evitar criar superfícies grandes a cada frame (implementado);
+   - medir FPS e uso de memória (implementado no topo, barra inferior e JSON).
 5. Layout:
-   - 1920x1080;
-   - 1366x768;
-   - teste físico no projetor.
+   - 1920x1080 (teste headless implementado);
+   - 1366x768 (teste headless implementado);
+   - teste físico no projetor (pendente de sala/equipamento).
 
 Não envolva cada comando em `except Exception` que esconda bugs. Valide input
 esperado e mantenha um handler de topo para cleanup e diagnóstico.
@@ -86,11 +86,23 @@ Roteiro de 20 minutos:
 
 ## Checklist
 
-- [ ] Dependências reproduzíveis.
-- [ ] UI não mostra hardware inexistente.
-- [ ] Campanha reproduzível.
-- [ ] JSON auditável.
-- [ ] Demo A/B cronometrada.
+- [x] Dependências reproduzíveis.
+- [x] UI não mostra hardware inexistente.
+- [x] Campanha reproduzível.
+- [x] JSON auditável.
+- [x] Demo A/B cronometrada.
 - [ ] Projetor validado.
-- [ ] Slides e roteiro revisados.
-- [ ] Limitações apresentadas.
+- [x] Slides e roteiro revisados em `APRESENTACAO_ROTEIRO.md`.
+- [x] Limitações apresentadas no README, roadmap e roteiro.
+
+## Estado em 2026-06-18
+
+Software da etapa 8 implementado e coberto por testes headless. O arquivo
+permanece aberto apenas porque projetor, campanha de 30 minutos e eventual
+demo hardware dependem de validação física no equipamento da apresentação.
+
+Na verificação de 2026-06-18, `/dev/ttyUSB0` foi detectada como CP2102N/Silicon
+Labs, mas a abertura ficou bloqueada por permissões `root:dialout`. Para a
+validação hardware final, libere temporariamente com `sudo chmod 666
+/dev/ttyUSB0` ou adicione o usuário ao grupo `dialout` e entre novamente na
+sessão.

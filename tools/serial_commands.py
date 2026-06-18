@@ -26,7 +26,8 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PQC_KEYGEN", "gera par ML-KEM-512 e mede tempo/heap"),
     CommandInfo("PQC_ENCAP", "encapsula usando chave pública armazenada"),
     CommandInfo("PQC_DECAP", "decapsula ciphertext armazenado e compara segredo"),
-    CommandInfo("PQC_BENCH n", "executa n rodadas keygen/encap/decap"),
+    CommandInfo("PQC_FAULT index mask [CONFIRM|NONE]", "aplica bit-flip em ciphertext ML-KEM e testa confirmação"),
+    CommandInfo("PQC_BENCH n", "executa n rodadas keygen/encap/decap, 1..100"),
     CommandInfo("PERIPHERALS", "detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C"),
     CommandInfo("I2C_SCAN", "varre o barramento I2C SDA21/SCL22"),
     CommandInfo("FEATURES [CORE|I2C|GPIO|ANALOG|EXPANSION]", "lista grupos de recursos conhecidos"),
@@ -51,15 +52,20 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
 
 
 DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = (
-    CommandInfo("INJECT_FAULT", "aplica bit-flip determinístico sem guardião"),
-    CommandInfo("BIT_FLIP [index mask]", "aplica bit-flip determinístico ou manual"),
+    CommandInfo("INJECT_FAULT", "aplica bit-flip determinístico com o guardião ativo"),
+    CommandInfo("BIT_FLIP [index mask]", "aplica bit-flip determinístico ou manual com o guardião ativo"),
+    CommandInfo("CHECKSUM ON|OFF|TOGGLE|STATUS", "liga/desliga o guardião CRC32 do fluxo manual"),
+    CommandInfo("GUARD NONE|CRC32", "define explicitamente o guardião ativo"),
     CommandInfo("PQC_STATUS", "consulta PQC_INFO na placa ou mostra pendência local"),
     CommandInfo("CRC_CHECK", "aplica bit-flip e verifica CRC32 real"),
     CommandInfo("EXPORT_JSON", "salva eventos e métricas em JSON"),
     CommandInfo("SAVE_SESSION", "alias de EXPORT_JSON"),
     CommandInfo("RUN_BATTERY n", "executa bateria A/B e exporta JSON"),
+    CommandInfo("DEMO [n]", "executa campanha A/B visual cronometrada"),
+    CommandInfo("DEMO_PAUSE|DEMO_RESUME", "pausa ou retoma a campanha visual"),
+    CommandInfo("DEMO_STOP|DEMO_RESTART", "para ou reinicia a campanha visual"),
     CommandInfo("RESET_SESSION", "salva dados pendentes, zera sessão e reinicia a seed"),
-    CommandInfo("HELP", "mostra a lista simples da demonstração"),
+    CommandInfo("HELP", "mostra ajuda avançada do terminal textual"),
 )
 
 

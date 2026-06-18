@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
@@ -9,6 +10,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import json
 
 import dashboard
+import pygame
 
 
 class FakeSerialClient:
@@ -32,6 +34,17 @@ class ExperimentEngineTests(unittest.TestCase):
     def test_import_does_not_initialize_fullscreen_display(self):
         self.assertIsNone(dashboard.screen)
 
+    def test_parse_args_accepts_no_splash_for_headless_runs(self):
+        old_argv = sys.argv
+        try:
+            sys.argv = ["dashboard.py", "--simulated", "--no-splash"]
+            args = dashboard.parse_args()
+        finally:
+            sys.argv = old_argv
+
+        self.assertTrue(args.simulated)
+        self.assertTrue(args.no_splash)
+
     def test_same_seed_repeats_fault_sequence(self):
         first = dashboard.ExperimentEngine(seed=123)
         second = dashboard.ExperimentEngine(seed=123)
@@ -51,6 +64,9 @@ class ExperimentEngineTests(unittest.TestCase):
         self.assertEqual(event.result, "SILENT")
         self.assertNotEqual(event.before_hex, event.after_hex)
         self.assertEqual(event.guard, "NONE")
+        self.assertEqual(event.guard_prepare_us, 0)
+        self.assertEqual(event.guard_verify_us, 0)
+        self.assertEqual(event.guard_overhead_us, 0)
 
     def test_crc32_detects_every_single_bit_in_payload(self):
         payload = b"PQC"
@@ -63,6 +79,12 @@ class ExperimentEngineTests(unittest.TestCase):
                     spec=dashboard.FaultSpec(byte_index=byte_index, bit_mask=1 << bit),
                 )
                 self.assertEqual(event.result, "DETECTED_GUARD")
+                self.assertGreaterEqual(event.guard_prepare_us, 1)
+                self.assertGreaterEqual(event.guard_verify_us, 1)
+                self.assertEqual(
+                    event.guard_overhead_us,
+                    event.guard_prepare_us + event.guard_verify_us,
+                )
 
     def test_invalid_fault_spec_is_rejected(self):
         engine = dashboard.ExperimentEngine(seed=1)
@@ -107,6 +129,34 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(panel.last_fault_event.byte_index, 0)
         self.assertEqual(panel.last_fault_event.bit_mask, 0x01)
         self.assertEqual(panel.last_fault_event.result, "SILENT")
+
+    def test_checksum_toggle_controls_manual_fault_guard(self):
+        panel = dashboard.DashboardPanel()
+
+        panel._execute_command("CHECKSUM ON")
+        panel._execute_command("INJECT_FAULT")
+
+        self.assertTrue(panel.checksum_enabled)
+        self.assertEqual(panel.guard_mode, "CRC32")
+        self.assertEqual(panel.last_fault_event.guard, "CRC32")
+        self.assertEqual(panel.last_fault_event.result, "DETECTED_GUARD")
+
+        panel._execute_command("CHECKSUM OFF")
+        panel._execute_command("BIT_FLIP 0 0x01")
+
+        self.assertFalse(panel.checksum_enabled)
+        self.assertEqual(panel.guard_mode, "NONE")
+        self.assertEqual(panel.last_fault_event.guard, "NONE")
+        self.assertEqual(panel.last_fault_event.result, "SILENT")
+
+    def test_guard_command_sets_exportable_checksum_without_events(self):
+        panel = dashboard.DashboardPanel()
+
+        panel._execute_command("GUARD CRC32")
+        data = panel._build_export_document()
+
+        self.assertEqual(panel.command_history[-1]["status"], "CRC32 ON")
+        self.assertEqual(data["config"]["checksum"], "CRC32")
 
     def test_invalid_manual_bit_flip_does_not_create_event(self):
         panel = dashboard.DashboardPanel()
@@ -175,8 +225,13 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(len(data["events"]), 2)
         self.assertEqual(data["events"][0]["scenario"], "A_NONE")
         self.assertEqual(data["events"][1]["scenario"], "B_CRC32")
+        self.assertEqual(data["events"][0]["guard_overhead_us"], 0)
+        self.assertGreaterEqual(data["events"][1]["guard_prepare_us"], 1)
+        self.assertGreaterEqual(data["events"][1]["guard_verify_us"], 1)
         self.assertEqual(len(data["hardware_samples"]), 1)
         self.assertEqual(data["hardware_samples"][0]["energy_proxy"]["kind"], "relative_cpu_time")
+        self.assertIn("host", data["metrics"])
+        self.assertIn("rss_bytes", data["metrics"]["host"])
 
     def test_board_export_info_accumulates_identity_across_responses(self):
         panel = dashboard.DashboardPanel()
@@ -218,6 +273,17 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertFalse(panel.session_dirty)
         self.assertEqual(panel.last_export_path, saved_path)
 
+    def test_close_auto_saves_dirty_session(self):
+        panel = dashboard.DashboardPanel()
+        panel._execute_command("INJECT_FAULT")
+        saved_path = Path("close-auto.json")
+        panel.export_session = lambda log_dir=dashboard.DEFAULT_LOG_DIR: saved_path
+
+        panel.close()
+
+        self.assertFalse(panel.session_dirty)
+        self.assertEqual(panel.last_export_path, saved_path)
+
     def test_pqc_status_queries_board_when_serial_is_online(self):
         fake = FakeSerialClient()
         panel = dashboard.DashboardPanel(serial_client=fake)
@@ -228,6 +294,74 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(fake.sent[-1], "PQC_INFO")
         self.assertEqual(panel.command_history[-1]["cmd"], "PQC_INFO")
         self.assertEqual(panel.command_history[-1]["status"], "QUEUED")
+
+    def test_advanced_firmware_command_from_dashboard_terminal_is_queued(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+
+        panel._execute_command("PQC_KAT")
+
+        self.assertEqual(fake.sent[-1], "PQC_KAT")
+        self.assertEqual(panel.command_history[-1]["cmd"], "PQC_KAT")
+        self.assertEqual(panel.command_history[-1]["status"], "QUEUED")
+
+    def test_dashboard_help_contains_advanced_firmware_commands(self):
+        panel = dashboard.DashboardPanel()
+
+        panel._execute_command("HELP")
+        rendered = "\n".join(panel._console_help_lines())
+
+        self.assertTrue(panel.help_visible)
+        self.assertIn("PQC_INFO", rendered)
+        self.assertIn("I2C_SCAN", rendered)
+
+    def test_metric_tiles_render_board_cpu_ram_and_flash_state(self):
+        panel = dashboard.DashboardPanel()
+        panel._apply_hardware_response(
+            "STATUS",
+            {
+                "profile": "OBC-1U-LIMITED",
+                "cpu_mhz": "80",
+                "heap": "202444",
+                "min_heap": "198456",
+                "flash": "4194304",
+                "elapsed_us": "15214",
+                "radio": "off",
+            },
+        )
+
+        tiles = {label: value for label, value, _detail, _color in panel._metric_tiles()}
+
+        self.assertTrue(tiles["CPU"].startswith("80 MHz "))
+        self.assertIn("%", tiles["CPU"])
+        self.assertIn("KB livre", tiles["RAM"])
+        self.assertEqual(tiles["DISCO"], "4.0 MB")
+        self.assertIn("HOST", tiles)
+        self.assertIn("CHECK", tiles)
+
+    def test_dashboard_draws_in_projector_target_resolutions(self):
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            for width, height in ((1920, 1080), (1366, 768)):
+                dashboard.WIDTH, dashboard.HEIGHT = width, height
+                surface = pygame.Surface((width, height), pygame.SRCALPHA)
+                earth = dashboard.Earth()
+                satellite = dashboard.Satellite(earth)
+                panel = dashboard.DashboardPanel()
+                panel._execute_command("INJECT_FAULT")
+
+                panel.draw(surface, 0.5, satellite)
+                panel.draw_satellite_lock(surface, 0.5)
+                nebula = dashboard.Nebula()
+                nebula.draw(surface, 0.5)
+                first_cache = nebula.surface_cache
+                nebula.draw(surface, 0.7)
+
+                self.assertIs(nebula.surface_cache, first_cache)
+                self.assertEqual(surface.get_size(), (width, height))
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
 
     def test_pqc_info_response_updates_label_and_exportable_metrics(self):
         panel = dashboard.DashboardPanel()
@@ -246,16 +380,92 @@ class DashboardCommandTests(unittest.TestCase):
                 "elapsed_us": "11",
                 "profile": "BASELINE",
                 "radio": "off",
+                "pk": "800",
+                "sk": "1632",
+                "ct": "768",
+                "ss": "32",
             },
         )
 
         self.assertEqual(panel.pqc_algorithm, "ML-KEM-512 (READY)")
         self.assertEqual(panel.hardware_samples[-1]["source_command"], "PQC_INFO")
         self.assertEqual(panel.hardware_samples[-1]["pqc_backend"], "mlkem-native")
+        self.assertEqual(panel.hardware_samples[-1]["pqc"]["pk"], 800)
+        self.assertEqual(panel.hardware_samples[-1]["pqc"]["pqc_status"], "ready")
         data = panel._build_export_document()
         self.assertEqual(data["config"]["pqc_target"], "ML-KEM-512")
         self.assertEqual(data["config"]["pqc_backend"], "mlkem-native")
         self.assertEqual(data["config"]["pqc_status"], "ready")
+        self.assertEqual(data["metrics"]["cpu"]["kind"], "observed_command_active_time")
+        self.assertGreaterEqual(data["hardware_samples"][-1]["cpu_load_pct"], 0)
+
+    def test_pqc_bench_response_exports_structured_metrics_without_secrets(self):
+        panel = dashboard.DashboardPanel()
+        panel.serial_connected = True
+
+        panel._apply_hardware_response(
+            "PQC_BENCH 5",
+            {
+                "n": "5",
+                "ok": "5",
+                "key_match": "1",
+                "keygen_avg_us": "10101",
+                "encap_avg_us": "11778",
+                "decap_avg_us": "15214",
+                "elapsed_us": "187371",
+                "heap": "202444",
+                "min_heap": "198456",
+            },
+        )
+
+        sample = panel.hardware_samples[-1]
+        self.assertEqual(sample["source_command"], "PQC_BENCH")
+        self.assertEqual(sample["pqc"]["n"], 5)
+        self.assertEqual(sample["pqc"]["key_match"], 1)
+        self.assertEqual(sample["pqc"]["keygen_avg_us"], 10101)
+        self.assertNotIn("shared_secret", json.dumps(sample))
+
+    def test_pqc_ciphertext_fault_exports_key_confirmation_result(self):
+        panel = dashboard.DashboardPanel()
+        panel.serial_connected = True
+
+        panel._apply_hardware_response(
+            "PQC_FAULT 0 0x01 CONFIRM",
+            {
+                "op": "ciphertext_fault",
+                "target": "CIPHERTEXT",
+                "result": "PROTOCOL_REJECT",
+                "confirmation": "HMAC-SHA256",
+                "key_match": "0",
+                "key_confirmed": "0",
+                "tag_match": "0",
+                "tag_ready": "1",
+                "byte_index": "0",
+                "bit_mask": "0x01",
+                "ct_crc_before": "0x11111111",
+                "ct_crc_after": "0x22222222",
+                "ss_enc_crc32": "0x33333333",
+                "ss_dec_crc32": "0x44444444",
+                "tag_enc_crc32": "0x55555555",
+                "tag_dec_crc32": "0x66666666",
+                "keygen_us": "1000",
+                "encap_us": "1100",
+                "decap_us": "1200",
+                "confirm_us": "130",
+                "elapsed_us": "3500",
+                "heap": "202444",
+            },
+        )
+
+        sample = panel.hardware_samples[-1]
+        self.assertEqual(sample["source_command"], "PQC_FAULT")
+        self.assertEqual(sample["pqc"]["result"], "PROTOCOL_REJECT")
+        self.assertEqual(sample["pqc"]["confirmation"], "HMAC-SHA256")
+        self.assertEqual(sample["pqc"]["key_confirmed"], 0)
+        self.assertEqual(sample["pqc"]["tag_match"], 0)
+        self.assertEqual(sample["pqc"]["ct_crc_after"], "0x22222222")
+        self.assertEqual(sample["pqc"]["confirm_us"], 130)
+        self.assertNotIn("pqc_ss", json.dumps(sample))
 
     def test_run_battery_pairs_none_and_crc32_with_same_fault_ids(self):
         panel = dashboard.DashboardPanel()
@@ -282,6 +492,8 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(data["events"][0]["campaign_run_id"], "battery-001")
         self.assertEqual(data["events"][0]["campaign_trial_id"], 1)
         self.assertEqual(data["events"][3]["campaign_trial_id"], 1)
+        self.assertEqual(data["metrics"]["checksum"]["events"], 3)
+        self.assertEqual(data["metrics"]["checksum"]["detection_rate_pct"], 100.0)
 
     def test_multiple_batteries_have_distinct_run_ids(self):
         panel = dashboard.DashboardPanel()
@@ -292,6 +504,49 @@ class DashboardCommandTests(unittest.TestCase):
 
         run_ids = [event.campaign_run_id for event in panel.experiment_events]
         self.assertEqual(run_ids, ["battery-001", "battery-001", "battery-002", "battery-002"])
+
+    def test_demo_runs_ab_campaign_with_same_faults_and_exportable_overlay(self):
+        panel = dashboard.DashboardPanel()
+        panel.export_session = lambda log_dir=dashboard.DEFAULT_LOG_DIR: Path("demo.json")
+
+        panel._execute_command("DEMO 3")
+        for _ in range(20):
+            panel.update(dashboard.DEMO_FAULT_INTERVAL_SECONDS)
+
+        events = panel.experiment_events
+        self.assertEqual(len(events), 6)
+        self.assertEqual(panel.demo_state, "RESULTS")
+        self.assertEqual(panel.demo_summary["attempts"], 3)
+        self.assertEqual(panel.demo_summary["none_silent"], 3)
+        self.assertEqual(panel.demo_summary["crc_detected"], 3)
+        self.assertEqual(panel.last_export_path, Path("demo.json"))
+        for index in range(3):
+            self.assertEqual(events[index].guard, "NONE")
+            self.assertEqual(events[index + 3].guard, "CRC32")
+            self.assertEqual(events[index].byte_index, events[index + 3].byte_index)
+            self.assertEqual(events[index].bit_mask, events[index + 3].bit_mask)
+
+        data = panel._build_export_document()
+        self.assertEqual(data["demo"]["summary"]["crc_detection_rate_pct"], 100.0)
+
+    def test_demo_pause_resume_and_stop_do_not_delete_data(self):
+        panel = dashboard.DashboardPanel()
+        panel.export_session = lambda log_dir=dashboard.DEFAULT_LOG_DIR: Path("demo.json")
+
+        panel._execute_command("DEMO 2")
+        panel.update(dashboard.DEMO_FAULT_INTERVAL_SECONDS)
+        panel._execute_command("DEMO_PAUSE")
+        count_after_pause = len(panel.experiment_events)
+        panel.update(dashboard.DEMO_FAULT_INTERVAL_SECONDS * 4)
+        self.assertEqual(len(panel.experiment_events), count_after_pause)
+
+        panel._execute_command("DEMO_RESUME")
+        panel.update(dashboard.DEMO_FAULT_INTERVAL_SECONDS)
+        self.assertGreaterEqual(len(panel.experiment_events), count_after_pause)
+        panel._execute_command("DEMO_STOP")
+
+        self.assertEqual(panel.demo_state, "STOPPED")
+        self.assertGreater(len(panel.experiment_events), 0)
 
 
 if __name__ == "__main__":

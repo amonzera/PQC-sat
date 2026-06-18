@@ -13,15 +13,27 @@ O repositório contém hoje:
 - comparação didática entre payload sem guardião e payload com CRC32;
 - integração serial ESP32/notebook para comandos de bancada da Wisdom;
 - backend ML-KEM-512 real no firmware, usando `mlkem-native` v1.1.0;
-- medições iniciais de ML-KEM-512 em `BASELINE` e `OBC-1U-LIMITED`;
+- medições de ML-KEM-512 até `PQC_BENCH 100` em `BASELINE` e
+  `OBC-1U-LIMITED`;
+- injeção manual de bit-flip em ciphertext ML-KEM com confirmação
+  HMAC-SHA256 da chave derivada;
+- modo `DEMO` A/B cronometrado, com pausa, retomada, parada, overlay calculado
+  e exportação JSON;
+- splash inicial opcional, autosave no encerramento, métricas superiores de
+  CPU/RAM/flash/host e testes headless para 1920x1080 e 1366x768;
+- roteiro de apresentação com cinco slides, sequência de demo e limites
+  científicos;
 - uma proposta acadêmica em DOCX;
-- um roadmap e especificações para as próximas etapas.
+- um roadmap consolidado e checklist final para validações físicas pendentes.
 
 O dashboard não executa ML-KEM localmente; ele consulta a placa via
-`PQC_STATUS`/`PQC_INFO`. O guardião CRC32 já existe para o experimento de
-payload, e a criptografia pós-quântica real existe no firmware como comando de
-bancada. A interface identifica o estado retornado pela placa e mantém
-`GUARD: NONE` ou `GUARD: CRC32` para o experimento de payload.
+`PQC_STATUS`/`PQC_INFO` e exporta as respostas `PQC_*` como métricas. O
+guardião CRC32 já existe para o experimento de payload, e a criptografia
+pós-quântica real existe no firmware como comando de bancada, incluindo
+`PQC_FAULT index mask [CONFIRM|NONE]` para corromper ciphertext e observar
+`KEY_MISMATCH` ou `PROTOCOL_REJECT`. A interface identifica o estado retornado
+pela placa e mantém `GUARD: NONE` ou `GUARD: CRC32` para o experimento de
+payload.
 
 A primeira integração real com a placa está em `firmware/`,
 `tools/serial_console.py` e no modo serial do `dashboard.py`: ela valida
@@ -87,6 +99,12 @@ Para desenvolvimento sem placa, use explicitamente:
 python3 dashboard.py --simulated
 ```
 
+Para testes automatizados ou captura direta sem a tela inicial curta:
+
+```bash
+python3 dashboard.py --simulated --no-splash
+```
+
 Use `Ctrl+Q` para encerrar.
 
 ## Integração ESP32 inicial
@@ -147,94 +165,113 @@ V1|request_id|RESULT|OK|key=value
 ```
 
 O firmware mantém comandos recebidos curtos; o parser do host aceita respostas
-de até 512 caracteres para acomodar `PQC_INFO` e helps de bancada.
+de até 1024 caracteres para acomodar `PQC_INFO`, `PQC_FAULT` e helps de
+bancada.
 
 ## Comandos do dashboard
 
 | Comando | Comportamento atual |
 |---|---|
-| `INJECT_FAULT` | Aplica bit-flip determinístico no payload sem guardião; payload alterado aceito vira `SILENT`. |
-| `BIT_FLIP [index mask]` | Aplica bit-flip manual, por exemplo `BIT_FLIP 0 0x01`. |
+| `INJECT_FAULT` | Aplica bit-flip determinístico usando o guardião ativo (`NONE` ou `CRC32`). |
+| `BIT_FLIP [index mask]` | Aplica bit-flip manual usando o guardião ativo, por exemplo `BIT_FLIP 0 0x01`. |
+| `CHECKSUM ON\|OFF\|TOGGLE\|STATUS` | Liga/desliga o guardião CRC32 do fluxo manual. |
+| `GUARD NONE\|CRC32` | Define explicitamente o guardião ativo. |
 | `PQC_STATUS` | Consulta `PQC_INFO` quando a placa está online; sem placa, informa pendência local. |
-| `CRC_CHECK` | Aplica bit-flip e compara CRC32 real; divergência vira `DETECTED_GUARD`. |
+| `CRC_CHECK` | Atalho que aplica uma tentativa forçada com CRC32; divergência vira `DETECTED_GUARD`. |
 | `EXPORT_JSON` | Salva a sessão atual em `logs/` com eventos, resumo e métricas de hardware. |
 | `SAVE_SESSION` | Alias de `EXPORT_JSON`. |
 | `RUN_BATTERY n` | Executa bateria A/B com `n` tentativas por cenário, reaplica os mesmos fault specs e exporta JSON. |
+| `DEMO [n]` | Executa campanha A/B visual cronometrada com overlay calculado. |
+| `DEMO_PAUSE\|DEMO_RESUME` | Pausa ou retoma o modo apresentação. |
+| `DEMO_STOP\|DEMO_RESTART` | Para sem apagar dados ou reinicia a demo com a mesma seed. |
 | `RESET_SESSION` | Zera contadores e reinicia a seed da campanha. |
-| `HELP` | Exibe uma lista única com os comandos mais relevantes da demonstração. |
+| `HELP` | Exibe a ajuda avançada do terminal textual do painel. |
 
 Os resultados desses comandos saem de bytes antes/depois e do CRC32, não de
 probabilidades. O backend PQC real está instalado no firmware como comando de
-bancada, mas os comandos técnicos `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`,
-`PQC_DECAP` e `PQC_BENCH` ficam fora do `HELP` visual da apresentação.
+bancada. Os comandos técnicos `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`,
+`PQC_DECAP`, `PQC_FAULT`, `PQC_BENCH`, inventário e debug não viram botões da
+apresentação, mas podem ser digitados no terminal textual do painel quando a
+placa está conectada.
 
 ## Comandos da demonstração ao vivo
 
-O `HELP` do dashboard não é dividido por menus. Ele mostra uma lista única,
-curta e voltada para a apresentação:
+O painel direito tem blocos clicáveis para os comandos centrais da
+apresentação. O terminal textual continua disponível abaixo dos blocos para
+comandos avançados, inclusive comandos fora do escopo visual da demo:
 
-| Comando | Uso na demonstração |
+| Bloco/comando | Uso na demonstração |
 |---|---|
-| `HELP` | Mostra a lista única de comandos. |
 | `PING` | Testa a comunicação com a placa. |
 | `STATUS` | Mostra CPU, heap e rádio. |
-| `TELEMETRY` | Atualiza sensores rápidos. |
-| `SENSOR_READ ACCEL` | Demonstra movimento da placa. |
-| `SENSOR_READ TEMP_HUM` | Lê temperatura e umidade. |
-| `SENSOR_READ APDS` | Lê luz e proximidade. |
+| `TELEM` / `TELEMETRY` | Atualiza sensores rápidos. |
+| `PQC` / `PQC_STATUS` | Mostra alvo, backend e estado PQC sem afirmar criptografia ativa. |
+| `DEMO` | Executa a apresentação A/B automatizada. |
+| `PAUSA` / `DEMO_PAUSE` | Pausa a apresentação A/B. |
+| `CHK ON` / `CHECKSUM ON` | Liga o guardião CRC32 para as próximas falhas manuais. |
+| `CHK OFF` / `CHECKSUM OFF` | Desliga o guardião e volta ao cenário sem proteção. |
+| `FALHA` / `INJECT_FAULT` | Injeta falha determinística respeitando o guardião ativo. |
+| `CRC32` / `CRC_CHECK` | Demonstra uma tentativa forçada com detecção real por CRC32. |
+| `BATERIA` / `RUN_BATTERY 5` | Executa bateria A/B curta e exporta JSON. |
+| `EXPORT` / `EXPORT_JSON` | Salva a sessão atual em JSON. |
 | `OLED STANDBY` | Restaura o ícone no display. |
-| `LED TEST` | Testa o indicador principal. |
-| `LED GREEN` | Liga o indicador em verde. |
-| `LED OFF` | Apaga o indicador. |
+| `LED GREEN` | Liga o indicador principal em verde. |
 | `RGB TEST` | Executa ciclo RGB. |
-| `RGB 0 255 0` | Mostra uma cor RGB livre. |
-| `RGB OFF` | Apaga o RGB. |
-| `BARGRAPH TEST` | Anima LEDs de porcentagem. |
 | `BARGRAPH 75` | Mostra progresso visual em 75%. |
-| `INJECT_FAULT` | Injeta falha determinística sem guardião. |
 | `BIT_FLIP [i m]` | Inverte um bit escolhido manualmente. |
-| `CRC_CHECK` | Demonstra detecção real por CRC32. |
-| `EXPORT_JSON` | Salva a sessão atual em JSON. |
 | `SAVE_SESSION` | Alias de exportação. |
-| `RUN_BATTERY n` | Executa bateria A/B e exporta JSON. |
-| `PQC_STATUS` | Mostra alvo, backend e estado PQC sem afirmar criptografia ativa. |
 | `RESET_SESSION` | Zera a sessão da demonstração. |
+| `HELP` | Mostra ajuda completa do terminal avançado no painel. |
 
 Comandos de bancada, inventário, debug e expansão ficam centralizados em
 [`hardware_command_reference.md`](hardware_command_reference.md). Eles podem
-ser usados pelo `tools/serial_console.py`, mas não aparecem como comandos da
-demonstração visual.
+ser usados pelo `tools/serial_console.py` ou digitados no terminal textual do
+dashboard; eles não aparecem como blocos clicáveis da demonstração visual.
+
+Durante a animação, a faixa superior central mostra métricas básicas e
+experimentais: CPU em MHz mais `% ativo` observado na janela móvel de 5s, RAM
+livre, flash como disco, memória do processo host, FPS, perfil operacional,
+rádio, tempo do último comando, tempos médios PQC e detecção/overhead de
+checksum. Sem telemetria real, a faixa mostra valores pendentes em vez de
+preencher números artificiais.
+Respostas `PQC_*` também entram no JSON como métricas estruturadas, incluindo
+tempos médios, KAT, `key_match`, `key_confirmed`, `tag_match`, tamanhos e CRCs
+curtos, sem exportar segredos completos.
 
 ## Próximas etapas
 
 Estado atual:
 
-- Etapas 01, 02 e 03: concluídas no código; os markdowns dessas etapas foram
-  removidos para não duplicar a fonte de verdade.
-- Etapa 04/05: funcionais para Wisdom, bridge serial, `FAULT` com CRC32 e
-  ML-KEM-512 real via `mlkem-native` v1.1.0, commit `d2cae2b`; medição
-  inicial feita em `BASELINE` e `OBC-1U-LIMITED`.
-- Etapa 06: parcial, com CRC32 real e `RUN_BATTERY` A/B; falta transformar a
-  bateria em fluxo visual de apresentação com overlay calculado.
+- Etapas 01 a 07: concluídas no código e consolidadas no `ROADMAP.md`; os
+  markdowns dessas etapas foram removidos para não duplicar a fonte de verdade.
+- Etapa 04: validada em hardware com firmware gravado, `PQC_KAT`,
+  `PQC_FAULT`, `PQC_BENCH 100` em `BASELINE` e `OBC-1U-LIMITED`, payload
+  `FAULT CRC32` e OLED standby.
+- Etapa 06: funcional para payload com `CHECKSUM ON/OFF`, `GUARD NONE/CRC32`,
+  CRC32 real, overhead do guardião no JSON, `RUN_BATTERY` A/B, `PQC_FAULT` em
+  ciphertext ML-KEM com confirmação HMAC-SHA256 e exportação JSON de métricas
+  PQC.
+- Etapa 07: funcional com `DEMO [n]`, pausa, retomada, parada, reinício,
+  snapshots A/B, overlay derivado dos eventos e exportação JSON.
+- Etapa 08: implementada no software com `--no-splash`, splash opcional,
+  autosave no fechamento, cleanup preservando traceback, cache de superfícies,
+  métricas host, testes headless de resoluções e roteiro em
+  `APRESENTACAO_ROTEIRO.md`.
 
 Próximos cortes, nesta ordem:
 
-1. Etapa 06: exportar métricas PQC no JSON da campanha sem segredos completos.
-2. Etapa 06: expandir a radiação simulada manual para bit-flips em payload e,
-   quando o KEM estiver pronto, ciphertext, mantendo checksum ativável ou
-   desativável.
-3. Etapa 06/07: transformar `RUN_BATTERY` em fluxo visual de apresentação com
-   pausa, parada e overlay calculado.
-4. Etapa 04/08: executar bateria PQC prolongada, validar projetor, roteiro e
-   robustez final.
+1. Validar fisicamente projetor, porta serial e campanha prolongada de 30
+   minutos na sala/equipamento da apresentação.
 
-Validação real em placa após upload: `PQC_KAT` retornou `kat=pass` com
-`ss_crc32=0xD9DA8D6C`; `PQC_DECAP` retornou `key_match=1`; `PQC_BENCH 5`
-em `BASELINE` retornou `keygen_avg_us=3369`, `encap_avg_us=3878` e
-`decap_avg_us=5013`; `PQC_BENCH 5` em `OBC-1U-LIMITED` retornou
-`keygen_avg_us=10101`, `encap_avg_us=11778` e `decap_avg_us=15214`. Nenhum
-comando imprime chave privada, segredo compartilhado completo ou material
-suficiente para reconstruir a sessão.
+Validação real em placa após upload em 2026-06-18: `PQC_KAT` retornou
+`kat=pass` com `ss_crc32=0xD9DA8D6C`; `PQC_FAULT 0 0x01 CONFIRM` retornou
+`PROTOCOL_REJECT`; `PQC_FAULT 0 0x01 NONE` retornou `KEY_MISMATCH`;
+`PQC_BENCH 100` em `BASELINE` retornou `ok=100`, `keygen_avg_us=3301`,
+`encap_avg_us=3864`, `decap_avg_us=4988`; `PQC_BENCH 100` em
+`OBC-1U-LIMITED` retornou `ok=100`, `keygen_avg_us=10045`,
+`encap_avg_us=11769`, `decap_avg_us=15194`; `FAULT CRC32 ... 0 0x01`
+retornou `DETECTED_GUARD`. Nenhum comando imprime chave privada, segredo
+compartilhado completo ou material suficiente para reconstruir a sessão.
 
 ## Estrutura
 
@@ -246,9 +283,10 @@ suficiente para reconstruir a sessão.
 | `tests/` | Testes automatizados do protocolo serial Python. |
 | `hardware_blackboard_wisdom.md` | Inventário e procedimento de bancada da placa RoboCore Wisdom. |
 | `hardware_command_reference.md` | Referência única de comandos completos de hardware/bancada. |
+| `APRESENTACAO_ROTEIRO.md` | Roteiro de 20 minutos, slides, sequência da demo e limites. |
 | `projeto_final_pqc_esp32_cubesat.docx` | Proposta acadêmica formal. |
 | `ROADMAP.md` | Plano consolidado, critérios e ordem recomendada. |
-| `etapa_04_*.md` a `etapa_08_*.md` | Especificações pendentes de implementação por etapa. |
+| `etapa_08_*.md` | Checklist de validações físicas finais da etapa 8. |
 | `agents.md` | Regras e contexto para agentes de IA. |
 | `requirements.txt` | Dependência reproduzível do dashboard. |
 

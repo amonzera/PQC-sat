@@ -3,9 +3,16 @@
 Este arquivo concentra as possibilidades completas de comunicacao com a
 BlackBoard Wisdom pelo protocolo serial `V1`.
 
-Durante a demonstracao ao vivo, o dashboard deve expor apenas comandos ligados
-ao enredo visual do projeto. Comandos de inventario, bancada, debug e expansao
-ficam documentados aqui para desenvolvimento, testes e manutencao.
+Durante a demonstracao ao vivo, os blocos clicaveis do dashboard devem expor
+apenas comandos ligados ao enredo visual do projeto. Comandos de inventario,
+bancada, debug e expansao ficam documentados aqui para desenvolvimento, testes
+e manutencao; eles podem ser enviados pelo terminal textual avancado do painel
+ou pelo console `tools/serial_console.py`.
+
+Comandos locais do dashboard, como `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`,
+`DEMO_STOP`, `DEMO_RESTART`, `RUN_BATTERY`, `CHECKSUM` e `EXPORT_JSON`, não
+são comandos do firmware. Eles orquestram a apresentação, geram eventos locais
+e podem encaminhar comandos seriais quando a placa está conectada.
 
 ## Protocolo
 
@@ -40,6 +47,7 @@ python3 tools/serial_console.py --commands
 | `PING` | `PING` | Confirma que a placa esta respondendo. |
 | `STATUS` | `STATUS` | Mostra perfil, CPU, heap, flash e radio. |
 | `TELEMETRY` | `TELEMETRY` | Atualiza telemetria real da Wisdom no painel. |
+| `DEMO` | `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`, `DEMO_STOP`, `DEMO_RESTART` | Comandos locais do dashboard para executar a apresentação A/B cronometrada. |
 | `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Comando serial tecnico usado para validar bit-flip e CRC32 na placa. No dashboard, use `INJECT_FAULT` e `CRC_CHECK`. |
 | `SENSOR_READ` | `SENSOR_READ TEMP_HUM` | Mostra temperatura e umidade. |
 | `SENSOR_READ` | `SENSOR_READ ACCEL` | Mostra movimento/orientacao pelo acelerometro. |
@@ -51,10 +59,11 @@ python3 tools/serial_console.py --commands
 
 ## Comandos PQC de bancada
 
-Estes comandos ainda **não** devem aparecer no `HELP` do dashboard. Eles
-existem no firmware como superfície técnica para medir ML-KEM-512 na Wisdom.
-O backend usado é `mlkem-native` v1.1.0, commit `d2cae2b`, licença
-`Apache-2.0 OR ISC OR MIT`, em build C-only para `MLK_CONFIG_PARAMETER_SET=512`.
+Estes comandos não devem virar blocos clicáveis da apresentação. Eles existem
+no firmware como superfície técnica para medir e auditar ML-KEM-512 na Wisdom,
+e podem aparecer no `HELP` avançado do terminal textual. O backend usado é
+`mlkem-native` v1.1.0, commit `d2cae2b`, licença `Apache-2.0 OR ISC OR MIT`,
+em build C-only para `MLK_CONFIG_PARAMETER_SET=512`.
 
 | Comando | Uso | Estado atual |
 |---|---|---|
@@ -63,7 +72,8 @@ O backend usado é `mlkem-native` v1.1.0, commit `d2cae2b`, licença
 | `PQC_KEYGEN` | `PQC_KEYGEN` | Gera par ML-KEM-512, armazena na RAM e retorna tempo/heap/digest curto da chave pública. |
 | `PQC_ENCAP` | `PQC_ENCAP` | Encapsula usando chave pública armazenada e retorna tempo, digest curto do ciphertext e digest curto do segredo. |
 | `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e retorna `key_match` sem imprimir segredo completo. |
-| `PQC_BENCH` | `PQC_BENCH n` | Executa `n` rodadas keygen/encap/decap; `n` aceito de 1 a 20. |
+| `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Aplica bit-flip em ciphertext ML-KEM real e testa confirmação HMAC-SHA256 da chave derivada. |
+| `PQC_BENCH` | `PQC_BENCH n` | Executa `n` rodadas keygen/encap/decap; `n` aceito de 1 a 100. |
 
 Medição registrada em 2026-06-17:
 
@@ -73,6 +83,17 @@ Medição registrada em 2026-06-17:
 | `OBC-1U-LIMITED` 80 MHz | `PQC_INFO` | `pqc_status=ready`, `pk=800`, `sk=1632`, `ct=768`, `ss=32`, `elapsed_us=24697`, `heap=202444`, `min_heap=198456`, `flash=4194304` |
 | `OBC-1U-LIMITED` 80 MHz | `PQC_KAT` | `kat=pass`, `key_match=1`, `ss_crc32=0xD9DA8D6C`, `elapsed_us=39270` |
 | `OBC-1U-LIMITED` 80 MHz | `PQC_BENCH 5` | `keygen_avg_us=10101`, `encap_avg_us=11778`, `decap_avg_us=15214`, `elapsed_us=187371`, `heap=202444`, `min_heap=198456` |
+
+Validação pós-upload registrada em 2026-06-18:
+
+| Perfil | Comando | Resultado |
+|---|---|---|
+| `BASELINE` 240 MHz | `PQC_KAT` | `kat=pass`, `key_match=1`, `ss_crc32=0xD9DA8D6C`, `elapsed_us=14117` |
+| `BASELINE` 240 MHz | `PQC_FAULT 0 0x01 CONFIRM` | `result=PROTOCOL_REJECT`, `confirmation=HMAC-SHA256`, `key_match=0`, `tag_ready=1`, `confirm_us=960`, `elapsed_us=46579` |
+| `BASELINE` 240 MHz | `PQC_FAULT 0 0x01 NONE` | `result=KEY_MISMATCH`, `confirmation=NONE`, `key_match=0`, `elapsed_us=35222` |
+| `BASELINE` 240 MHz | `PQC_BENCH 100` | `ok=100`, `keygen_avg_us=3301`, `encap_avg_us=3864`, `decap_avg_us=4988`, `elapsed_us=1217337`, `heap=201512`, `min_heap=197624` |
+| `OBC-1U-LIMITED` 80 MHz | `PQC_BENCH 100` | `ok=100`, `keygen_avg_us=10045`, `encap_avg_us=11769`, `decap_avg_us=15194`, `elapsed_us=3706253`, `heap=201512`, `min_heap=197624` |
+| `OBC-1U-LIMITED` 80 MHz | `FAULT CRC32 5051432D534154 0 0x01` | `result=DETECTED_GUARD`, `crc_before=0xDFFEC3A1`, `crc_after=0x7989C815`, `elapsed_us=11` |
 
 ## Comandos completos de bancada
 
@@ -88,7 +109,8 @@ Medição registrada em 2026-06-17:
 | `PQC_KEYGEN` | `PQC_KEYGEN` | Gera par ML-KEM-512 real e mede tempo/heap. |
 | `PQC_ENCAP` | `PQC_ENCAP` | Encapsula para a chave pública armazenada. |
 | `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e compara segredo compartilhado. |
-| `PQC_BENCH` | `PQC_BENCH n` | Executa benchmark de bancada para `n` rodadas. |
+| `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Gera sessão ML-KEM, corrompe um byte do ciphertext, decapsula e reporta `KEY_MISMATCH`, `PROTOCOL_REJECT` ou `OK`, com CRCs curtos e tempos. |
+| `PQC_BENCH` | `PQC_BENCH n` | Executa benchmark de bancada para 1 a 100 rodadas. |
 | `PERIPHERALS` | `PERIPHERALS` | Detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C. |
 | `I2C_SCAN` | `I2C_SCAN` | Varre o barramento I2C em SDA21/SCL22. |
 | `FEATURES` | `FEATURES`, `FEATURES CORE`, `FEATURES I2C`, `FEATURES GPIO`, `FEATURES ANALOG`, `FEATURES EXPANSION` | Lista grupos de recursos conhecidos pela firmware. |
