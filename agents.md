@@ -78,17 +78,22 @@ implementar.
   `PROTOCOL_REJECT` por confirmação HMAC-SHA256 da chave derivada.
 - etapa 8 de software implementada com splash opcional, `--no-splash`,
   autosave no fechamento, cleanup preservando traceback, cache de superfícies
-  grandes, métrica `HOST` no topo e testes headless para 1920x1080 e
-  1366x768;
+  grandes, faixa superior reduzida a CPU/RAM/PQC/CHECK e testes headless para
+  1920x1080 e 1366x768;
+- telemetria automática desligada no dashboard; `TELEMETRY`, `PING`, LED, RGB,
+  bargraph, sensores e comandos de bancada ficam no HELP/terminal textual, não
+  como botões da apresentação;
+- aceitação hardware da etapa 8 validada em
+  `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json`, com 1.816,87 s,
+  77 registros, 0 falhas, 2 benchmarks PQC e demo headless OK;
 - roteiro de apresentação criado em `APRESENTACAO_ROTEIRO.md`, com cinco
   slides, sequência de demo, limites científicos e checklist pré-apresentação.
+- projetor/legibilidade confirmados pelo usuário em 2026-06-18 após ajuste de
+  botões e métricas do dashboard.
 
 ### Não implementado
-
-- validação física no projetor real;
-- campanha prolongada de 30 minutos antes da apresentação;
-- nova validação hardware se a permissão da porta serial estiver bloqueada no
-  equipamento final.
+Nenhuma etapa técnica de implementação permanece aberta para o MVP do
+seminário. Extensões futuras devem ficar fora da superfície principal da demo.
 
 ## 4. Stack
 
@@ -131,8 +136,9 @@ ML-KEM/FIPS 203.
 - Não mostre `ESP32 ONLINE`, `CRC ON` ou `ML-KEM ativo` sem evidência real.
 - O dashboard é a superfície da apresentação ao vivo. Mantenha como blocos
   clicáveis apenas comandos pertinentes ao roteiro visual e didático: falha
-  manual, checksum, telemetria essencial, exportação, bateria de demonstração e
-  controles visuais necessários. O terminal textual do painel pode encaminhar
+  manual, checksum, consulta essencial de estado, exportação, demo automatizada
+  e controles visuais necessários. O terminal textual
+  do painel pode encaminhar
   comandos avançados de firmware quando a placa estiver conectada, inclusive
   bancada, inventário, debug e PQC técnico, desde que isso não vire botão ou
   fluxo principal da apresentação.
@@ -147,6 +153,17 @@ ML-KEM/FIPS 203.
 - Trate `OBC-1U-LIMITED` como perfil experimental, não como especificação
   universal de CubeSat.
 - Compare medições limitadas com o baseline integral do ESP32.
+- Baterias longas na placa para consolidação final, aceite da apresentação ou
+  coleta de dados demorados não devem ser iniciadas pelo agente. O agente deve
+  indicar exatamente os comandos para o operador executar no terminal, os
+  resultados esperados e o arquivo JSON esperado; depois, quando o usuário
+  chamar o agente novamente, o agente deve analisar os logs/resultados gerados.
+  Smoke tests curtos podem ser executados pelo agente apenas quando forem
+  necessários e autorizados.
+  Para repetir o aceite longo deste projeto, indique ao operador:
+  `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 tools/stage8_acceptance.py --port /dev/ttyUSB0 --timeout 12 --duration 1800 --interval 30`.
+  O resumo esperado é `ok=true`, `failed=0`, `dashboard_demo_ok=true` e
+  `pqc_bench_runs=2`.
 - Preserve alterações locais do usuário que não pertençam à tarefa.
 
 Os tamanhos atuais são:
@@ -160,8 +177,8 @@ Os tamanhos atuais são:
 | `FONT_CMD` | 17 |
 | `FONT_PIXEL` / `FONT_LABEL` | 13 |
 
-Esses valores ainda precisam de validação em projetor. Não afirme
-legibilidade a cinco metros sem teste físico.
+Esses valores foram validados em projetor para a apresentação atual. Se a sala,
+resolução ou projetor mudarem, revalidar antes de afirmar legibilidade.
 
 ## 6. Modelo experimental obrigatório
 
@@ -210,7 +227,7 @@ compilação.
 
 ## 8. Próxima ordem de trabalho
 
-1. Validar fisicamente projetor, serial e campanha de 30 minutos.
-2. Atualizar relatório/slides finais com os resultados JSON medidos.
+1. Atualizar relatório/slides finais com os resultados JSON medidos.
+2. Ensaiar a apresentação sem reintroduzir comandos ruidosos nos botões.
 
 Última revisão: 2026-06-18.

@@ -45,10 +45,11 @@ RUN_SCHEMA_VERSION = "pqc-sat-run-v2"
 DEFAULT_LOG_DIR = Path("logs")
 SPLASH_SECONDS = 1.6
 TIMELINE_WINDOW = 16
-SERIAL_STARTUP_COMMANDS = ("PERIPHERALS", "OLED STANDBY", "TELEMETRY")
+SERIAL_STARTUP_COMMANDS = ("OLED STANDBY",)
 SERIAL_RECONNECT_DELAY = 1.5
 SERIAL_TIMEOUT_SECONDS = 5.0
-TELEMETRY_POLL_SECONDS = 1.0
+AUTO_TELEMETRY_ENABLED = False
+TELEMETRY_POLL_SECONDS = 30.0
 CPU_LOAD_WINDOW_SECONDS = 5.0
 DEMO_DEFAULT_ATTEMPTS = 5
 DEMO_FAULT_INTERVAL_SECONDS = 0.55
@@ -62,20 +63,14 @@ HELP_HINT_LINES = (
 COMMAND_BUTTONS = (
     ("DEMO", "DEMO"),
     ("PAUSA", "DEMO_PAUSE"),
-    ("PING", "PING"),
     ("STATUS", "STATUS"),
-    ("TELEM", "TELEMETRY"),
     ("PQC", "PQC_STATUS"),
     ("CHK ON", "CHECKSUM ON"),
     ("CHK OFF", "CHECKSUM OFF"),
     ("FALHA", "INJECT_FAULT"),
     ("CRC32", "CRC_CHECK"),
-    ("BATERIA", "RUN_BATTERY 5"),
     ("EXPORT", "EXPORT_JSON"),
     ("OLED", "OLED STANDBY"),
-    ("LED", "LED GREEN"),
-    ("RGB", "RGB TEST"),
-    ("BAR 75", "BARGRAPH 75"),
 )
 
 # --- Paleta de Cores ----------------------------------------------------------
@@ -1632,6 +1627,9 @@ class DashboardPanel:
         self._drain_serial_events()
 
     def _poll_telemetry(self, dt):
+        if not AUTO_TELEMETRY_ENABLED:
+            self.telemetry_poll_timer = 0.0
+            return
         if self.serial_client is None or not self.serial_connected:
             self.telemetry_poll_timer = 0.0
             return
@@ -2500,17 +2498,11 @@ class DashboardPanel:
         cpu_load = computed_cpu_load if self.cpu_active_window else (payload_cpu_load or 0.0)
         heap = _optional_int(state.get("heap"))
         min_heap = _optional_int(state.get("min_heap"))
-        flash = _optional_int(state.get("flash"))
-        elapsed = _optional_int(state.get("elapsed_us"))
-        host_rss = _process_rss_bytes()
-        host_fps = int(clock.get_fps())
 
         if self.serial_client is None:
             profile = "SIMULADO"
         else:
             profile = state.get("profile") or ("ONLINE" if self.serial_connected else "AGUARDANDO")
-
-        radio = state.get("radio") or "--"
 
         if cpu is None:
             cpu_value = f"-- {cpu_load:.0f}%"
@@ -2547,14 +2539,10 @@ class DashboardPanel:
             pqc_color = C_ACCENT_PURPLE
 
         return (
-            ("CPU", cpu_value, "ativo 5s", cpu_color),
+            ("CPU", cpu_value, str(profile), cpu_color),
             ("RAM", f"{_format_bytes(heap)} livre", ram_detail, C_ACCENT_GREEN if heap else C_ACCENT_ORANGE),
-            ("DISCO", _format_bytes(flash), "flash", C_ACCENT_CYAN if flash else C_ACCENT_ORANGE),
-            ("HOST", _format_bytes(host_rss), f"FPS {host_fps}", C_ACCENT_CYAN),
             ("PQC", pqc_value, pqc_detail, pqc_color),
             ("CHECK", checksum_value, checksum_detail, checksum_color),
-            ("PERFIL", str(profile), f"radio {str(radio).upper()}", C_ACCENT_PURPLE),
-            ("TEMPO", _format_elapsed(elapsed), "últ. cmd", C_ACCENT_CYAN if elapsed else C_TEXT_DIM),
         )
 
     def _draw_bottom_bar(self, surface, t):

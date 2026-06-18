@@ -14,9 +14,9 @@ cenários `NONE` e `CRC32`. O backend PQC real já está instalado na Wisdom com
 ML-KEM-512 e medição nos perfis `BASELINE` e `OBC-1U-LIMITED`. O firmware
 também executa bit-flip manual em ciphertext ML-KEM e classifica o efeito com
 comparação de segredos ou confirmação HMAC-SHA256 da chave derivada. O modo
-`DEMO` automatiza a apresentação A/B. A etapa 8 já tem fechamento de software,
-roteiro e material-base; a prioridade restante é validação física em projetor,
-porta serial da sala e campanha prolongada antes da apresentação.
+`DEMO` automatiza a apresentação A/B. A etapa 8 foi consolidada com
+fechamento de software, roteiro, material-base, aceitação serial, campanha
+prolongada e validação física de projetor/legibilidade confirmada pelo usuário.
 
 ## 2. Baseline auditado
 
@@ -50,8 +50,8 @@ projeto sem reconstruir decisões antigas:
 - 2026-06-18: dashboard ajustado para usar apenas blocos clicáveis ligados à
   apresentação; comandos de bancada ficaram no terminal textual e em
   `hardware_command_reference.md`.
-- 2026-06-18: métricas superiores do dashboard passaram a expor CPU, RAM
-  livre, flash, perfil, rádio e tempo do último comando perto da animação.
+- 2026-06-18: métricas superiores do dashboard foram enxugadas para a
+  apresentação e hoje expõem apenas CPU, RAM, PQC e checksum perto da animação.
 - 2026-06-18: a métrica de CPU passou a mostrar também `% ativo` em janela
   móvel de 5s, calculado por tempo de comando observado; a exportação JSON
   passou para `pqc-sat-run-v2` e inclui métricas agregadas de CPU, PQC e
@@ -73,21 +73,30 @@ projeto sem reconstruir decisões antigas:
   snapshots A/B e exportação JSON cronometrada.
 - 2026-06-18: Etapa 08 implementada no software com splash opcional,
   `--no-splash`, autosave no fechamento, cleanup com traceback preservado,
-  cache de superfícies grandes, métrica `HOST` na faixa superior, exportação
-  de métricas do processo e teste headless para 1920x1080 e 1366x768.
+  cache de superfícies grandes, faixa superior reduzida a CPU, RAM, PQC e
+  checksum, exportação de métricas do processo e teste headless para
+  1920x1080 e 1366x768.
 - 2026-06-18: criado `APRESENTACAO_ROTEIRO.md` com cinco slides, roteiro de
   20 minutos, sequência de comandos da demo, limites científicos e checklist
   pré-apresentação.
 - 2026-06-18: verificação final detectou a Wisdom em `/dev/ttyUSB0` como
-  CP2102N/Silicon Labs, mas a abertura da porta foi bloqueada por permissões
-  `root:dialout` (`crw-rw----`). A validação de comandos reais depende de
-  `sudo chmod 666 /dev/ttyUSB0` temporário ou de adicionar o usuário ao grupo
-  `dialout` e reiniciar a sessão.
+  CP2102N/Silicon Labs. Após liberação da porta, a aceitação de hardware da
+  etapa 8 passou com `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json`:
+  1.816,87 s de execução, 77 registros, 0 falhas, 60 comandos no long-run,
+  2 benchmarks PQC, 13 `DETECTED_GUARD` em payload CRC32 e demo headless do
+  dashboard com 5/5 falhas silenciosas em A e 5/5 detectadas em B.
+- 2026-06-18: polimento final de apresentação removeu polling automático de
+  `TELEMETRY`, reduziu os blocos clicáveis aos comandos centrais da demo e
+  manteve comandos de bancada no HELP/terminal textual.
+- 2026-06-18: criado `GUIA_DIDATICO_APRESENTACAO.md` como material completo
+  de estudo e condução da apresentação para público leigo em criptografia,
+  consolidando objetivo, passo a passo, resultados, comandos, limites e fala
+  sugerida.
 
 O dashboard já pode demonstrar `SILENT` versus `DETECTED_GUARD` em payload,
 executar `RUN_BATTERY` A/B, executar `DEMO` com overlay calculado e exportar
-sessões em JSON. A coleta técnica já existe; falta validar fisicamente o
-projetor, a serial no equipamento final e a campanha prolongada.
+sessões em JSON. A coleta técnica, a campanha prolongada e a validação de
+projetor/legibilidade já foram concluídas para a apresentação atual.
 
 ## 3. Gate 0 - protocolo experimental
 
@@ -239,13 +248,12 @@ linear rígida.
    base de coleta. A antiga Etapa 06 foi consolidada neste roadmap.
 2. Manter `DEMO` como campanha visual automatizada. A antiga Etapa 07 foi
    consolidada neste roadmap.
-3. [Etapa 08](etapa_08_polimento_final.md): robustez de software concluída;
-   validação física de projetor/30 minutos pendente.
+3. Etapa 08 consolidada neste roadmap: robustez de software, aceitação serial,
+   campanha de 30 minutos e projetor concluídos.
 
-Etapas 01 a 07 já estão implementadas e seus markdowns foram removidos. A
+Etapas 01 a 08 já estão implementadas e seus markdowns foram removidos. A
 trilha PQC agora possui backend real medido; a demo deve continuar separando
-dado medido, simulação e pendência. Permanece apenas o checklist físico da
-Etapa 08.
+dado medido, simulação e pendência.
 
 ### Trilha hardware
 
@@ -504,7 +512,7 @@ Implementado:
 
 ### Etapa 08 - fechamento
 
-Estado: **implementada no software; validação física pendente**.
+Estado: **implementada e validada em software, hardware e projetor**.
 
 Entregas:
 
@@ -514,19 +522,18 @@ Entregas:
 - resumo, auto-save no reset/fechamento e JSON versionado implementados;
 - tratamento de exceções com cleanup sem mascarar traceback implementado;
 - cache de superfícies grandes e métrica de memória/FPS do host implementados;
+- polling automático de `TELEMETRY` desligado no dashboard; telemetria fica
+  manual pelo terminal/HELP;
 - teste headless de layout em 1920x1080 e 1366x768 implementado;
+- runner `tools/stage8_acceptance.py` implementado para aceitação serial,
+  benchmark, campanha prolongada e demo headless com exportação JSON;
+- campanha prolongada validada por
+  `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json`;
+- projetor validado por confirmação do usuário em 2026-06-18, após ajuste
+  visual para reduzir botões e métricas;
 - roteiro de 20 minutos e base de até cinco slides em
   `APRESENTACAO_ROTEIRO.md`;
 - limitações científicas registradas no README, roadmap e roteiro.
-
-Pendências físicas:
-
-- teste prolongado de 30 minutos;
-- teste no projetor real;
-- demo hardware completa se a porta serial estiver acessível no equipamento
-  usado na apresentação.
-- permissão atual observada: `/dev/ttyUSB0` existe, mas está restrita ao grupo
-  `dialout`; o usuário da sessão não conseguiu abrir a porta sem sudo.
 
 Não use a expressão "nenhum crash possível". O critério correto é "nenhuma
 falha conhecida nos cenários testados".
@@ -535,12 +542,7 @@ falha conhecida nos cenários testados".
 
 ### Próximos cortes
 
-1. Validar `DEMO` em projetor, resolução e roteiro usando os dados já
-   coletados no hardware.
-2. Liberar ou corrigir permissão da porta serial no equipamento final e repetir
-   `PING`, `STATUS`, `PQC_INFO`, `PQC_KAT`, `PQC_FAULT` e `DEMO 5`.
-3. Executar uma campanha de 30 minutos e guardar o JSON gerado para planilha.
-4. Levar para o relatório/slides a distinção: checksum protege transporte,
+1. Levar para o relatório/slides a distinção: checksum protege transporte,
    confirmação de chave protege aceitação de sessão, e consumo de energia só
    será afirmado se houver medição externa.
 
@@ -577,9 +579,10 @@ falha conhecida nos cenários testados".
 - `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`;
 - medição de tempo e memória no dispositivo.
 
-O hardware e o modo `DEMO` sustentam a demonstração. A entrega final ainda
-depende de validação física em projetor, porta serial e campanha prolongada.
-O roteiro, a base de slides e os limites científicos já estão documentados em
+O hardware, a campanha prolongada, o projetor validado e o modo `DEMO`
+sustentam a demonstração.
+O guia didático, o roteiro, a base de slides e os limites científicos já estão
+documentados em `GUIA_DIDATICO_APRESENTACAO.md` e
 `APRESENTACAO_ROTEIRO.md`.
 
 ## 11. Referências técnicas para decisões

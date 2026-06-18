@@ -19,12 +19,15 @@ O repositório contém hoje:
   HMAC-SHA256 da chave derivada;
 - modo `DEMO` A/B cronometrado, com pausa, retomada, parada, overlay calculado
   e exportação JSON;
-- splash inicial opcional, autosave no encerramento, métricas superiores de
-  CPU/RAM/flash/host e testes headless para 1920x1080 e 1366x768;
+- splash inicial opcional, autosave no encerramento, métricas superiores
+  essenciais de CPU/RAM/PQC/checksum e testes headless para 1920x1080 e
+  1366x768;
 - roteiro de apresentação com cinco slides, sequência de demo e limites
   científicos;
+- guia didático completo para conduzir a apresentação com público leigo em
+  criptografia;
 - uma proposta acadêmica em DOCX;
-- um roadmap consolidado e checklist final para validações físicas pendentes.
+- um roadmap consolidado como histórico final das etapas implementadas.
 
 O dashboard não executa ML-KEM localmente; ele consulta a placa via
 `PQC_STATUS`/`PQC_INFO` e exporta as respostas `PQC_*` como métricas. O
@@ -202,9 +205,7 @@ comandos avançados, inclusive comandos fora do escopo visual da demo:
 
 | Bloco/comando | Uso na demonstração |
 |---|---|
-| `PING` | Testa a comunicação com a placa. |
 | `STATUS` | Mostra CPU, heap e rádio. |
-| `TELEM` / `TELEMETRY` | Atualiza sensores rápidos. |
 | `PQC` / `PQC_STATUS` | Mostra alvo, backend e estado PQC sem afirmar criptografia ativa. |
 | `DEMO` | Executa a apresentação A/B automatizada. |
 | `PAUSA` / `DEMO_PAUSE` | Pausa a apresentação A/B. |
@@ -212,12 +213,8 @@ comandos avançados, inclusive comandos fora do escopo visual da demo:
 | `CHK OFF` / `CHECKSUM OFF` | Desliga o guardião e volta ao cenário sem proteção. |
 | `FALHA` / `INJECT_FAULT` | Injeta falha determinística respeitando o guardião ativo. |
 | `CRC32` / `CRC_CHECK` | Demonstra uma tentativa forçada com detecção real por CRC32. |
-| `BATERIA` / `RUN_BATTERY 5` | Executa bateria A/B curta e exporta JSON. |
 | `EXPORT` / `EXPORT_JSON` | Salva a sessão atual em JSON. |
 | `OLED STANDBY` | Restaura o ícone no display. |
-| `LED GREEN` | Liga o indicador principal em verde. |
-| `RGB TEST` | Executa ciclo RGB. |
-| `BARGRAPH 75` | Mostra progresso visual em 75%. |
 | `BIT_FLIP [i m]` | Inverte um bit escolhido manualmente. |
 | `SAVE_SESSION` | Alias de exportação. |
 | `RESET_SESSION` | Zera a sessão da demonstração. |
@@ -227,13 +224,15 @@ Comandos de bancada, inventário, debug e expansão ficam centralizados em
 [`hardware_command_reference.md`](hardware_command_reference.md). Eles podem
 ser usados pelo `tools/serial_console.py` ou digitados no terminal textual do
 dashboard; eles não aparecem como blocos clicáveis da demonstração visual.
+Isso inclui `PING`, `TELEMETRY`, `RUN_BATTERY`, `LED`, `RGB`, `BARGRAPH`,
+sensores e comandos PQC de bancada.
 
 Durante a animação, a faixa superior central mostra métricas básicas e
-experimentais: CPU em MHz mais `% ativo` observado na janela móvel de 5s, RAM
-livre, flash como disco, memória do processo host, FPS, perfil operacional,
-rádio, tempo do último comando, tempos médios PQC e detecção/overhead de
-checksum. Sem telemetria real, a faixa mostra valores pendentes em vez de
-preencher números artificiais.
+experimentais essenciais: CPU em MHz mais `% ativo` observado na janela móvel
+de 5s, RAM livre, resumo PQC e detecção/overhead de checksum. Não há polling
+automático de `TELEMETRY`; `STATUS`, `PQC_STATUS` e comandos avançados são
+acionados manualmente pelo botão ou pelo terminal textual. Sem medição real, a
+faixa mostra valores pendentes em vez de preencher números artificiais.
 Respostas `PQC_*` também entram no JSON como métricas estruturadas, incluindo
 tempos médios, KAT, `key_match`, `key_confirmed`, `tag_match`, tamanhos e CRCs
 curtos, sem exportar segredos completos.
@@ -255,13 +254,15 @@ Estado atual:
   snapshots A/B, overlay derivado dos eventos e exportação JSON.
 - Etapa 08: implementada no software com `--no-splash`, splash opcional,
   autosave no fechamento, cleanup preservando traceback, cache de superfícies,
-  métricas host, testes headless de resoluções e roteiro em
-  `APRESENTACAO_ROTEIRO.md`.
+  métricas essenciais no topo, testes headless de resoluções, runner de aceitação em
+  `tools/stage8_acceptance.py` e roteiro em `APRESENTACAO_ROTEIRO.md`.
+  A aceitação de hardware passou em
+  `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json` com 1.816,87 s,
+  77 registros, 0 falhas, 2 benchmarks PQC e demo headless OK.
 
-Próximos cortes, nesta ordem:
-
-1. Validar fisicamente projetor, porta serial e campanha prolongada de 30
-   minutos na sala/equipamento da apresentação.
+Próximo corte: ensaiar a apresentação usando `GUIA_DIDATICO_APRESENTACAO.md`
+e `APRESENTACAO_ROTEIRO.md`, anexando os resultados JSON ao material final do
+seminário.
 
 Validação real em placa após upload em 2026-06-18: `PQC_KAT` retornou
 `kat=pass` com `ss_crc32=0xD9DA8D6C`; `PQC_FAULT 0 0x01 CONFIRM` retornou
@@ -283,10 +284,10 @@ compartilhado completo ou material suficiente para reconstruir a sessão.
 | `tests/` | Testes automatizados do protocolo serial Python. |
 | `hardware_blackboard_wisdom.md` | Inventário e procedimento de bancada da placa RoboCore Wisdom. |
 | `hardware_command_reference.md` | Referência única de comandos completos de hardware/bancada. |
+| `GUIA_DIDATICO_APRESENTACAO.md` | Explicação passo a passo, leiga e completa, do projeto e da demonstração. |
 | `APRESENTACAO_ROTEIRO.md` | Roteiro de 20 minutos, slides, sequência da demo e limites. |
 | `projeto_final_pqc_esp32_cubesat.docx` | Proposta acadêmica formal. |
 | `ROADMAP.md` | Plano consolidado, critérios e ordem recomendada. |
-| `etapa_08_*.md` | Checklist de validações físicas finais da etapa 8. |
 | `agents.md` | Regras e contexto para agentes de IA. |
 | `requirements.txt` | Dependência reproduzível do dashboard. |
 

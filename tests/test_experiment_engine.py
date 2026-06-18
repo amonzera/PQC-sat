@@ -316,7 +316,7 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertIn("PQC_INFO", rendered)
         self.assertIn("I2C_SCAN", rendered)
 
-    def test_metric_tiles_render_board_cpu_ram_and_flash_state(self):
+    def test_metric_tiles_render_core_presentation_metrics(self):
         panel = dashboard.DashboardPanel()
         panel._apply_hardware_response(
             "STATUS",
@@ -336,9 +336,32 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertTrue(tiles["CPU"].startswith("80 MHz "))
         self.assertIn("%", tiles["CPU"])
         self.assertIn("KB livre", tiles["RAM"])
-        self.assertEqual(tiles["DISCO"], "4.0 MB")
-        self.assertIn("HOST", tiles)
+        self.assertIn("PQC", tiles)
         self.assertIn("CHECK", tiles)
+        self.assertNotIn("DISCO", tiles)
+        self.assertNotIn("HOST", tiles)
+
+    def test_presentation_buttons_exclude_noisy_bench_commands(self):
+        commands = [command for _label, command in dashboard.COMMAND_BUTTONS]
+
+        self.assertIn("DEMO", commands)
+        self.assertIn("PQC_STATUS", commands)
+        self.assertIn("INJECT_FAULT", commands)
+        self.assertNotIn("TELEMETRY", commands)
+        self.assertNotIn("PING", commands)
+        self.assertNotIn("RGB TEST", commands)
+        self.assertNotIn("BARGRAPH 75", commands)
+
+    def test_dashboard_does_not_poll_telemetry_automatically(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+        fake.sent.clear()
+
+        for _ in range(40):
+            panel.update(dashboard.TELEMETRY_POLL_SECONDS)
+
+        self.assertNotIn("TELEMETRY", fake.sent)
 
     def test_dashboard_draws_in_projector_target_resolutions(self):
         old_size = (dashboard.WIDTH, dashboard.HEIGHT)

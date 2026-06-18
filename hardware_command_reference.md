@@ -40,22 +40,18 @@ Para listar apenas os comandos da demonstracao:
 python3 tools/serial_console.py --commands
 ```
 
-## Comandos usados na demonstracao
+## Comandos de apoio da demonstracao
 
 | Comando | Uso | Papel na demonstracao |
 |---|---|---|
-| `PING` | `PING` | Confirma que a placa esta respondendo. |
-| `STATUS` | `STATUS` | Mostra perfil, CPU, heap, flash e radio. |
-| `TELEMETRY` | `TELEMETRY` | Atualiza telemetria real da Wisdom no painel. |
+| `STATUS` | `STATUS` | Mostra perfil, CPU, heap, flash e radio sob demanda. |
 | `DEMO` | `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`, `DEMO_STOP`, `DEMO_RESTART` | Comandos locais do dashboard para executar a apresentação A/B cronometrada. |
 | `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Comando serial tecnico usado para validar bit-flip e CRC32 na placa. No dashboard, use `INJECT_FAULT` e `CRC_CHECK`. |
-| `SENSOR_READ` | `SENSOR_READ TEMP_HUM` | Mostra temperatura e umidade. |
-| `SENSOR_READ` | `SENSOR_READ ACCEL` | Mostra movimento/orientacao pelo acelerometro. |
-| `SENSOR_READ` | `SENSOR_READ APDS` | Mostra luz/proximidade pelo APDS-9960. |
 | `OLED` | `OLED STANDBY` | Restaura o icone robo-satelite no display. |
-| `LED` | `LED TEST`, `LED WHITE`, `LED RED`, `LED GREEN`, `LED BLUE`, `LED OFF` | Controla o indicador principal. |
-| `RGB` | `RGB TEST`, `RGB R G B`, `RGB OFF` | Controla o LED RGB para efeitos visuais. |
-| `BARGRAPH` | `BARGRAPH TEST`, `BARGRAPH 0`, `BARGRAPH 25`, `BARGRAPH 50`, `BARGRAPH 75`, `BARGRAPH 100` | Mostra progresso nos LEDs de porcentagem. |
+
+`PING`, `TELEMETRY`, sensores, LED, RGB e bargraph continuam disponíveis pelo
+HELP/terminal textual e pelo `tools/serial_console.py`, mas não devem aparecer
+como blocos clicáveis da apresentação para evitar ruído visual e serial.
 
 ## Comandos PQC de bancada
 
@@ -130,8 +126,8 @@ Validação pós-upload registrada em 2026-06-18:
 
 ## Politica de uso
 
-- Dashboard da apresentacao: somente comandos da secao "Comandos usados na
-  demonstracao".
+- Dashboard da apresentacao: somente comandos ligados ao roteiro visual
+  principal. Comandos de apoio e bancada ficam no HELP/terminal textual.
 - Bancada, debug e desenvolvimento: qualquer comando desta referencia pode ser
   enviado por `tools/serial_console.py`.
 - Comandos que acionam expansoes fisicas, como `RELAY` e `SERVO`, nao devem
