@@ -49,20 +49,30 @@ python3 tools/serial_console.py --commands
 | `RGB` | `RGB TEST`, `RGB R G B`, `RGB OFF` | Controla o LED RGB para efeitos visuais. |
 | `BARGRAPH` | `BARGRAPH TEST`, `BARGRAPH 0`, `BARGRAPH 25`, `BARGRAPH 50`, `BARGRAPH 75`, `BARGRAPH 100` | Mostra progresso nos LEDs de porcentagem. |
 
-## Comandos PQC planejados
+## Comandos PQC de bancada
 
 Estes comandos ainda **não** devem aparecer no `HELP` do dashboard. Eles
-entram no firmware apenas depois de o backend ML-KEM-512/Kyber512 compilar,
-passar vetor conhecido e reportar métricas na Wisdom.
+existem no firmware como superfície técnica para medir ML-KEM-512 na Wisdom.
+O backend usado é `mlkem-native` v1.1.0, commit `d2cae2b`, licença
+`Apache-2.0 OR ISC OR MIT`, em build C-only para `MLK_CONFIG_PARAMETER_SET=512`.
 
-| Comando | Uso previsto | Observação |
+| Comando | Uso | Estado atual |
 |---|---|---|
-| `PQC_INFO` | `PQC_INFO` | Variante, parâmetros, fonte, commit, licença, tamanhos e backend. |
-| `PQC_KAT` | `PQC_KAT` | Executa vetor conhecido e retorna status, tempo e métricas. |
-| `PQC_KEYGEN` | `PQC_KEYGEN` | Mede geração de chaves sem imprimir chave completa. |
-| `PQC_ENCAP` | `PQC_ENCAP` | Encapsula para chave pública de teste e retorna digest curto. |
-| `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext de teste e retorna digest curto. |
-| `PQC_BENCH` | `PQC_BENCH n` | Executa `n` iterações e retorna tempo, heap, heap mínimo e resets. |
+| `PQC_INFO` | `PQC_INFO` | Reporta backend, variante, commit, licença, tamanhos `pk=800`, `sk=1632`, `ct=768`, `ss=32`, CPU, heap, flash, perfil e tempo. |
+| `PQC_KAT` | `PQC_KAT` | Executa vetor determinístico do projeto; validado em placa com `kat=pass` e `ss_crc32=0xD9DA8D6C`. |
+| `PQC_KEYGEN` | `PQC_KEYGEN` | Gera par ML-KEM-512, armazena na RAM e retorna tempo/heap/digest curto da chave pública. |
+| `PQC_ENCAP` | `PQC_ENCAP` | Encapsula usando chave pública armazenada e retorna tempo, digest curto do ciphertext e digest curto do segredo. |
+| `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e retorna `key_match` sem imprimir segredo completo. |
+| `PQC_BENCH` | `PQC_BENCH n` | Executa `n` rodadas keygen/encap/decap; `n` aceito de 1 a 20. |
+
+Medição registrada em 2026-06-17:
+
+| Perfil | Comando | Resultado |
+|---|---|---|
+| `BASELINE` 240 MHz | `PQC_BENCH 5` | `keygen_avg_us=3369`, `encap_avg_us=3878`, `decap_avg_us=5013`, `elapsed_us=62068`, `heap=202444`, `min_heap=198456` |
+| `OBC-1U-LIMITED` 80 MHz | `PQC_INFO` | `pqc_status=ready`, `pk=800`, `sk=1632`, `ct=768`, `ss=32`, `elapsed_us=24697`, `heap=202444`, `min_heap=198456`, `flash=4194304` |
+| `OBC-1U-LIMITED` 80 MHz | `PQC_KAT` | `kat=pass`, `key_match=1`, `ss_crc32=0xD9DA8D6C`, `elapsed_us=39270` |
+| `OBC-1U-LIMITED` 80 MHz | `PQC_BENCH 5` | `keygen_avg_us=10101`, `encap_avg_us=11778`, `decap_avg_us=15214`, `elapsed_us=187371`, `heap=202444`, `min_heap=198456` |
 
 ## Comandos completos de bancada
 
@@ -73,6 +83,12 @@ passar vetor conhecido e reportar métricas na Wisdom.
 | `STATUS` | `STATUS` | Estado do ESP32: perfil, chip, CPU, heap, flash e radio. |
 | `TELEMETRY` | `TELEMETRY` | Snapshot de uptime, CPU, heap, potenciometro, som, botao e rele. |
 | `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Aplica bit-flip em payload hexadecimal e retorna `result`, byte antes/depois, CRC32 antes/depois e `elapsed_us`. |
+| `PQC_INFO` | `PQC_INFO` | Reporta contrato PQC atual, backend real e métricas. |
+| `PQC_KAT` | `PQC_KAT` | Executa vetor conhecido determinístico e retorna digests curtos. |
+| `PQC_KEYGEN` | `PQC_KEYGEN` | Gera par ML-KEM-512 real e mede tempo/heap. |
+| `PQC_ENCAP` | `PQC_ENCAP` | Encapsula para a chave pública armazenada. |
+| `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e compara segredo compartilhado. |
+| `PQC_BENCH` | `PQC_BENCH n` | Executa benchmark de bancada para `n` rodadas. |
 | `PERIPHERALS` | `PERIPHERALS` | Detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C. |
 | `I2C_SCAN` | `I2C_SCAN` | Varre o barramento I2C em SDA21/SCL22. |
 | `FEATURES` | `FEATURES`, `FEATURES CORE`, `FEATURES I2C`, `FEATURES GPIO`, `FEATURES ANALOG`, `FEATURES EXPANSION` | Lista grupos de recursos conhecidos pela firmware. |

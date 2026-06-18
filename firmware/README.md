@@ -3,8 +3,9 @@
 Este diretorio contem o firmware do projeto para a RoboCore BlackBoard Wisdom.
 Ele implementa o bridge serial `V1`, inventario da placa e comandos de bancada
 para exercitar os perifericos integrados. Nesta etapa, ele tambem executa um
-experimento pequeno de payload com bit-flip e CRC32, ainda sem criptografia
-real nem campanha completa de radiacao.
+experimento pequeno de payload com bit-flip e CRC32 e executa ML-KEM-512 real
+com `mlkem-native`; a campanha completa de radiacao simulada ainda fica no
+dashboard/host.
 
 O objetivo desta etapa e dominar a comunicacao ESP32/notebook e preservar o
 potencial da Wisdom para a demonstracao: sensores, atuadores, OLED, entradas
@@ -157,7 +158,11 @@ Para a sequencia completa de bancada, use `../hardware_command_reference.md`.
 ## Limites desta etapa
 
 - O sketch usa Arduino/PlatformIO para destravar o transporte rapidamente.
-- O backend criptografico aparece como `crypto=none`.
+- O backend criptografico aparece como `crypto=ML-KEM-512` e usa
+  `mlkem-native` v1.1.0 vendorizado em `firmware/lib/mlkem_native`.
+- A interface PQC real existe: `PQC_INFO` reporta alvo, backend, variante,
+  commit, licença, tamanhos e métricas; `PQC_KAT`, `PQC_KEYGEN`,
+  `PQC_ENCAP`, `PQC_DECAP` e `PQC_BENCH` executam na placa.
 - A injecao de falhas implementada e somente de payload serial, reportada
   como `fault=payload_crc32`.
 - OLED tem suporte minimo de inicializacao, limpeza, padrao de teste e standby
@@ -170,12 +175,12 @@ Para a sequencia completa de bancada, use `../hardware_command_reference.md`.
 
 ## Proximo incremento
 
-O proximo marco do firmware e instalar um backend real de ML-KEM-512, ou
-Kyber512 rotulado corretamente se for usado como fallback inicial. Antes de
-expor isso no dashboard, a placa deve passar KAT/vetor conhecido e reportar
-tempo, `heap`, `min_heap`, flash e perfil operacional.
+O proximo marco do firmware e repetir o backend real de ML-KEM-512 com uma
+bateria maior, exportar as amostras no JSON da campanha e ligar a injecao de
+falhas ao fluxo PQC sem expor chave privada, segredo compartilhado completo ou
+material suficiente para reconstruir a sessao.
 
-Comandos planejados para essa fase:
+Sequencia minima de bancada:
 
 ```text
 PQC_INFO
@@ -186,6 +191,29 @@ PQC_DECAP
 PQC_BENCH n
 ```
 
-Nenhum comando deve imprimir chaves privadas, segredos completos ou material
-criptografico suficiente para reconstruir a sessao; use tamanhos, status,
-tempos e digests curtos.
+Validação real em placa após upload:
+
+```text
+PQC_INFO      pqc_backend=mlkem-native pqc_status=ready
+PQC_KAT       kat=pass ss_crc32=0xD9DA8D6C elapsed_us=14125
+PQC_KEYGEN    elapsed_us=3498
+PQC_ENCAP     elapsed_us=4059
+PQC_DECAP     key_match=1 elapsed_us=5202
+PQC_BENCH 2   keygen_avg_us=3420 encap_avg_us=3876 decap_avg_us=5015
+```
+
+Medição comparativa registrada em 2026-06-17:
+
+```text
+BASELINE 240 MHz
+PQC_BENCH 5   keygen_avg_us=3369 encap_avg_us=3878 decap_avg_us=5013 elapsed_us=62068 heap=202444 min_heap=198456
+
+OBC-1U-LIMITED 80 MHz
+PQC_INFO       pqc_status=ready pk=800 sk=1632 ct=768 ss=32 elapsed_us=24697 heap=202444 min_heap=198456 flash=4194304
+PQC_KAT        kat=pass key_match=1 ss_crc32=0xD9DA8D6C elapsed_us=39270
+PQC_BENCH 5   keygen_avg_us=10101 encap_avg_us=11778 decap_avg_us=15214 elapsed_us=187371 heap=202444 min_heap=198456
+```
+
+Nenhum comando imprime chaves privadas, segredos completos ou material
+criptografico suficiente para reconstruir a sessao; são usados tamanhos,
+status, tempos e digests curtos.

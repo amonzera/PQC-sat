@@ -10,7 +10,7 @@ honesta sobre suas limitações.
 ## Software
 
 1. Inicialização:
-   - argumentos antes do display;
+   - argumentos antes do display (implementado);
    - splash opcional;
    - `--no-splash` para testes;
    - mensagem clara de modo.

@@ -5,24 +5,41 @@
   - own the serial bridge protocol used by the notebook;
   - expose a reproducible inventory of the Wisdom board;
   - test every onboard feature;
-  - run a small payload fault/CRC32 experiment without pretending ML-KEM exists.
-
-  Crypto and radiation experiments are later stages.
+  - run a small payload fault/CRC32 experiment;
+  - run ML-KEM-512 through a vendored C-only mlkem-native backend.
 */
 
 #include <Arduino.h>
+#include <esp_system.h>
 #include <WiFi.h>
 #include <Wire.h>
+
+#include <mlkem_native.h>
 
 #if defined(CONFIG_BT_ENABLED)
 #include "esp_bt.h"
 #endif
+
+SET_LOOP_TASK_STACK_SIZE(32768);
 
 // ---- Protocol ---------------------------------------------------------------
 static constexpr uint32_t SERIAL_BAUD = 115200;
 static constexpr size_t MAX_FRAME_LEN = 256;
 static constexpr size_t MAX_FIELDS = 14;
 static constexpr size_t MAX_EXPERIMENT_PAYLOAD = 96;
+
+static constexpr const char *PQC_TARGET = "ML-KEM-512";
+static constexpr const char *PQC_BACKEND = "mlkem-native";
+static constexpr const char *PQC_VARIANT = "FIPS203-512";
+static constexpr const char *PQC_STATUS = "ready";
+static constexpr const char *PQC_SOURCE = "pq-code-package/mlkem-native";
+static constexpr const char *PQC_COMMIT = "d2cae2b";
+static constexpr const char *PQC_LICENSE = "Apache2-ISC-MIT";
+
+static_assert(CRYPTO_PUBLICKEYBYTES == 800, "unexpected ML-KEM-512 public key size");
+static_assert(CRYPTO_SECRETKEYBYTES == 1632, "unexpected ML-KEM-512 secret key size");
+static_assert(CRYPTO_CIPHERTEXTBYTES == 768, "unexpected ML-KEM-512 ciphertext size");
+static_assert(CRYPTO_BYTES == 32, "unexpected ML-KEM shared-secret size");
 
 // ---- BlackBoard Wisdom pin map ---------------------------------------------
 static constexpr int PIN_I2C_SDA = 21;
@@ -101,6 +118,44 @@ static bool mma_present = false;
 static uint8_t oled_addr = 0;
 static uint8_t mma_addr = 0;
 static uint8_t oled_buffer[OLED_BUFFER_SIZE];
+
+static uint8_t pqc_pk[CRYPTO_PUBLICKEYBYTES];
+static uint8_t pqc_sk[CRYPTO_SECRETKEYBYTES];
+static uint8_t pqc_ct[CRYPTO_CIPHERTEXTBYTES];
+static uint8_t pqc_ss_enc[CRYPTO_BYTES];
+static uint8_t pqc_ss_dec[CRYPTO_BYTES];
+static bool pqc_keypair_ready = false;
+static bool pqc_ciphertext_ready = false;
+static bool pqc_shared_secret_ready = false;
+
+static uint8_t pqc_kat_pk[CRYPTO_PUBLICKEYBYTES];
+static uint8_t pqc_kat_sk[CRYPTO_SECRETKEYBYTES];
+static uint8_t pqc_kat_ct[CRYPTO_CIPHERTEXTBYTES];
+static uint8_t pqc_kat_ss_enc[CRYPTO_BYTES];
+static uint8_t pqc_kat_ss_dec[CRYPTO_BYTES];
+
+static constexpr uint8_t PQC_KAT_EXPECTED_SS[CRYPTO_BYTES] = {
+    0xA0, 0x21, 0x91, 0x08, 0xC1, 0xBF, 0xF6, 0xDE,
+    0xA0, 0x11, 0x3B, 0x89, 0x8D, 0xEC, 0x16, 0xBC,
+    0x69, 0x62, 0x0F, 0x88, 0xEF, 0x21, 0xBD, 0x40,
+    0xA3, 0x4F, 0xD4, 0xA9, 0xAD, 0x93, 0xE1, 0x05,
+};
+
+extern "C" int randombytes(uint8_t *out, size_t outlen) {
+  if (out == nullptr) {
+    return -1;
+  }
+
+  size_t offset = 0;
+  while (offset < outlen) {
+    uint32_t word = esp_random();
+    for (uint8_t i = 0; i < 4 && offset < outlen; ++i) {
+      out[offset++] = static_cast<uint8_t>(word & 0xFFU);
+      word >>= 8;
+    }
+  }
+  return 0;
+}
 
 struct RobotPixel {
   uint8_t col;
@@ -904,7 +959,7 @@ static void configure_board_io() {
 static void print_boot_event() {
   Serial.print("V1|0|EVENT|BOOT|node=PQC-SAT-WISDOM|proto=V1|baud=");
   Serial.print(SERIAL_BAUD);
-  Serial.println("|crypto=none|fault=payload_crc32|board=BlackBoard-Wisdom");
+  Serial.println("|crypto=ML-KEM-512|pqc=ready|fault=payload_crc32|board=BlackBoard-Wisdom");
 }
 
 // ---- Command handlers -------------------------------------------------------
@@ -936,7 +991,9 @@ static void send_hello(const char *request_id) {
   print_kv("board", "BlackBoard-Wisdom");
   print_kv("proto", "V1");
   print_kv("transport", "uart");
-  print_kv("crypto", "none");
+  print_kv("crypto", PQC_TARGET);
+  print_kv("pqc", PQC_STATUS);
+  print_kv("pqc_target", PQC_TARGET);
   print_kv("fault", "payload_crc32");
   end_result();
 }
@@ -959,6 +1016,257 @@ static void send_status(const char *request_id) {
   print_kv_u32("flash", ESP.getFlashChipSize());
   print_kv("radio", "off");
   print_kv("fault", "payload_crc32");
+  print_kv("pqc", PQC_STATUS);
+  print_kv("pqc_target", PQC_TARGET);
+  print_kv("pqc_backend", PQC_BACKEND);
+  end_result();
+}
+
+static void print_pqc_metrics() {
+  print_kv("pqc_target", PQC_TARGET);
+  print_kv("pqc_backend", PQC_BACKEND);
+  print_kv("pqc_variant", PQC_VARIANT);
+  print_kv("pqc_status", PQC_STATUS);
+  print_kv("pqc_commit", PQC_COMMIT);
+  print_kv("pqc_license", PQC_LICENSE);
+  print_kv("profile", active_profile);
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  print_kv_u32("flash", ESP.getFlashChipSize());
+  print_kv("radio", "off");
+}
+
+static void fill_pqc_kat_coins(uint8_t *keygen_coins, uint8_t *encap_coins) {
+  for (size_t i = 0; i < 2U * CRYPTO_SYMBYTES; ++i) {
+    keygen_coins[i] = static_cast<uint8_t>(0xA5U ^ static_cast<uint8_t>(i * 17U + 3U));
+  }
+  for (size_t i = 0; i < CRYPTO_SYMBYTES; ++i) {
+    encap_coins[i] = static_cast<uint8_t>(0x5AU ^ static_cast<uint8_t>(i * 29U + 7U));
+  }
+}
+
+static bool pqc_shared_secrets_match(const uint8_t *left, const uint8_t *right) {
+  uint8_t diff = 0;
+  for (size_t i = 0; i < CRYPTO_BYTES; ++i) {
+    diff |= static_cast<uint8_t>(left[i] ^ right[i]);
+  }
+  return diff == 0;
+}
+
+static void print_pqc_sizes() {
+  print_kv_u32("pk", CRYPTO_PUBLICKEYBYTES);
+  print_kv_u32("sk", CRYPTO_SECRETKEYBYTES);
+  print_kv_u32("ct", CRYPTO_CIPHERTEXTBYTES);
+  print_kv_u32("ss", CRYPTO_BYTES);
+}
+
+static void print_pqc_error_result(const char *request_id, const char *operation, int rc, uint32_t elapsed_us) {
+  begin_result(request_id, "ERROR");
+  print_kv("code", "PQC_FAIL");
+  print_kv("op", operation);
+  print_kv_i32("rc", rc);
+  print_kv_u32("elapsed_us", elapsed_us);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  end_result();
+}
+
+static void send_pqc_info(const char *request_id) {
+  const uint32_t started = micros();
+  begin_result(request_id, "OK");
+  print_pqc_metrics();
+  print_pqc_sizes();
+  print_kv("source", PQC_SOURCE);
+  print_kv("ready", "1");
+  print_kv_u32("elapsed_us", micros() - started);
+  end_result();
+}
+
+static void send_pqc_kat(const char *request_id) {
+  uint8_t keygen_coins[2U * CRYPTO_SYMBYTES];
+  uint8_t encap_coins[CRYPTO_SYMBYTES];
+  fill_pqc_kat_coins(keygen_coins, encap_coins);
+
+  const uint32_t started = micros();
+  const int key_rc = crypto_kem_keypair_derand(pqc_kat_pk, pqc_kat_sk, keygen_coins);
+  const int pk_rc = key_rc == 0 ? crypto_kem_check_pk(pqc_kat_pk) : key_rc;
+  const int sk_rc = key_rc == 0 ? crypto_kem_check_sk(pqc_kat_sk) : key_rc;
+  const int enc_rc = key_rc == 0 ? crypto_kem_enc_derand(pqc_kat_ct, pqc_kat_ss_enc, pqc_kat_pk, encap_coins) : key_rc;
+  const int dec_rc = enc_rc == 0 ? crypto_kem_dec(pqc_kat_ss_dec, pqc_kat_ct, pqc_kat_sk) : enc_rc;
+  const bool key_match = dec_rc == 0 && pqc_shared_secrets_match(pqc_kat_ss_enc, pqc_kat_ss_dec);
+  const bool vector_match = key_match && pqc_shared_secrets_match(pqc_kat_ss_enc, PQC_KAT_EXPECTED_SS);
+  const uint32_t elapsed_us = micros() - started;
+
+  begin_result(request_id, vector_match ? "OK" : "ERROR");
+  print_kv("kat", vector_match ? "pass" : "fail");
+  print_kv_bool("key_match", key_match);
+  print_kv_i32("key_rc", key_rc);
+  print_kv_i32("pk_rc", pk_rc);
+  print_kv_i32("sk_rc", sk_rc);
+  print_kv_i32("enc_rc", enc_rc);
+  print_kv_i32("dec_rc", dec_rc);
+  print_kv_hex_u32("ss_crc32", crc32_bytes(pqc_kat_ss_enc, sizeof(pqc_kat_ss_enc)));
+  print_kv_u32("elapsed_us", elapsed_us);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  end_result();
+}
+
+static void send_pqc_keygen(const char *request_id) {
+  const uint32_t started = micros();
+  const int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
+  const uint32_t elapsed_us = micros() - started;
+  if (rc != 0) {
+    pqc_keypair_ready = false;
+    pqc_ciphertext_ready = false;
+    pqc_shared_secret_ready = false;
+    print_pqc_error_result(request_id, "keygen", rc, elapsed_us);
+    return;
+  }
+
+  pqc_keypair_ready = true;
+  pqc_ciphertext_ready = false;
+  pqc_shared_secret_ready = false;
+  begin_result(request_id, "OK");
+  print_kv("op", "keygen");
+  print_kv_bool("stored", pqc_keypair_ready);
+  print_kv_hex_u32("pk_crc32", crc32_bytes(pqc_pk, sizeof(pqc_pk)));
+  print_pqc_sizes();
+  print_kv_u32("elapsed_us", elapsed_us);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  end_result();
+}
+
+static void send_pqc_encap(const char *request_id) {
+  if (!pqc_keypair_ready) {
+    print_error(request_id, "PQC_STATE", "run_PQC_KEYGEN_first");
+    return;
+  }
+
+  const uint32_t started = micros();
+  const int rc = crypto_kem_enc(pqc_ct, pqc_ss_enc, pqc_pk);
+  const uint32_t elapsed_us = micros() - started;
+  if (rc != 0) {
+    pqc_ciphertext_ready = false;
+    pqc_shared_secret_ready = false;
+    print_pqc_error_result(request_id, "encap", rc, elapsed_us);
+    return;
+  }
+
+  pqc_ciphertext_ready = true;
+  pqc_shared_secret_ready = false;
+  begin_result(request_id, "OK");
+  print_kv("op", "encap");
+  print_kv_bool("ct_stored", pqc_ciphertext_ready);
+  print_kv_hex_u32("ct_crc32", crc32_bytes(pqc_ct, sizeof(pqc_ct)));
+  print_kv_hex_u32("ss_crc32", crc32_bytes(pqc_ss_enc, sizeof(pqc_ss_enc)));
+  print_kv_u32("ct", CRYPTO_CIPHERTEXTBYTES);
+  print_kv_u32("elapsed_us", elapsed_us);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  end_result();
+}
+
+static void send_pqc_decap(const char *request_id) {
+  if (!pqc_keypair_ready || !pqc_ciphertext_ready) {
+    print_error(request_id, "PQC_STATE", "run_PQC_KEYGEN_and_PQC_ENCAP_first");
+    return;
+  }
+
+  const uint32_t started = micros();
+  const int rc = crypto_kem_dec(pqc_ss_dec, pqc_ct, pqc_sk);
+  const uint32_t elapsed_us = micros() - started;
+  if (rc != 0) {
+    pqc_shared_secret_ready = false;
+    print_pqc_error_result(request_id, "decap", rc, elapsed_us);
+    return;
+  }
+
+  const bool key_match = pqc_shared_secrets_match(pqc_ss_enc, pqc_ss_dec);
+  pqc_shared_secret_ready = key_match;
+  begin_result(request_id, key_match ? "OK" : "ERROR");
+  print_kv("op", "decap");
+  print_kv_bool("key_match", key_match);
+  print_kv_hex_u32("ss_crc32", crc32_bytes(pqc_ss_dec, sizeof(pqc_ss_dec)));
+  print_kv_u32("elapsed_us", elapsed_us);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  end_result();
+}
+
+static bool run_pqc_round(uint32_t *keygen_us, uint32_t *encap_us, uint32_t *decap_us, bool *key_match) {
+  uint32_t started = micros();
+  int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
+  *keygen_us = micros() - started;
+  if (rc != 0) {
+    return false;
+  }
+
+  started = micros();
+  rc = crypto_kem_enc(pqc_ct, pqc_ss_enc, pqc_pk);
+  *encap_us = micros() - started;
+  if (rc != 0) {
+    return false;
+  }
+
+  started = micros();
+  rc = crypto_kem_dec(pqc_ss_dec, pqc_ct, pqc_sk);
+  *decap_us = micros() - started;
+  if (rc != 0) {
+    return false;
+  }
+
+  *key_match = pqc_shared_secrets_match(pqc_ss_enc, pqc_ss_dec);
+  pqc_keypair_ready = true;
+  pqc_ciphertext_ready = true;
+  pqc_shared_secret_ready = *key_match;
+  return *key_match;
+}
+
+static void handle_pqc_bench(const char *request_id, size_t field_count, char *fields[]) {
+  uint8_t rounds = 3;
+  if (field_count >= 4) {
+    int parsed = 0;
+    if (!parse_int_range(fields[3], 1, 20, &parsed)) {
+      print_error(request_id, "BAD_ARGS", "expected_1_to_20");
+      return;
+    }
+    rounds = static_cast<uint8_t>(parsed);
+  }
+
+  const uint32_t started = micros();
+  uint32_t total_keygen = 0;
+  uint32_t total_encap = 0;
+  uint32_t total_decap = 0;
+  uint8_t ok = 0;
+  bool last_match = false;
+
+  for (uint8_t i = 0; i < rounds; ++i) {
+    uint32_t keygen_us = 0;
+    uint32_t encap_us = 0;
+    uint32_t decap_us = 0;
+    bool key_match = false;
+    if (run_pqc_round(&keygen_us, &encap_us, &decap_us, &key_match)) {
+      ok++;
+    }
+    last_match = key_match;
+    total_keygen += keygen_us;
+    total_encap += encap_us;
+    total_decap += decap_us;
+    delay(0);
+  }
+
+  begin_result(request_id, ok == rounds ? "OK" : "ERROR");
+  print_kv_u32("n", rounds);
+  print_kv_u32("ok", ok);
+  print_kv_bool("key_match", last_match);
+  print_kv_u32("keygen_avg_us", total_keygen / rounds);
+  print_kv_u32("encap_avg_us", total_encap / rounds);
+  print_kv_u32("decap_avg_us", total_decap / rounds);
+  print_kv_u32("elapsed_us", micros() - started);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
   end_result();
 }
 
@@ -1485,6 +1793,24 @@ static void send_help_detail(const char *request_id, const char *command) {
   } else if (strcmp(command, "FAULT") == 0) {
     print_kv("usage", "FAULT NONE|CRC32 payload_hex index mask");
     print_kv("does", "aplica bit-flip e compara CRC32");
+  } else if (strcmp(command, "PQC_INFO") == 0) {
+    print_kv("usage", "PQC_INFO");
+    print_kv("does", "reporta backend ML-KEM e tamanhos");
+  } else if (strcmp(command, "PQC_KAT") == 0) {
+    print_kv("usage", "PQC_KAT");
+    print_kv("does", "executa vetor conhecido deterministico");
+  } else if (strcmp(command, "PQC_KEYGEN") == 0) {
+    print_kv("usage", "PQC_KEYGEN");
+    print_kv("does", "gera par ML-KEM-512 e mede tempo");
+  } else if (strcmp(command, "PQC_ENCAP") == 0) {
+    print_kv("usage", "PQC_ENCAP");
+    print_kv("does", "encapsula usando pk armazenada");
+  } else if (strcmp(command, "PQC_DECAP") == 0) {
+    print_kv("usage", "PQC_DECAP");
+    print_kv("does", "decapsula ct armazenado e compara");
+  } else if (strcmp(command, "PQC_BENCH") == 0) {
+    print_kv("usage", "PQC_BENCH n");
+    print_kv("does", "benchmark keygen encap decap");
   } else if (strcmp(command, "PERIPHERALS") == 0) {
     print_kv("usage", "PERIPHERALS");
     print_kv("does", "detecta OLED APDS HTU MMA");
@@ -1550,9 +1876,10 @@ static void send_help(const char *request_id, size_t field_count, char *fields[]
   begin_result(request_id, "OK");
   print_kv("usage", "HELP [COMMAND]");
   print_kv("cmd1", "HELLO,PING,STATUS,TELEMETRY,FAULT,PERIPHERALS");
-  print_kv("cmd2", "I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ,ANALOG,DIGITAL");
-  print_kv("cmd3", "RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS");
-  print_kv("cmd4", "HELP");
+  print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_BENCH");
+  print_kv("cmd3", "I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ,ANALOG,DIGITAL");
+  print_kv("cmd4", "RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS");
+  print_kv("cmd5", "HELP");
   end_result();
 }
 
@@ -1585,6 +1912,18 @@ static void process_frame(char *line) {
     send_telemetry(request_id);
   } else if (strcmp(command, "FAULT") == 0) {
     handle_fault(request_id, field_count, fields);
+  } else if (strcmp(command, "PQC_INFO") == 0) {
+    send_pqc_info(request_id);
+  } else if (strcmp(command, "PQC_KAT") == 0) {
+    send_pqc_kat(request_id);
+  } else if (strcmp(command, "PQC_KEYGEN") == 0) {
+    send_pqc_keygen(request_id);
+  } else if (strcmp(command, "PQC_ENCAP") == 0) {
+    send_pqc_encap(request_id);
+  } else if (strcmp(command, "PQC_DECAP") == 0) {
+    send_pqc_decap(request_id);
+  } else if (strcmp(command, "PQC_BENCH") == 0) {
+    handle_pqc_bench(request_id, field_count, fields);
   } else if (strcmp(command, "PERIPHERALS") == 0) {
     send_peripherals(request_id);
   } else if (strcmp(command, "I2C_SCAN") == 0) {

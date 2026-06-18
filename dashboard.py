@@ -10,8 +10,11 @@ para receber comandos de injeção de falha e controle de sessão PQC.
 """
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+import json
 import math
+from pathlib import Path
 import queue
 import random
 import sys
@@ -30,18 +33,16 @@ from tools.serial_commands import (
 from tools.serial_protocol import ProtocolError, decode_key_values
 
 # --- Inicializacao ------------------------------------------------------------
-pygame.init()
-
-# Resolucao e janela (fullscreen)
-info = pygame.display.Info()
-WIDTH, HEIGHT = info.current_w, info.current_h
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN | pygame.DOUBLEBUF)
-pygame.display.set_caption("PQC-SAT Mission Control Dashboard")
-
+pygame.font.init()
+WIDTH, HEIGHT = 1920, 1080
+screen = None
 clock = pygame.time.Clock()
 FPS = 60
 SIMULATION_SEED = 42
 DEFAULT_PAYLOAD = b"PQC-SAT|TEMP=24.5|STATUS=OK"
+RUN_SCHEMA_VERSION = "pqc-sat-run-v1"
+DEFAULT_LOG_DIR = Path("logs")
+TIMELINE_WINDOW = 16
 SERIAL_STARTUP_COMMANDS = ("PERIPHERALS", "OLED STANDBY", "TELEMETRY")
 SERIAL_RECONNECT_DELAY = 1.5
 SERIAL_TIMEOUT_SECONDS = 5.0
@@ -71,7 +72,10 @@ DEMO_HELP_LINES = (
     "  INJECT_FAULT - injeta falha",
     "  BIT_FLIP [i m] - falha manual",
     "  CRC_CHECK - falha com CRC32",
-    "  PQC_STATUS - alvo PQC na placa",
+    "  EXPORT_JSON - salva sessão",
+    "  SAVE_SESSION - alias export",
+    "  RUN_BATTERY n - bateria A/B",
+    "  PQC_STATUS - estado PQC",
     "  RESET_SESSION - zera sessão",
 )
 
@@ -113,6 +117,18 @@ FONT_PIXEL   = load_font("monospace", 13)
 FONT_LABEL   = load_font("monospace", 13)
 
 
+def init_display():
+    """Initialize the fullscreen display after CLI arguments are parsed."""
+    global WIDTH, HEIGHT, screen, clock
+
+    pygame.init()
+    info = pygame.display.Info()
+    WIDTH, HEIGHT = info.current_w, info.current_h
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN | pygame.DOUBLEBUF)
+    pygame.display.set_caption("PQC-SAT Mission Control Dashboard")
+    clock = pygame.time.Clock()
+
+
 # --- Nucleo experimental ------------------------------------------------------
 @dataclass(frozen=True)
 class FaultSpec:
@@ -127,6 +143,8 @@ class ExperimentEvent:
     session_id: str
     campaign_seed: int
     trial_id: int
+    campaign_run_id: str
+    campaign_trial_id: int
     mode: str
     target: str
     byte_index: int
@@ -172,7 +190,17 @@ class ExperimentEngine:
         bit_mask = 1 << self._rng.randrange(8)
         return FaultSpec(byte_index=byte_index, bit_mask=bit_mask)
 
-    def run_fault(self, *, guard="NONE", spec=None, mode="SIMULATED", target="PAYLOAD", uptime_s=0.0):
+    def run_fault(
+        self,
+        *,
+        guard="NONE",
+        spec=None,
+        mode="SIMULATED",
+        target="PAYLOAD",
+        uptime_s=0.0,
+        campaign_run_id="manual",
+        campaign_trial_id=None,
+    ):
         guard = guard.upper()
         if guard not in {"NONE", "CRC32"}:
             raise ValueError("guard deve ser NONE ou CRC32")
@@ -204,6 +232,8 @@ class ExperimentEngine:
             session_id=self.session_id,
             campaign_seed=self.seed,
             trial_id=self._next_trial_id,
+            campaign_run_id=campaign_run_id,
+            campaign_trial_id=campaign_trial_id or self._next_trial_id,
             mode=mode,
             target=target,
             byte_index=spec.byte_index,
@@ -237,6 +267,118 @@ def _crc32_hex(data):
     return f"{zlib.crc32(data) & 0xFFFFFFFF:08X}"
 
 
+def event_summary(events):
+    unique_events = []
+    seen = set()
+    for event in events:
+        event_key = (event.session_id, event.trial_id, event.target, event.guard)
+        if event_key in seen:
+            continue
+        seen.add(event_key)
+        unique_events.append(event)
+
+    summary = {
+        "events": len(unique_events),
+        "ok": 0,
+        "silent": 0,
+        "detected_guard": 0,
+        "key_mismatch": 0,
+        "protocol_reject": 0,
+        "invalid_input": 0,
+    }
+    for event in unique_events:
+        key = event.result.lower()
+        if key in summary:
+            summary[key] += 1
+    return summary
+
+
+def session_checksum_mode(events, current_guard="NONE"):
+    guards = {event.guard for event in events}
+    if not guards:
+        return current_guard
+    if len(guards) == 1:
+        return next(iter(guards))
+    return "MIXED"
+
+
+def visible_timeline_events(events, limit=TIMELINE_WINDOW):
+    return list(events)[-limit:]
+
+
+def timeline_layout(events, x, y, width, height, limit=TIMELINE_WINDOW):
+    visible_events = visible_timeline_events(events, limit=limit)
+    if not visible_events:
+        return []
+
+    lane_top = y + 16
+    lane_bottom = y + max(34, height - 14)
+    left_pad = min(46, max(32, width // 5))
+    right_pad = 10
+    usable_w = max(1, width - left_pad - right_pad)
+    step = 0 if len(visible_events) == 1 else usable_w / (len(visible_events) - 1)
+
+    points = []
+    for index, event in enumerate(visible_events):
+        if len(visible_events) == 1:
+            cx = x + left_pad + usable_w // 2
+        else:
+            cx = x + left_pad + int(round(step * index))
+        cy = lane_bottom if event.guard == "CRC32" else lane_top
+        points.append(
+            {
+                "event": event,
+                "x": max(x, min(x + width - 1, cx)),
+                "y": max(y, min(y + height - 1, cy)),
+                "lane": "B CRC32" if event.guard == "CRC32" else "A NONE",
+            }
+        )
+    return points
+
+
+def event_to_json(event):
+    data = asdict(event)
+    data["bit_mask_hex"] = event.bit_mask_hex
+    data["scenario"] = "B_CRC32" if event.guard == "CRC32" else "A_NONE"
+    return data
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _safe_slug(value):
+    slug = []
+    for char in str(value).lower():
+        if char.isalnum():
+            slug.append(char)
+        elif char in {"-", "_"}:
+            slug.append(char)
+        else:
+            slug.append("-")
+    return "".join(slug).strip("-") or "session"
+
+
+def _atomic_write_json(document, log_dir=DEFAULT_LOG_DIR):
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    session_slug = _safe_slug(document.get("session_id", "session"))
+    path = log_dir / f"{timestamp}_{session_slug}.json"
+    suffix = 1
+    while path.exists():
+        path = log_dir / f"{timestamp}_{session_slug}_{suffix}.json"
+        suffix += 1
+
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as handle:
+        json.dump(document, handle, indent=2, ensure_ascii=False, sort_keys=True)
+        handle.write("\n")
+    tmp_path.replace(path)
+    return path
+
+
 def _parse_u8_token(token):
     try:
         value = int(token, 0)
@@ -245,6 +387,13 @@ def _parse_u8_token(token):
     if not 0 <= value <= 255:
         raise ValueError("valor fora de 0..255")
     return value
+
+
+def _optional_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 # --- Estrelas de fundo --------------------------------------------------------
@@ -746,6 +895,7 @@ class DashboardPanel:
         self.serial_connected = False
         self.serial_status = "SERIAL DESATIVADA"
         self.hardware_payload = {}
+        self.hardware_state = {}
         self.help_visible = False
         self.help_topic = "INDEX"
         self.command_history = []
@@ -761,6 +911,10 @@ class DashboardPanel:
         self.session_seed = SIMULATION_SEED
         self.experiment = ExperimentEngine(seed=self.session_seed)
         self.experiment_events = self.experiment.events
+        self.hardware_samples = []
+        self.session_dirty = False
+        self.last_export_path = None
+        self.battery_runs = 0
         self.last_fault_event = None
         self.guard_mode = "NONE"
         self.effect_timer = 0.0
@@ -769,7 +923,7 @@ class DashboardPanel:
         self.effect_color = C_ACCENT_CYAN
         self._append_history("SYS_INIT", "OK")
         self._append_history("MODE_SELECT", "SIMULADO")
-        self._append_history("PQC_BACKEND", "ALVO 512")
+        self._append_history("PQC_BACKEND", "AGUARDANDO")
 
         if self.serial_client is not None:
             self.serial_status = "INICIANDO SERIAL"
@@ -822,17 +976,18 @@ class DashboardPanel:
         elif command_name == "BIT_FLIP":
             status = self._run_experiment_command("NONE", parts[1:])
         elif cmd_upper == "PQC_STATUS":
+            if self.serial_connected:
+                self._queue_serial_command("PQC_INFO", visible=True)
+                return
             status = "PQC PENDENTE"
         elif cmd_upper == "RESET_SESSION":
-            self.experiment.reset()
-            self.last_fault_event = None
-            self.guard_mode = "NONE"
-            self._refresh_experiment_metrics()
-            self.session_status = "SIMULADO"
-            self.effect_timer = 0.0
-            status = "SIM RESET"
+            status = self._reset_session()
         elif cmd_upper == "CRC_CHECK":
             status = self._run_experiment_command("CRC32")
+        elif cmd_upper in {"EXPORT_JSON", "SAVE_SESSION"}:
+            status = self._export_session_status()
+        elif command_name == "RUN_BATTERY":
+            status = self._run_battery_command(parts[1:])
         elif command_name == "PING" and self.serial_client is None:
             status = "LOOP LOCAL OK"
         elif command_name == "TELEMETRY" and self.serial_client is None:
@@ -857,7 +1012,7 @@ class DashboardPanel:
 
         self._append_history(cmd_upper, status)
 
-    def _run_experiment_command(self, guard, args=None):
+    def _run_experiment_command(self, guard, args=None, campaign_trial_id=None):
         try:
             spec = self._fault_spec_from_args(args or [])
             mode = "HARDWARE" if self.satellite_online() else "SIMULATED"
@@ -866,12 +1021,15 @@ class DashboardPanel:
                 spec=spec,
                 mode=mode,
                 uptime_s=self.uptime,
+                campaign_run_id=getattr(self, "_active_campaign_run_id", "manual"),
+                campaign_trial_id=campaign_trial_id,
             )
         except ValueError as exc:
             self._append_history("FAULT_SPEC", str(exc).upper()[:14])
             return "INVALID_INPUT"
 
         self.last_fault_event = event
+        self.session_dirty = True
         self.guard_mode = event.guard
         self._refresh_experiment_metrics()
         self._trigger_fault_effect(event)
@@ -887,6 +1045,94 @@ class DashboardPanel:
             return "DETECTED"
         self.session_status = "OK"
         return event.result
+
+    def _reset_session(self):
+        if self.session_dirty and (self.experiment_events or self.hardware_samples):
+            status = self._export_session_status(auto=True)
+            if status == "EXPORT ERROR":
+                return status
+
+        self.experiment.reset()
+        self.hardware_samples.clear()
+        self.battery_runs = 0
+        self.last_fault_event = None
+        self.guard_mode = "NONE"
+        self._refresh_experiment_metrics()
+        self.session_status = "SIMULADO"
+        self.effect_timer = 0.0
+        self.session_dirty = False
+        return "SIM RESET"
+
+    def _export_session_status(self, *, auto=False):
+        try:
+            path = self.export_session()
+        except OSError:
+            return "EXPORT ERROR"
+        self.last_export_path = path
+        self.session_dirty = False
+        if auto:
+            self._append_history("AUTO_SAVE", path.name[:14])
+        return "JSON SALVO"
+
+    def export_session(self, log_dir=DEFAULT_LOG_DIR):
+        document = self._build_export_document()
+        return _atomic_write_json(document, log_dir=log_dir)
+
+    def _build_export_document(self):
+        return {
+            "schema_version": RUN_SCHEMA_VERSION,
+            "session_id": self.experiment.session_id,
+            "created_at": _utc_now_iso(),
+            "board": self._board_export_info(),
+            "config": {
+                "campaign_seed": self.session_seed,
+                "pqc_target": self.hardware_state.get("pqc_target", "ML-KEM-512"),
+                "pqc_backend": self.hardware_state.get("pqc_backend", "none"),
+                "pqc_status": self.hardware_state.get("pqc_status", "not_ready"),
+                "checksum": session_checksum_mode(self.experiment_events, self.guard_mode),
+                "radiation_mode": "manual_bitflip",
+            },
+            "summary": event_summary(self.experiment_events),
+            "events": [event_to_json(event) for event in self.experiment_events],
+            "hardware_samples": list(self.hardware_samples),
+        }
+
+    def _board_export_info(self):
+        payload = self.hardware_state or {}
+        connected = bool(self.serial_connected)
+        return {
+            "connected": connected,
+            "node": payload.get("node", "PQC-SAT-WISDOM" if connected else ""),
+            "board": payload.get("board", "BlackBoard-Wisdom" if connected else ""),
+            "chip": payload.get("chip", ""),
+            "profile": payload.get("profile", ""),
+        }
+
+    def _run_battery_command(self, args):
+        if len(args) != 1:
+            return "INVALID_INPUT"
+        try:
+            attempts = int(args[0], 10)
+        except ValueError:
+            return "INVALID_INPUT"
+        if not 1 <= attempts <= 100:
+            return "INVALID_INPUT"
+
+        specs = [self.experiment.next_spec() for _ in range(attempts)]
+        self.battery_runs += 1
+        previous_run_id = getattr(self, "_active_campaign_run_id", "manual")
+        self._active_campaign_run_id = f"battery-{self.battery_runs:03d}"
+        try:
+            for index, spec in enumerate(specs, start=1):
+                args = [str(spec.byte_index), f"0x{spec.bit_mask:02X}"]
+                self._run_experiment_command("NONE", args, campaign_trial_id=index)
+            for index, spec in enumerate(specs, start=1):
+                args = [str(spec.byte_index), f"0x{spec.bit_mask:02X}"]
+                self._run_experiment_command("CRC32", args, campaign_trial_id=index)
+        finally:
+            self._active_campaign_run_id = previous_run_id
+
+        return self._export_session_status()
 
     def _fault_spec_from_args(self, args):
         if not args:
@@ -962,7 +1208,10 @@ class DashboardPanel:
     def _apply_hardware_response(self, command, payload):
         if self.serial_connected:
             self.session_status = "SATÉLITE ONLINE"
-        if command.startswith("FAULT"):
+        self.hardware_state.update(payload)
+        if command.startswith("HELLO"):
+            self.hardware_payload = payload
+        elif command.startswith("FAULT"):
             if payload.get("result"):
                 self.session_status = f"HW {payload['result']}"
             self.hardware_payload = payload
@@ -970,6 +1219,57 @@ class DashboardPanel:
             self.hardware_payload = payload
         elif command.startswith("STATUS"):
             self.hardware_payload = payload
+            self._update_pqc_label(payload)
+        elif command.startswith("PQC_"):
+            self.hardware_payload = payload
+            self._update_pqc_label(payload)
+        self._record_hardware_sample(command, payload)
+
+    def _update_pqc_label(self, payload):
+        target = payload.get("pqc_target", "ML-KEM-512")
+        status = payload.get("pqc_status") or payload.get("pqc")
+        if status:
+            display_status = status.replace("_", " ").upper()
+            self.pqc_algorithm = f"{target} ({display_status})"
+
+    def _record_hardware_sample(self, command, payload):
+        metric_keys = {"uptime_ms", "cpu_mhz", "heap", "min_heap", "flash", "elapsed_us", "radio", "profile"}
+        if not any(key in payload for key in metric_keys):
+            return
+
+        elapsed_us = _optional_int(payload.get("elapsed_us"))
+        cpu_mhz = _optional_int(payload.get("cpu_mhz"))
+        energy_value = None
+        if elapsed_us is not None and cpu_mhz is not None:
+            energy_value = cpu_mhz * elapsed_us
+
+        uptime_ms = _optional_int(payload.get("uptime_ms"))
+        sample = {
+            "timestamp": _utc_now_iso(),
+            "uptime_s": round(uptime_ms / 1000, 3) if uptime_ms is not None else round(self.uptime, 3),
+            "mode": "HARDWARE",
+            "source_command": command.split()[0],
+            "profile": payload.get("profile", ""),
+            "cpu_mhz": cpu_mhz,
+            "heap": _optional_int(payload.get("heap")),
+            "min_heap": _optional_int(payload.get("min_heap")),
+            "flash": _optional_int(payload.get("flash")),
+            "elapsed_us": elapsed_us,
+            "radio": payload.get("radio", ""),
+            "pqc_target": payload.get("pqc_target", ""),
+            "pqc_backend": payload.get("pqc_backend", ""),
+            "pqc_status": payload.get("pqc_status", ""),
+            "checksum": payload.get("guard", self.guard_mode),
+            "energy_proxy": {
+                "kind": "relative_cpu_time",
+                "value": energy_value,
+                "unit": "mhz_us",
+            },
+        }
+        self.hardware_samples.append(sample)
+        self.session_dirty = True
+        if len(self.hardware_samples) > 512:
+            self.hardware_samples = self.hardware_samples[-512:]
 
     def draw(self, surface, t, satellite):
         """Desenha todos os paineis da interface."""
@@ -1164,10 +1464,24 @@ class DashboardPanel:
             surface.blit(val, (x, y))
             y += 20
 
-            for key in ("cpu_mhz", "heap", "min_heap", "flash", "elapsed_us", "radio"):
+            hardware_keys = (
+                "profile",
+                "cpu_mhz",
+                "heap",
+                "min_heap",
+                "elapsed_us",
+                "pqc_status",
+                "kat",
+                "key_match",
+                "keygen_avg_us",
+                "encap_avg_us",
+                "decap_avg_us",
+                "radio",
+            )
+            for key in hardware_keys:
                 if key in self.hardware_payload and y < panel_rect.bottom - 18:
-                    text = FONT_LABEL.render(f"{key}: {self.hardware_payload[key]}", True, C_TEXT_DIM)
-                    surface.blit(text, (x, y))
+                    line = f"{key}: {self.hardware_payload[key]}"
+                    surface.blit(self._render_clipped(FONT_LABEL, line, C_TEXT_DIM, cw), (x, y))
                     y += 16
 
         y += 28
@@ -1177,6 +1491,20 @@ class DashboardPanel:
     def _draw_event_timeline(self, surface, x, y, width, panel_rect):
         lbl = FONT_LABEL.render("TIMELINE", True, C_ACCENT_CYAN)
         surface.blit(lbl, (x, y))
+        y += 16
+
+        legend = (
+            ("OK", C_ACCENT_GREEN),
+            ("SIL", C_ACCENT_RED),
+            ("DET", C_ACCENT_ORANGE),
+            ("INV", C_TEXT_DIM),
+        )
+        lx = x
+        for label, color in legend:
+            pygame.draw.circle(surface, color, (lx + 4, y + 6), 4)
+            text = FONT_LABEL.render(label, True, C_TEXT_DIM)
+            surface.blit(text, (lx + 12, y))
+            lx += max(46, text.get_width() + 24)
         y += 18
 
         if not self.experiment_events:
@@ -1184,18 +1512,25 @@ class DashboardPanel:
             surface.blit(empty, (x, y))
             return
 
-        visible_events = self.experiment_events[-16:]
-        step = max(12, min(18, width // max(1, len(visible_events))))
-        base_y = y + 16
-        for idx, event in enumerate(visible_events):
-            cx = x + 6 + idx * step
+        plot_h = min(72, max(48, panel_rect.bottom - y - 66))
+        layout = timeline_layout(self.experiment_events, x, y, width, plot_h)
+        lanes = {"A NONE": y + 16, "B CRC32": y + max(34, plot_h - 14)}
+        for label, lane_y in lanes.items():
+            text = FONT_LABEL.render(label, True, C_TEXT_DIM)
+            surface.blit(text, (x, lane_y - 7))
+            pygame.draw.line(surface, C_PANEL_BORDER, (x + 48, lane_y), (x + width, lane_y), 1)
+
+        for point in layout:
+            event = point["event"]
+            cx = point["x"]
+            cy = point["y"]
             color = self._result_color(event.result)
             radius = 5 if event is self.last_fault_event else 4
-            pygame.draw.circle(surface, color, (cx, base_y), radius)
+            pygame.draw.circle(surface, color, (cx, cy), radius)
             if event is self.last_fault_event:
-                pygame.draw.circle(surface, color, (cx, base_y), radius + 4, 1)
+                pygame.draw.circle(surface, color, (cx, cy), radius + 4, 1)
 
-        y = base_y + 17
+        y += plot_h + 4
         last = self.last_fault_event
         if last is not None:
             detail = (
@@ -1209,7 +1544,11 @@ class DashboardPanel:
             y += 16
 
         if y < panel_rect.bottom - 18:
-            summary = f"SIL {self.silent_failures}  DET {self.detected_errors}  TOTAL {self.fault_injections}"
+            summary_data = event_summary(self.experiment_events)
+            summary = (
+                f"A/B total {summary_data['events']}  "
+                f"SIL {summary_data['silent']}  DET {summary_data['detected_guard']}"
+            )
             surface.blit(FONT_LABEL.render(summary, True, C_TEXT_DIM), (x, y))
 
     @staticmethod
@@ -1407,10 +1746,14 @@ class DashboardPanel:
         else:
             esp32_item = "SAT: AGUARDANDO"
 
+        pqc_label = self.pqc_algorithm
+        if len(pqc_label) > 28:
+            pqc_label = pqc_label[:25] + "..."
+
         items = [
             f"FPS: {int(clock.get_fps())}",
             esp32_item,
-            "PQC: ALVO ML-KEM-512",
+            f"PQC: {pqc_label}",
             f"GUARD: {self.guard_mode}",
             f"SEED: {SIMULATION_SEED}",
         ]
@@ -1420,6 +1763,10 @@ class DashboardPanel:
             if "CONECTADO" in item:
                 color = C_ACCENT_GREEN
             elif "AGUARDANDO" in item:
+                color = C_ACCENT_ORANGE
+            elif "READY" in item:
+                color = C_ACCENT_GREEN
+            elif "PENDENTE" in item:
                 color = C_ACCENT_ORANGE
             surf = FONT_LABEL.render(item, True, color)
             surface.blit(surf, (ix, bar_y + 8))
@@ -1561,9 +1908,9 @@ def parse_args():
 
 
 def main():
-    global WIDTH, HEIGHT, screen
-
     args = parse_args()
+    init_display()
+
     serial_client = None
     if args.serial or args.port or not args.simulated:
         serial_client = DashboardSerialClient(
@@ -1607,6 +1954,8 @@ def main():
             shooting_stars.update(dt)
 
             # -- Desenho --
+            if screen is None:
+                raise RuntimeError("display not initialized")
             screen.fill(C_SPACE_BG)
 
             # Nebulosa de fundo

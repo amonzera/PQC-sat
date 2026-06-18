@@ -12,19 +12,22 @@ O repositório contém hoje:
 - um núcleo determinístico de mutação de payload com eventos auditáveis;
 - comparação didática entre payload sem guardião e payload com CRC32;
 - integração serial ESP32/notebook para comandos de bancada da Wisdom;
+- backend ML-KEM-512 real no firmware, usando `mlkem-native` v1.1.0;
+- medições iniciais de ML-KEM-512 em `BASELINE` e `OBC-1U-LIMITED`;
 - uma proposta acadêmica em DOCX;
 - um roadmap e especificações para as próximas etapas.
 
-O dashboard atual **não executa ML-KEM**. O guardião CRC32 já existe para o
-experimento de payload; a criptografia pós-quântica real é o próximo marco
-técnico. A interface identifica esse estado como `PQC: ALVO ML-KEM-512` e
-`GUARD: NONE` ou `GUARD: CRC32`.
+O dashboard não executa ML-KEM localmente; ele consulta a placa via
+`PQC_STATUS`/`PQC_INFO`. O guardião CRC32 já existe para o experimento de
+payload, e a criptografia pós-quântica real existe no firmware como comando de
+bancada. A interface identifica o estado retornado pela placa e mantém
+`GUARD: NONE` ou `GUARD: CRC32` para o experimento de payload.
 
 A primeira integração real com a placa está em `firmware/`,
 `tools/serial_console.py` e no modo serial do `dashboard.py`: ela valida
 transporte serial, handshake, `PING`, `STATUS`, `TELEMETRY`, sensores,
-atuadores, OLED, troca de perfil operacional e inventário da placa, ainda com
-`crypto=none` e `fault=payload_crc32`.
+atuadores, OLED, troca de perfil operacional, inventário da placa, ML-KEM-512
+real e `fault=payload_crc32`.
 
 ## Objetivo experimental
 
@@ -50,7 +53,7 @@ ciphertext ML-KEM e detecção no nível de protocolo.
 
 O firmware também deverá comparar o ESP32 sem limitação adicional com o perfil
 experimental `OBC-1U-LIMITED`: um core, 80 MHz, sem PSRAM, rádio desativado,
-orçamento de 256 KiB, frames UART de 256 bytes e telemetria a 1 Hz. Esse perfil
+orçamento de 256 KiB, comandos UART curtos e telemetria a 1 Hz. Esse perfil
 é uma política didática reproduzível, não uma especificação universal de
 CubeSat.
 
@@ -143,19 +146,27 @@ V1|request_id|COMMAND|arg1
 V1|request_id|RESULT|OK|key=value
 ```
 
+O firmware mantém comandos recebidos curtos; o parser do host aceita respostas
+de até 512 caracteres para acomodar `PQC_INFO` e helps de bancada.
+
 ## Comandos do dashboard
 
 | Comando | Comportamento atual |
 |---|---|
 | `INJECT_FAULT` | Aplica bit-flip determinístico no payload sem guardião; payload alterado aceito vira `SILENT`. |
 | `BIT_FLIP [index mask]` | Aplica bit-flip manual, por exemplo `BIT_FLIP 0 0x01`. |
-| `PQC_STATUS` | Informa que o alvo criptográfico é ML-KEM-512 na placa e que ainda está pendente. |
+| `PQC_STATUS` | Consulta `PQC_INFO` quando a placa está online; sem placa, informa pendência local. |
 | `CRC_CHECK` | Aplica bit-flip e compara CRC32 real; divergência vira `DETECTED_GUARD`. |
+| `EXPORT_JSON` | Salva a sessão atual em `logs/` com eventos, resumo e métricas de hardware. |
+| `SAVE_SESSION` | Alias de `EXPORT_JSON`. |
+| `RUN_BATTERY n` | Executa bateria A/B com `n` tentativas por cenário, reaplica os mesmos fault specs e exporta JSON. |
 | `RESET_SESSION` | Zera contadores e reinicia a seed da campanha. |
 | `HELP` | Exibe uma lista única com os comandos mais relevantes da demonstração. |
 
 Os resultados desses comandos saem de bytes antes/depois e do CRC32, não de
-probabilidades. O backend PQC real ainda não está instalado no firmware.
+probabilidades. O backend PQC real está instalado no firmware como comando de
+bancada, mas os comandos técnicos `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`,
+`PQC_DECAP` e `PQC_BENCH` ficam fora do `HELP` visual da apresentação.
 
 ## Comandos da demonstração ao vivo
 
@@ -183,7 +194,10 @@ curta e voltada para a apresentação:
 | `INJECT_FAULT` | Injeta falha determinística sem guardião. |
 | `BIT_FLIP [i m]` | Inverte um bit escolhido manualmente. |
 | `CRC_CHECK` | Demonstra detecção real por CRC32. |
-| `PQC_STATUS` | Mostra o alvo PQC e o estado da instalação na placa. |
+| `EXPORT_JSON` | Salva a sessão atual em JSON. |
+| `SAVE_SESSION` | Alias de exportação. |
+| `RUN_BATTERY n` | Executa bateria A/B e exporta JSON. |
+| `PQC_STATUS` | Mostra alvo, backend e estado PQC sem afirmar criptografia ativa. |
 | `RESET_SESSION` | Zera a sessão da demonstração. |
 
 Comandos de bancada, inventário, debug e expansão ficam centralizados em
@@ -195,28 +209,32 @@ demonstração visual.
 
 Estado atual:
 
-- Etapa 01: concluída, com `ExperimentEngine`, eventos e efeitos reais.
-- Etapa 02: parcial, com timeline simples derivada dos eventos.
-- Etapa 04/05: funcionais para Wisdom, bridge serial e `FAULT` com CRC32.
-- Etapa 06: parcial, com CRC32 real por tentativa; falta campanha A/B formal.
+- Etapas 01, 02 e 03: concluídas no código; os markdowns dessas etapas foram
+  removidos para não duplicar a fonte de verdade.
+- Etapa 04/05: funcionais para Wisdom, bridge serial, `FAULT` com CRC32 e
+  ML-KEM-512 real via `mlkem-native` v1.1.0, commit `d2cae2b`; medição
+  inicial feita em `BASELINE` e `OBC-1U-LIMITED`.
+- Etapa 06: parcial, com CRC32 real e `RUN_BATTERY` A/B; falta transformar a
+  bateria em fluxo visual de apresentação com overlay calculado.
 
 Próximos cortes, nesta ordem:
 
-1. Etapa 04: portar/instalar ML-KEM-512 na placa, com KAT e benchmark de
-   tempo, heap e flash nos perfis `BASELINE` e `OBC-1U-LIMITED`.
+1. Etapa 06: exportar métricas PQC no JSON da campanha sem segredos completos.
 2. Etapa 06: expandir a radiação simulada manual para bit-flips em payload e,
    quando o KEM estiver pronto, ciphertext, mantendo checksum ativável ou
    desativável.
-3. Etapa 03: implementar `EXPORT_JSON`, `SAVE_SESSION` e `RUN_BATTERY` para
-   salvar eventos e métricas de hardware em JSON versionado.
-4. Etapa 06: criar campanha A/B que reaplica os mesmos fault specs em `NONE`
-   e `CRC32`.
-5. Etapa 07: automatizar `DEMO`, pausa/parada e overlay calculado.
-6. Etapa 08: validar projetor, roteiro e robustez final.
+3. Etapa 06/07: transformar `RUN_BATTERY` em fluxo visual de apresentação com
+   pausa, parada e overlay calculado.
+4. Etapa 04/08: executar bateria PQC prolongada, validar projetor, roteiro e
+   robustez final.
 
-ML-KEM-512 deve entrar agora como experimento de bancada controlado. Ele só
-vira comando de demonstração depois que o firmware passar vetor conhecido,
-reportar métricas e não expor segredos completos no console ou no JSON.
+Validação real em placa após upload: `PQC_KAT` retornou `kat=pass` com
+`ss_crc32=0xD9DA8D6C`; `PQC_DECAP` retornou `key_match=1`; `PQC_BENCH 5`
+em `BASELINE` retornou `keygen_avg_us=3369`, `encap_avg_us=3878` e
+`decap_avg_us=5013`; `PQC_BENCH 5` em `OBC-1U-LIMITED` retornou
+`keygen_avg_us=10101`, `encap_avg_us=11778` e `decap_avg_us=15214`. Nenhum
+comando imprime chave privada, segredo compartilhado completo ou material
+suficiente para reconstruir a sessão.
 
 ## Estrutura
 
@@ -230,7 +248,7 @@ reportar métricas e não expor segredos completos no console ou no JSON.
 | `hardware_command_reference.md` | Referência única de comandos completos de hardware/bancada. |
 | `projeto_final_pqc_esp32_cubesat.docx` | Proposta acadêmica formal. |
 | `ROADMAP.md` | Plano consolidado, critérios e ordem recomendada. |
-| `etapa_01_*.md` a `etapa_08_*.md` | Especificações de implementação por etapa. |
+| `etapa_04_*.md` a `etapa_08_*.md` | Especificações pendentes de implementação por etapa. |
 | `agents.md` | Regras e contexto para agentes de IA. |
 | `requirements.txt` | Dependência reproduzível do dashboard. |
 

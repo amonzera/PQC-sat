@@ -12,15 +12,18 @@ Parcialmente implementada:
 
 - `CRC_CHECK` calcula CRC32 antes e depois da mutação;
 - `INJECT_FAULT` representa o cenário `NONE`;
+- `RUN_BATTERY n` reaplica a mesma lista de fault specs em `NONE` e `CRC32`
+  e exporta a sessão em JSON;
 - o firmware ESP32 aceita `FAULT NONE|CRC32 payload_hex index mask` e retorna
   `SILENT` ou `DETECTED_GUARD` com CRC antes/depois;
 - testes cobrem single-bit em payload curto no engine Python.
 
 Ainda falta para concluir a etapa:
 
-- reaplicar exatamente a mesma campanha nos cenários A e B;
-- registrar overhead agregado de `prepare`/`verify`;
-- exportar os dois cenários no mesmo JSON;
+- registrar overhead separado de `prepare`/`verify`;
+- cobrir campanhas multi-bit, bursts, checksum corrompido e região fora da
+  cobertura;
+- integrar a bateria A/B ao modo apresentação;
 - documentar limitações no relatório final.
 
 ## Escopo mínimo
@@ -106,6 +109,7 @@ confirmação de chave. Registre separadamente:
 ## Aceite
 
 - [x] Resultados vêm de comparação real.
-- [ ] Mesma campanha é usada em A e B.
+- [x] Mesma campanha é usada em A e B via `RUN_BATTERY`.
+- [x] Os dois cenários são exportados no mesmo JSON.
 - [ ] Overhead agregado é medido, não inventado.
 - [ ] Limitações do mecanismo aparecem no relatório.

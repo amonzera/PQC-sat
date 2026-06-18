@@ -43,7 +43,9 @@ V1|request_id|RESULT|status|key=value
 Requisitos:
 
 - uma linha por frame;
-- tamanho máximo;
+- comandos recebidos pelo firmware continuam limitados a 256 caracteres;
+- respostas lidas pelo host aceitam até 512 caracteres para `PQC_INFO` e
+  helps de bancada;
 - parser estrito;
 - timeout por request;
 - resposta de erro para comando desconhecido;
@@ -88,6 +90,7 @@ python3 dashboard.py --simulated
 
 Quando o modo serial esta ativo:
 
+- argumentos sao processados antes de inicializar o display fullscreen;
 - `DashboardSerialClient` roda em uma thread daemon;
 - o loop Pygame apenas enfileira comandos e drena respostas;
 - a thread tenta detectar/reconectar a Wisdom automaticamente;
@@ -96,14 +99,13 @@ Quando o modo serial esta ativo:
 - somente comandos de demonstracao do firmware sao encaminhados para a ESP32
   pelo dashboard;
 - comandos completos de bancada ficam em `hardware_command_reference.md`;
-- comandos didaticos locais continuam simulados;
+- comandos locais de experimento continuam no dashboard e usam o engine
+  deterministico;
 - `HELP` abre a lista de comandos da demonstracao no painel;
 - `close()` sinaliza a thread e fecha a serial ao sair.
 
 Pendencias conhecidas:
 
-- `pygame.init()` e a criacao do display ainda acontecem antes do parse de
-  argumentos;
 - ainda nao ha fake serial dedicado para testes automatizados do dashboard.
 
 ## Segurança e robustez

@@ -17,9 +17,11 @@ minutos.
 
 ## Estado atual
 
-Não implementada. O dashboard já tem os comandos manuais necessários para uma
-demo guiada (`INJECT_FAULT`, `CRC_CHECK`, `BIT_FLIP`, `RESET_SESSION`), mas
-ainda não há máquina de estados automática para campanha A/B.
+Não implementada como modo visual automático. O dashboard já tem os comandos
+manuais necessários para uma demo guiada (`INJECT_FAULT`, `CRC_CHECK`,
+`BIT_FLIP`, `RESET_SESSION`) e a bateria `RUN_BATTERY n`, que executa A/B e
+exporta JSON. Ainda não há máquina de estados com temporizador, pausa,
+snapshots e overlay calculado.
 
 Para o objetivo atual, o modo apresentação deve demonstrar:
 
@@ -65,6 +67,9 @@ participação da turma e discussão.
 - `DEMO_STOP`: para sem apagar dados;
 - `DEMO_RESTART`: reinicia com a mesma seed.
 
+`RUN_BATTERY n` permanece como comando técnico de coleta; `DEMO` deve
+reaproveitar a mesma lógica, mas com estados visuais e controle de tempo.
+
 `ESC` fecha apenas o overlay, sem destruir os dados.
 
 ## Estados
@@ -90,8 +95,8 @@ STOPPED
 
 ## Aceite
 
-- [ ] A e B usam a mesma campanha.
+- [x] A e B usam a mesma campanha em `RUN_BATTERY`.
 - [ ] Overlay é derivado dos dados.
 - [ ] Demo pode ser pausada e interrompida.
-- [ ] JSON final contém os dois cenários.
+- [x] JSON final contém os dois cenários quando exportado por `RUN_BATTERY`.
 - [ ] Duração foi cronometrada.

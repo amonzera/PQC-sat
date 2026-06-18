@@ -21,6 +21,12 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("STATUS", "mostra CPU, heap, flash, perfil e rádio"),
     CommandInfo("TELEMETRY", "lê uptime, heap, potenciômetro, som, botão e relé"),
     CommandInfo("FAULT NONE|CRC32 payload_hex index mask", "aplica bit-flip em payload e compara CRC32"),
+    CommandInfo("PQC_INFO", "reporta backend ML-KEM-512, tamanhos e métricas"),
+    CommandInfo("PQC_KAT", "executa vetor conhecido determinístico e retorna digest curto"),
+    CommandInfo("PQC_KEYGEN", "gera par ML-KEM-512 e mede tempo/heap"),
+    CommandInfo("PQC_ENCAP", "encapsula usando chave pública armazenada"),
+    CommandInfo("PQC_DECAP", "decapsula ciphertext armazenado e compara segredo"),
+    CommandInfo("PQC_BENCH n", "executa n rodadas keygen/encap/decap"),
     CommandInfo("PERIPHERALS", "detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C"),
     CommandInfo("I2C_SCAN", "varre o barramento I2C SDA21/SCL22"),
     CommandInfo("FEATURES [CORE|I2C|GPIO|ANALOG|EXPANSION]", "lista grupos de recursos conhecidos"),
@@ -47,9 +53,12 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
 DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("INJECT_FAULT", "aplica bit-flip determinístico sem guardião"),
     CommandInfo("BIT_FLIP [index mask]", "aplica bit-flip determinístico ou manual"),
-    CommandInfo("PQC_STATUS", "mostra alvo ML-KEM-512 pendente na placa"),
+    CommandInfo("PQC_STATUS", "consulta PQC_INFO na placa ou mostra pendência local"),
     CommandInfo("CRC_CHECK", "aplica bit-flip e verifica CRC32 real"),
-    CommandInfo("RESET_SESSION", "zera contadores simulados e reinicia a seed"),
+    CommandInfo("EXPORT_JSON", "salva eventos e métricas em JSON"),
+    CommandInfo("SAVE_SESSION", "alias de EXPORT_JSON"),
+    CommandInfo("RUN_BATTERY n", "executa bateria A/B e exporta JSON"),
+    CommandInfo("RESET_SESSION", "salva dados pendentes, zera sessão e reinicia a seed"),
     CommandInfo("HELP", "mostra a lista simples da demonstração"),
 )
 

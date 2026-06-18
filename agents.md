@@ -39,24 +39,32 @@ implementar.
 - dashboard fullscreen em `dashboard.py`;
 - Terra, CubeSat, estrelas, nebulosa e partículas procedurais;
 - painel de telemetria e console;
-- comandos simulados: `INJECT_FAULT`, `BIT_FLIP`, `PQC_STATUS`,
-  `CRC_CHECK`, `PING`, `TELEMETRY`, `RESET_SESSION` e `HELP`;
+- comandos locais do dashboard: `INJECT_FAULT`, `BIT_FLIP`, `PQC_STATUS`,
+  `CRC_CHECK`, `EXPORT_JSON`, `SAVE_SESSION`, `RUN_BATTERY`,
+  `RESET_SESSION` e `HELP`;
 - firmware serial `V1` para a RoboCore BlackBoard Wisdom;
 - bridge serial Python e console `tools/serial_console.py`;
 - modo padrão de `dashboard.py` tenta detectar a Wisdom e encaminha comandos do
   console visual para a ESP32 sem bloquear o loop Pygame;
 - seed exclusiva para os resultados de falha (`42`);
-- indicadores explícitos de modo simulado.
+- indicadores explícitos de modo simulado;
 - mutação real de payload com CRC32 no dashboard e no firmware via
-  `FAULT NONE|CRC32 payload_hex index mask`.
+  `FAULT NONE|CRC32 payload_hex index mask`;
+- backend ML-KEM-512 real na Wisdom com `mlkem-native` v1.1.0, commit
+  `d2cae2b`, vendorizado em `firmware/lib/mlkem_native`;
+- comandos PQC de bancada: `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`,
+  `PQC_DECAP` e `PQC_BENCH`; validação real em placa teve `PQC_KAT kat=pass`
+  e `PQC_DECAP key_match=1`;
+- medição inicial em placa: `PQC_BENCH 5` em `BASELINE` a 240 MHz retornou
+  `keygen_avg_us=3369`, `encap_avg_us=3878`, `decap_avg_us=5013`; em
+  `OBC-1U-LIMITED` a 80 MHz retornou `keygen_avg_us=10101`,
+  `encap_avg_us=11778`, `decap_avg_us=15214`;
+- exportação JSON com eventos, resumo e amostras de hardware.
 
 ### Não implementado
 
-- operação ML-KEM-512 real;
 - mutação real de ciphertext ML-KEM;
-- campanha A/B completa com a mesma lista de fault specs;
-- exportação JSON e bateria de testes;
-- modo de apresentação;
+- modo apresentação A/B completo com pausa, snapshots e overlay calculado;
 - slides e roteiro final.
 
 ## 4. Stack
@@ -69,14 +77,16 @@ implementar.
 | Renderização | pygame-ce 2.5.7 |
 | Aplicação | `dashboard.py` monolítico |
 | Assets | desenho procedural, sem arquivos externos |
+| Serial | pyserial 3.5+ opcional |
+| Firmware | Arduino/PlatformIO para BlackBoard Wisdom |
+| PQC | ML-KEM-512 com `mlkem-native` v1.1.0 vendorizado |
 
 ### Planejada
 
 | Componente | Tecnologia candidata |
 |---|---|
-| Serial | pyserial 3.5+ opcional |
-| Firmware | ESP-IDF preferencialmente; Arduino somente se a biblioteca escolhida suportar |
-| PQC | ML-KEM-512 na Wisdom; Kyber512 identificado apenas como fallback rotulado |
+| Firmware futuro | ESP-IDF se a apresentação exigir troca de framework |
+| PQC futuro | Kyber512 apenas se identificado como fallback rotulado; ML-KEM-768+ fora do MVP |
 
 `pqm4` é voltado a ARM Cortex-M4 e não deve ser tratado como drop-in para
 ESP32 Xtensa. `liboqs` é útil para prototipagem no host, mas não há no projeto
@@ -96,6 +106,17 @@ ML-KEM/FIPS 203.
 - Não bloqueie o loop principal com `sleep`, I/O serial ou criptografia longa.
 - Não carregue imagens, sons ou fontes externas sem decisão explícita.
 - Não mostre `ESP32 ONLINE`, `CRC ON` ou `ML-KEM ativo` sem evidência real.
+- O dashboard é a superfície da apresentação ao vivo. Mantenha nele apenas
+  comandos pertinentes ao roteiro visual e didático: falha manual, checksum,
+  telemetria essencial, exportação, bateria de demonstração e controles visuais
+  necessários. Comandos de bancada, inventário, debug, expansão de hardware,
+  endpoints técnicos ainda pendentes ou operações perigosas devem ficar fora do
+  `HELP` visual e fora do fluxo principal do dashboard.
+- Todo comando útil que não pertença à apresentação deve continuar registrado
+  para uso técnico em outro lugar: `hardware_command_reference.md`,
+  `tools/serial_console.py --all-commands`, documentação de etapa ou scripts de
+  bancada. Não apague capacidade técnica só porque ela não aparece no
+  dashboard; apenas separe a superfície da demo da superfície de engenharia.
 - Resultados experimentais devem vir de bytes mutados e verificações reais.
 - Mantenha a aleatoriedade do experimento separada da aleatoriedade visual.
 - Trate `OBC-1U-LIMITED` como perfil experimental, não como especificação
@@ -163,13 +184,12 @@ compilação.
 
 ## 8. Próxima ordem de trabalho
 
-1. Etapa 04: portar/instalar ML-KEM-512 na placa, registrar fonte/commit/licença
-   e validar KAT.
+1. Etapa 06: exportar amostras PQC no JSON da campanha sem expor segredos
+   completos.
 2. Etapa 06: ligar bit-flips manuais e checksum ativável/desativável ao fluxo
    de payload e, depois do KEM estável, ao ciphertext.
-3. Etapa 03: exportação JSON e bateria de testes com eventos e métricas de
-   hardware.
-4. Etapa 07: demo com a mesma campanha nos cenários A e B.
-5. Etapa 08: testes, projetor, slides, roteiro e relatório.
+3. Etapa 07: demo com a mesma campanha nos cenários A e B.
+4. Etapa 04/08: bateria PQC prolongada, testes, projetor, slides, roteiro e
+   relatório.
 
 Última revisão: 2026-06-17.

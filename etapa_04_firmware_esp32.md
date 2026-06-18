@@ -101,18 +101,30 @@ Escopo atual do firmware Wisdom:
   payload e comparacao de CRC32;
 - suporte minimo ao OLED SSD1306 para inicializacao, limpeza, padrao de teste
   e standby com icone pixel-art do robo/satelite usado no dashboard;
-- build PlatformIO validado e gravado em `/dev/ttyUSB0`: 49.188 bytes de RAM
-  estimada e 898.341 bytes de flash;
+- backend ML-KEM-512 real vendorizado em `firmware/lib/mlkem_native`, usando
+  `mlkem-native` v1.1.0, commit `d2cae2b`, licença
+  `Apache-2.0 OR ISC OR MIT`;
+- build PlatformIO validado apos ML-KEM real: 55.724 bytes de RAM estimada
+  e 912.541 bytes de flash;
+- upload desta revisão executado em `/dev/ttyUSB0` e verificado por hash pelo
+  `esptool.py`;
 - validacao real em placa: `HELLO`, `STATUS`, `FAULT NONE ... 0 0x01` e
   `FAULT CRC32 ... 0 0x01`.
 - perfis validados em placa: `PROFILE OBC-1U-LIMITED` reportou 80 MHz e
   `PROFILE BASELINE` reportou 240 MHz.
+- validação real de ML-KEM em placa: `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`,
+  `PQC_ENCAP`, `PQC_DECAP` e `PQC_BENCH 2` funcionais; `PQC_KAT` retornou
+  `kat=pass`, `ss_crc32=0xD9DA8D6C`; `PQC_DECAP` retornou `key_match=1`.
+- medição inicial de ML-KEM em placa nos dois perfis: `PQC_BENCH 5` em
+  `BASELINE` e `OBC-1U-LIMITED`, mais `PQC_INFO` e `PQC_KAT` no perfil
+  limitado.
 
-Pendencias antes de considerar a etapa concluida:
+Pendencias para coleta final e relatório:
 
-- validar na placa real os comandos de perifericos apos upload;
-- medir comandos de perifericos com a placa em bancada depois da limpeza;
-- congelar ou substituir o framework antes do backend criptografico.
+- executar bateria maior que `PQC_BENCH 5` sem watchdog;
+- registrar tabela final de tempo, heap, heap mínimo e flash no relatório;
+- exportar amostras PQC no JSON da campanha sem segredos completos;
+- decidir se Arduino/PlatformIO fica congelado como framework final.
 
 ### Marco 1 - transporte
 
@@ -133,7 +145,8 @@ Pendencias antes de considerar a etapa concluida:
 
 ### Marco 3 - backend criptográfico
 
-Estado: **próximo marco de implementação**.
+Estado: **backend ML-KEM-512 real implementado, validado em placa e medido nos
+perfis `BASELINE` e `OBC-1U-LIMITED`; bateria prolongada pendente**.
 
 Objetivo imediato: executar ML-KEM-512 na Wisdom, com variante, fonte, commit
 e licença registrados. Se a primeira porta viável for Kyber512 pré-FIPS, ela
@@ -148,28 +161,37 @@ Escolher uma opção e rotular corretamente:
 
 Não chamar AES, hash ou bytes aleatórios de ML-KEM.
 
-Comandos seriais planejados para entrar somente depois de cada função existir:
+Interface serial implementada:
 
 | Comando | Função |
 |---|---|
-| `PQC_INFO` | Reporta variante, parâmetros, fonte, commit, licença, tamanhos e backend. |
-| `PQC_KAT` | Executa vetor conhecido e retorna apenas status, tempo e métricas. |
-| `PQC_KEYGEN` | Mede geração de chaves sem imprimir chave completa. |
-| `PQC_ENCAP` | Encapsula para chave pública de teste e retorna digest curto do segredo. |
-| `PQC_DECAP` | Decapsula ciphertext de teste e retorna digest curto do segredo. |
-| `PQC_BENCH n` | Executa `n` iterações e retorna tempo, heap, heap mínimo e resets. |
+| `PQC_INFO` | Reporta `pqc_target=ML-KEM-512`, `pqc_backend=mlkem-native`, `pqc_status=ready`, variante, commit, licença, tamanhos, CPU, heap, flash, perfil e tempo. |
+| `PQC_KAT` | Executa vetor determinístico do projeto com `*_derand`; compara o segredo esperado e retorna digests curtos. |
+| `PQC_KEYGEN` | Gera par ML-KEM-512 real, armazena na RAM e retorna tempo, heap e digest curto da chave pública. |
+| `PQC_ENCAP` | Encapsula usando a chave pública armazenada e retorna tempo, digest curto do ciphertext e digest curto do segredo. |
+| `PQC_DECAP` | Decapsula o ciphertext armazenado e retorna `key_match` comparando os segredos. |
+| `PQC_BENCH n` | Executa `n` rodadas keygen/encap/decap, limitado a 1..20 por comando. |
 
-O dashboard só deve expor esses comandos no `HELP` da demonstração quando eles
-tiverem sido testados na placa. Até lá, `PQC_STATUS` permanece como indicador
-de alvo pendente.
+Esses comandos continuam fora do `HELP` visual do dashboard. Eles são comandos
+de bancada; o dashboard usa `PQC_STATUS` para consultar `PQC_INFO` sem expor
+opções técnicas demais durante a apresentação.
+
+Medição real registrada em 2026-06-17:
+
+| Perfil | CPU | Comando | Resultado |
+|---|---:|---|---|
+| `BASELINE` | 240 MHz | `PQC_BENCH 5` | `keygen_avg_us=3369`, `encap_avg_us=3878`, `decap_avg_us=5013`, `elapsed_us=62068`, `heap=202444`, `min_heap=198456` |
+| `OBC-1U-LIMITED` | 80 MHz | `PQC_INFO` | `pqc_status=ready`, `pk=800`, `sk=1632`, `ct=768`, `ss=32`, `elapsed_us=24697`, `heap=202444`, `min_heap=198456`, `flash=4194304` |
+| `OBC-1U-LIMITED` | 80 MHz | `PQC_KAT` | `kat=pass`, `key_match=1`, `ss_crc32=0xD9DA8D6C`, `elapsed_us=39270` |
+| `OBC-1U-LIMITED` | 80 MHz | `PQC_BENCH 5` | `keygen_avg_us=10101`, `encap_avg_us=11778`, `decap_avg_us=15214`, `elapsed_us=187371`, `heap=202444`, `min_heap=198456` |
 
 ### Marco 4 - validação
 
-- KAT/vetor conhecido;
-- encapsulação e decapsulação produzem o mesmo segredo sem falha;
-- versão e parâmetros aparecem na telemetria;
-- 100 iterações sem watchdog;
-- RAM, flash e tempos registrados.
+- [x] KAT/vetor conhecido;
+- [x] encapsulação e decapsulação produzem o mesmo segredo sem falha;
+- [x] versão e parâmetros aparecem na telemetria;
+- [ ] 100 iterações sem watchdog;
+- [x] RAM, flash e tempos registrados para a medição inicial.
 
 Cada benchmark deve ser executado nos dois perfis. O relatório compara:
 
@@ -243,6 +265,6 @@ telemetria.
 - [x] Perfis `BASELINE` e `OBC-1U-LIMITED` reproduzíveis.
 - [x] Protocolo serial inicial funciona no codigo antes da PQC.
 - [x] CRC32 funciona antes da PQC.
-- [ ] Backend criptográfico identificado sem marketing indevido.
-- [ ] KAT e métricas anexados.
-- [ ] Fallback continua sendo tecnicamente honesto.
+- [x] Backend criptográfico identificado sem marketing indevido.
+- [x] KAT e métricas iniciais anexados.
+- [x] Fallback continua sendo tecnicamente honesto.

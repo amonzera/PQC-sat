@@ -1,0 +1,12 @@
+{
+  "name": "mlkem_native",
+  "version": "1.1.0-vendored",
+  "description": "Vendored C-only mlkem-native ML-KEM implementation for PQC-SAT firmware",
+  "license": "Apache-2.0 OR ISC OR MIT",
+  "build": {
+    "flags": [
+      "-DMLK_CONFIG_PARAMETER_SET=512",
+      "-DMLK_CONFIG_NAMESPACE_PREFIX=PQC_SAT_MLKEM512"
+    ]
+  }
+}
