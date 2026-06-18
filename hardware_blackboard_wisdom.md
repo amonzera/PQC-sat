@@ -240,9 +240,11 @@ Os comandos completos de bancada, inventario, debug e expansao ficam em
 `hardware_command_reference.md`.
 
 O console interativo do terminal e o console visual do dashboard aceitam
-`HELP` para listar os comandos de demonstracao. No dashboard, comandos do firmware
-como `PING`, `STATUS`, `TELEMETRY`, `OLED STANDBY`, `RGB 0 255 0`,
-`BARGRAPH 75` e `SENSOR_READ ACCEL` sao encaminhados para a ESP32. O dashboard
+`HELP` para listar os comandos de demonstracao. No dashboard, os blocos
+principais acionam `MISSION CLASSIC`, `MISSION PQC` e `MISSION PQC_CRC32`.
+Comandos de apoio como `PING`, `TELEMETRY`, `RGB 0 255 0`, `BARGRAPH 75` e
+`SENSOR_READ ACCEL` ficam no terminal textual/HELP e são encaminhados para a
+ESP32 quando digitados. O dashboard
 tenta detectar a placa automaticamente; se o firmware `PQC-SAT-WISDOM` nao
 responder ao handshake `HELLO`, a arte do satelite fica travada e nao e
 desenhada na orbita.
@@ -254,9 +256,10 @@ Para o projeto PQC-SAT, o caminho mais direto e cientificamente controlado e:
 1. preservar o backup atual;
 2. gravar o firmware serial do projeto;
 3. validar bridge, inventario, I2C, entradas, sensores e atuadores;
-4. manter `FAULT NONE|CRC32` como base de radiacao simulada de payload;
-5. integrar ML-KEM-512/Kyber512 validado e medido antes de expor comandos PQC
-   no dashboard.
+4. usar `MISSION CLASSIC|PQC|PQC_CRC32` como fluxo principal de apresentação;
+5. manter `FAULT NONE|CRC32` como base de radiacao simulada de payload;
+6. manter ML-KEM-512 validado e medido antes de qualquer afirmação de PQC no
+   dashboard.
 
 O risco de brick permanente e baixo porque o bootloader ROM do ESP32 respondeu
 de forma confiavel. O risco real e sobrescrever o ambiente original da

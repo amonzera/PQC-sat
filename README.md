@@ -15,13 +15,15 @@ O repositório contém hoje:
 - backend ML-KEM-512 real no firmware, usando `mlkem-native` v1.1.0;
 - medições de ML-KEM-512 até `PQC_BENCH 100` em `BASELINE` e
   `OBC-1U-LIMITED`;
+- entrega real de mensagem pelo firmware nos cenários `MISSION CLASSIC`,
+  `MISSION PQC` e `MISSION PQC_CRC32`, com tempos, bytes, heap e resultado;
 - injeção manual de bit-flip em ciphertext ML-KEM com confirmação
   HMAC-SHA256 da chave derivada;
 - modo `DEMO` A/B cronometrado, com pausa, retomada, parada, overlay calculado
   e exportação JSON;
 - splash inicial opcional, autosave no encerramento, métricas superiores
-  essenciais de CPU/RAM/PQC/checksum e testes headless para 1920x1080 e
-  1366x768;
+  essenciais de CPU/RAM/CLÁSSICA/PQC/PQC+CRC e testes headless para 1920x1080
+  e 1366x768;
 - roteiro de apresentação com cinco slides, sequência de demo e limites
   científicos;
 - guia didático completo para conduzir a apresentação com público leigo em
@@ -29,14 +31,14 @@ O repositório contém hoje:
 - uma proposta acadêmica em DOCX;
 - um roadmap consolidado como histórico final das etapas implementadas.
 
-O dashboard não executa ML-KEM localmente; ele consulta a placa via
-`PQC_STATUS`/`PQC_INFO` e exporta as respostas `PQC_*` como métricas. O
-guardião CRC32 já existe para o experimento de payload, e a criptografia
-pós-quântica real existe no firmware como comando de bancada, incluindo
-`PQC_FAULT index mask [CONFIRM|NONE]` para corromper ciphertext e observar
-`KEY_MISMATCH` ou `PROTOCOL_REJECT`. A interface identifica o estado retornado
-pela placa e mantém `GUARD: NONE` ou `GUARD: CRC32` para o experimento de
-payload.
+O dashboard não executa ML-KEM localmente; ele aciona a placa via `MISSION`,
+`PQC_STATUS`/`PQC_INFO` e exporta as respostas `MISSION` e `PQC_*` como
+métricas. O guardião CRC32 já existe para o experimento de payload, e a
+criptografia pós-quântica real existe no firmware, incluindo `MISSION PQC`,
+`MISSION PQC_CRC32` e `PQC_FAULT index mask [CONFIRM|NONE]` para corromper
+ciphertext e observar `KEY_MISMATCH` ou `PROTOCOL_REJECT`. A interface
+identifica o estado retornado pela placa e mantém `GUARD: NONE` ou
+`GUARD: CRC32` para o experimento de payload.
 
 A primeira integração real com a placa está em `firmware/`,
 `tools/serial_console.py` e no modo serial do `dashboard.py`: ela valida
@@ -46,7 +48,19 @@ real e `fault=payload_crc32`.
 
 ## Objetivo experimental
 
-A entrega final deve comparar, com a mesma campanha determinística de falhas:
+A entrega final deve comparar duas dimensões complementares:
+
+1. custo de comunicação segura em hardware limitado;
+2. comportamento sob falhas de bit.
+
+Para custo de comunicação, a demonstração principal compara:
+
+1. `CLASSIC`: payload autenticado por `HMAC-SHA256`;
+2. `PQC`: acordo de segredo com `ML-KEM-512` e autenticação da mensagem;
+3. `PQC_CRC32`: o mesmo fluxo PQC com CRC32 adicional no payload.
+
+Para consistência sob falha, o dashboard ainda compara, com a mesma campanha
+determinística:
 
 1. dados sem proteção adicional;
 2. dados protegidos por um mecanismo leve de integridade;
@@ -180,6 +194,7 @@ bancada.
 | `CHECKSUM ON\|OFF\|TOGGLE\|STATUS` | Liga/desliga o guardião CRC32 do fluxo manual. |
 | `GUARD NONE\|CRC32` | Define explicitamente o guardião ativo. |
 | `PQC_STATUS` | Consulta `PQC_INFO` quando a placa está online; sem placa, informa pendência local. |
+| `MISSION CLASSIC\|PQC\|PQC_CRC32` | Envia mensagem de missão na placa e mede tempo, bytes, heap e resultado por cenário. |
 | `CRC_CHECK` | Atalho que aplica uma tentativa forçada com CRC32; divergência vira `DETECTED_GUARD`. |
 | `EXPORT_JSON` | Salva a sessão atual em `logs/` com eventos, resumo e métricas de hardware. |
 | `SAVE_SESSION` | Alias de `EXPORT_JSON`. |
@@ -206,13 +221,12 @@ comandos avançados, inclusive comandos fora do escopo visual da demo:
 | Bloco/comando | Uso na demonstração |
 |---|---|
 | `STATUS` | Mostra CPU, heap e rádio. |
-| `PQC` / `PQC_STATUS` | Mostra alvo, backend e estado PQC sem afirmar criptografia ativa. |
+| `CLÁSSICA` / `MISSION CLASSIC` | Envia mensagem autenticada por HMAC-SHA256 e mede o baseline clássico. |
+| `PQC` / `MISSION PQC` | Envia mensagem após acordo de segredo ML-KEM-512 e mede o custo PQC. |
+| `PQC+CRC` / `MISSION PQC_CRC32` | Repete a mensagem PQC com CRC32 no payload e mede o acréscimo. |
 | `DEMO` | Executa a apresentação A/B automatizada. |
 | `PAUSA` / `DEMO_PAUSE` | Pausa a apresentação A/B. |
-| `CHK ON` / `CHECKSUM ON` | Liga o guardião CRC32 para as próximas falhas manuais. |
-| `CHK OFF` / `CHECKSUM OFF` | Desliga o guardião e volta ao cenário sem proteção. |
 | `FALHA` / `INJECT_FAULT` | Injeta falha determinística respeitando o guardião ativo. |
-| `CRC32` / `CRC_CHECK` | Demonstra uma tentativa forçada com detecção real por CRC32. |
 | `EXPORT` / `EXPORT_JSON` | Salva a sessão atual em JSON. |
 | `OLED STANDBY` | Restaura o ícone no display. |
 | `BIT_FLIP [i m]` | Inverte um bit escolhido manualmente. |
@@ -227,15 +241,15 @@ dashboard; eles não aparecem como blocos clicáveis da demonstração visual.
 Isso inclui `PING`, `TELEMETRY`, `RUN_BATTERY`, `LED`, `RGB`, `BARGRAPH`,
 sensores e comandos PQC de bancada.
 
-Durante a animação, a faixa superior central mostra métricas básicas e
-experimentais essenciais: CPU em MHz mais `% ativo` observado na janela móvel
-de 5s, RAM livre, resumo PQC e detecção/overhead de checksum. Não há polling
-automático de `TELEMETRY`; `STATUS`, `PQC_STATUS` e comandos avançados são
+Durante a animação, a faixa superior central mostra métricas essenciais: CPU em
+MHz mais `% ativo` observado na janela móvel de 5s, RAM livre e os últimos
+tempos/bytes de `CLÁSSICA`, `PQC` e `PQC+CRC`. Não há polling automático de
+`TELEMETRY`; `STATUS`, `MISSION ...`, `PQC_STATUS` e comandos avançados são
 acionados manualmente pelo botão ou pelo terminal textual. Sem medição real, a
 faixa mostra valores pendentes em vez de preencher números artificiais.
-Respostas `PQC_*` também entram no JSON como métricas estruturadas, incluindo
-tempos médios, KAT, `key_match`, `key_confirmed`, `tag_match`, tamanhos e CRCs
-curtos, sem exportar segredos completos.
+Respostas `MISSION` e `PQC_*` entram no JSON como métricas estruturadas,
+incluindo tempos, bytes, KAT, `key_match`, `key_confirmed`, `tag_match`,
+tamanhos e CRCs curtos, sem exportar segredos completos.
 
 ## Próximas etapas
 
@@ -260,9 +274,9 @@ Estado atual:
   `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json` com 1.816,87 s,
   77 registros, 0 falhas, 2 benchmarks PQC e demo headless OK.
 
-Próximo corte: ensaiar a apresentação usando `GUIA_DIDATICO_APRESENTACAO.md`
-e `APRESENTACAO_ROTEIRO.md`, anexando os resultados JSON ao material final do
-seminário.
+Próximo corte: gravar o firmware com `MISSION`, rodar a coleta manual curta
+dos três cenários em `METRICAS_CONSOLIDADAS.md` e anexar o JSON final ao
+material do seminário.
 
 Validação real em placa após upload em 2026-06-18: `PQC_KAT` retornou
 `kat=pass` com `ss_crc32=0xD9DA8D6C`; `PQC_FAULT 0 0x01 CONFIRM` retornou
@@ -284,6 +298,7 @@ compartilhado completo ou material suficiente para reconstruir a sessão.
 | `tests/` | Testes automatizados do protocolo serial Python. |
 | `hardware_blackboard_wisdom.md` | Inventário e procedimento de bancada da placa RoboCore Wisdom. |
 | `hardware_command_reference.md` | Referência única de comandos completos de hardware/bancada. |
+| `METRICAS_CONSOLIDADAS.md` | Metodologia de comparação CLASSIC, PQC e PQC+CRC32 para o seminário. |
 | `GUIA_DIDATICO_APRESENTACAO.md` | Explicação passo a passo, leiga e completa, do projeto e da demonstração. |
 | `APRESENTACAO_ROTEIRO.md` | Roteiro de 20 minutos, slides, sequência da demo e limites. |
 | `projeto_final_pqc_esp32_cubesat.docx` | Proposta acadêmica formal. |

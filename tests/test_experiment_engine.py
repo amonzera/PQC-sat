@@ -337,15 +337,18 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertIn("%", tiles["CPU"])
         self.assertIn("KB livre", tiles["RAM"])
         self.assertIn("PQC", tiles)
-        self.assertIn("CHECK", tiles)
+        self.assertIn("CLÁSSICA", tiles)
+        self.assertIn("PQC+CRC", tiles)
         self.assertNotIn("DISCO", tiles)
         self.assertNotIn("HOST", tiles)
 
-    def test_presentation_buttons_exclude_noisy_bench_commands(self):
+    def test_presentation_buttons_focus_live_mission_scenarios(self):
         commands = [command for _label, command in dashboard.COMMAND_BUTTONS]
 
         self.assertIn("DEMO", commands)
-        self.assertIn("PQC_STATUS", commands)
+        self.assertIn("MISSION CLASSIC", commands)
+        self.assertIn("MISSION PQC", commands)
+        self.assertIn("MISSION PQC_CRC32", commands)
         self.assertIn("INJECT_FAULT", commands)
         self.assertNotIn("TELEMETRY", commands)
         self.assertNotIn("PING", commands)
@@ -489,6 +492,73 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(sample["pqc"]["ct_crc_after"], "0x22222222")
         self.assertEqual(sample["pqc"]["confirm_us"], 130)
         self.assertNotIn("pqc_ss", json.dumps(sample))
+
+    def test_mission_command_requires_online_satellite(self):
+        panel = dashboard.DashboardPanel()
+
+        panel._execute_command("MISSION PQC")
+
+        self.assertEqual(panel.command_history[-1]["status"], "SAT OFF")
+        self.assertEqual(panel.session_status, "AGUARDANDO SAT")
+
+    def test_mission_command_queues_scenario_and_visual_effects(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+        fake.sent.clear()
+
+        panel._execute_command("MISSION PQC_CRC32")
+
+        self.assertEqual(fake.sent[:3], ["MISSION PQC_CRC32", "BARGRAPH 100", "LED GREEN"])
+        self.assertEqual(panel.command_history[-1]["cmd"], "MISSION PQC_CRC32")
+        self.assertEqual(panel.command_history[-1]["status"], "QUEUED")
+
+    def test_mission_response_exports_consolidated_metrics(self):
+        panel = dashboard.DashboardPanel()
+        panel.serial_connected = True
+
+        panel._apply_hardware_response(
+            "MISSION PQC_CRC32",
+            {
+                "scenario": "PQC_CRC32",
+                "op": "mission_message",
+                "message": "HELLO_UFF",
+                "result": "DELIVERED",
+                "crypto": "ML-KEM-512",
+                "checksum": "CRC32",
+                "confirmation": "HMAC-SHA256",
+                "key_match": "1",
+                "tag_ready": "1",
+                "tag_match": "1",
+                "crc_match": "1",
+                "payload_len": "41",
+                "bytes_payload": "41",
+                "bytes_crypto": "800",
+                "bytes_checksum": "4",
+                "bytes_total": "845",
+                "keygen_us": "10045",
+                "encap_us": "11769",
+                "decap_us": "15194",
+                "tag_us": "80",
+                "verify_us": "81",
+                "crc_us": "11",
+                "elapsed_us": "37180",
+                "heap": "201512",
+                "min_heap": "197624",
+                "profile": "OBC-1U-LIMITED",
+                "cpu_mhz": "80",
+            },
+        )
+
+        sample = panel.hardware_samples[-1]
+        self.assertEqual(panel.last_mission["scenario"], "PQC_CRC32")
+        self.assertEqual(sample["mission"]["result"], "DELIVERED")
+        self.assertEqual(sample["mission"]["bytes_total"], 845)
+        data = panel._build_export_document()
+        scenario = data["metrics"]["mission"]["scenarios"]["PQC_CRC32"]
+        self.assertEqual(scenario["elapsed_us"], 37180)
+        tiles = {label: value for label, value, _detail, _color in panel._metric_tiles()}
+        self.assertIn("ms", tiles["PQC+CRC"])
 
     def test_run_battery_pairs_none_and_crc32_with_same_fault_ids(self):
         panel = dashboard.DashboardPanel()

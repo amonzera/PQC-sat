@@ -11,8 +11,9 @@ ou pelo console `tools/serial_console.py`.
 
 Comandos locais do dashboard, como `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`,
 `DEMO_STOP`, `DEMO_RESTART`, `RUN_BATTERY`, `CHECKSUM` e `EXPORT_JSON`, não
-são comandos do firmware. Eles orquestram a apresentação, geram eventos locais
-e podem encaminhar comandos seriais quando a placa está conectada.
+são comandos do firmware. O comando `MISSION`, por outro lado, existe no
+firmware e é o caminho principal da apresentação para medir `CLASSIC`, `PQC` e
+`PQC_CRC32`.
 
 ## Protocolo
 
@@ -45,6 +46,7 @@ python3 tools/serial_console.py --commands
 | Comando | Uso | Papel na demonstracao |
 |---|---|---|
 | `STATUS` | `STATUS` | Mostra perfil, CPU, heap, flash e radio sob demanda. |
+| `MISSION` | `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32` | Entrega mensagem curta e mede tempo, bytes, heap e resultado nos três cenários centrais do seminário. |
 | `DEMO` | `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`, `DEMO_STOP`, `DEMO_RESTART` | Comandos locais do dashboard para executar a apresentação A/B cronometrada. |
 | `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Comando serial tecnico usado para validar bit-flip e CRC32 na placa. No dashboard, use `INJECT_FAULT` e `CRC_CHECK`. |
 | `OLED` | `OLED STANDBY` | Restaura o icone robo-satelite no display. |
@@ -52,6 +54,38 @@ python3 tools/serial_console.py --commands
 `PING`, `TELEMETRY`, sensores, LED, RGB e bargraph continuam disponíveis pelo
 HELP/terminal textual e pelo `tools/serial_console.py`, mas não devem aparecer
 como blocos clicáveis da apresentação para evitar ruído visual e serial.
+O dashboard pode acionar LED/bargraph automaticamente depois de `MISSION` como
+efeito lúdico de custo relativo; isso não transforma LED/bargraph em métrica.
+
+## Comando MISSION
+
+`MISSION` é o comando principal para consolidar a comparação do seminário.
+
+| Uso | Significado |
+|---|---|
+| `MISSION CLASSIC` | Payload autenticado por HMAC-SHA256 clássico simétrico. |
+| `MISSION PQC` | ML-KEM-512 estabelece segredo; HMAC-SHA256 autentica a mensagem. |
+| `MISSION PQC_CRC32` | Mesmo fluxo PQC com CRC32 adicional no payload. |
+| `MISSION CLASSIC payload_hex` | Executa o cenário clássico com payload hexadecimal escolhido. |
+| `MISSION PQC payload_hex` | Executa PQC com payload hexadecimal escolhido. |
+| `MISSION PQC_CRC32 payload_hex` | Executa PQC+CRC32 com payload hexadecimal escolhido. |
+
+Campos retornados:
+
+| Campo | Interpretação |
+|---|---|
+| `scenario` | `CLASSIC`, `PQC` ou `PQC_CRC32`. |
+| `result` | `DELIVERED` ou `REJECTED`. |
+| `crypto` | `HMAC-SHA256` ou `ML-KEM-512`. |
+| `checksum` | `NONE` ou `CRC32`. |
+| `key_match` | Segredos ML-KEM bateram; sempre verdadeiro no clássico. |
+| `tag_match` | Autenticação da mensagem foi aceita. |
+| `crc_match` | CRC32 bateu quando checksum está ativo. |
+| `bytes_total` | Payload + material criptográfico + checksum. |
+| `elapsed_us` | Tempo total da entrega medida na placa. |
+| `keygen_us`, `encap_us`, `decap_us` | Subtempos ML-KEM; zero no cenário clássico. |
+| `tag_us`, `verify_us`, `crc_us` | Custo da autenticação e do checksum. |
+| `heap`, `min_heap`, `cpu_mhz`, `profile` | Métricas do ESP32 no cenário. |
 
 ## Comandos PQC de bancada
 
@@ -107,6 +141,7 @@ Validação pós-upload registrada em 2026-06-18:
 | `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e compara segredo compartilhado. |
 | `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Gera sessão ML-KEM, corrompe um byte do ciphertext, decapsula e reporta `KEY_MISMATCH`, `PROTOCOL_REJECT` ou `OK`, com CRCs curtos e tempos. |
 | `PQC_BENCH` | `PQC_BENCH n` | Executa benchmark de bancada para 1 a 100 rodadas. |
+| `MISSION` | `MISSION CLASSIC\|PQC\|PQC_CRC32 [payload_hex]` | Entrega mensagem curta e mede custo/bytes/segurança por cenário. |
 | `PERIPHERALS` | `PERIPHERALS` | Detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C. |
 | `I2C_SCAN` | `I2C_SCAN` | Varre o barramento I2C em SDA21/SCL22. |
 | `FEATURES` | `FEATURES`, `FEATURES CORE`, `FEATURES I2C`, `FEATURES GPIO`, `FEATURES ANALOG`, `FEATURES EXPANSION` | Lista grupos de recursos conhecidos pela firmware. |

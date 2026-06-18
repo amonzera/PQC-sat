@@ -6,6 +6,7 @@
   - expose a reproducible inventory of the Wisdom board;
   - test every onboard feature;
   - run a small payload fault/CRC32 experiment;
+  - deliver a small mission message in CLASSIC, PQC and PQC_CRC32 modes;
   - run ML-KEM-512 through a vendored C-only mlkem-native backend.
 */
 
@@ -40,6 +41,9 @@ static constexpr const char *PQC_COMMIT = "d2cae2b";
 static constexpr const char *PQC_LICENSE = "Apache2-ISC-MIT";
 static constexpr const char *PQC_CONFIRMATION = "HMAC-SHA256";
 static constexpr size_t PQC_CONFIRM_TAG_BYTES = 32;
+static constexpr size_t CLASSIC_TAG_BYTES = 32;
+static constexpr const char *CLASSIC_TARGET = "HMAC-SHA256";
+static constexpr const char *MISSION_DEFAULT_PAYLOAD = "PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK";
 
 static_assert(CRYPTO_PUBLICKEYBYTES == 800, "unexpected ML-KEM-512 public key size");
 static_assert(CRYPTO_SECRETKEYBYTES == 1632, "unexpected ML-KEM-512 secret key size");
@@ -135,6 +139,13 @@ static uint8_t pqc_fault_tag_dec[PQC_CONFIRM_TAG_BYTES];
 static bool pqc_keypair_ready = false;
 static bool pqc_ciphertext_ready = false;
 static bool pqc_shared_secret_ready = false;
+
+static const uint8_t classic_demo_key[CLASSIC_TAG_BYTES] = {
+    0x50, 0x51, 0x43, 0x2D, 0x53, 0x41, 0x54, 0x2D,
+    0x43, 0x4C, 0x41, 0x53, 0x53, 0x49, 0x43, 0x2D,
+    0x55, 0x46, 0x46, 0x2D, 0x44, 0x45, 0x4D, 0x4F,
+    0x2D, 0x4B, 0x45, 0x59, 0x2D, 0x30, 0x31, 0x21,
+};
 
 static uint8_t pqc_kat_pk[CRYPTO_PUBLICKEYBYTES];
 static uint8_t pqc_kat_sk[CRYPTO_SECRETKEYBYTES];
@@ -1003,6 +1014,7 @@ static void send_hello(const char *request_id) {
   print_kv("pqc", PQC_STATUS);
   print_kv("pqc_target", PQC_TARGET);
   print_kv("fault", "payload_crc32");
+  print_kv("mission", "CLASSIC,PQC,PQC_CRC32");
   end_result();
 }
 
@@ -1027,6 +1039,7 @@ static void send_status(const char *request_id) {
   print_kv("pqc", PQC_STATUS);
   print_kv("pqc_target", PQC_TARGET);
   print_kv("pqc_backend", PQC_BACKEND);
+  print_kv("mission", "CLASSIC,PQC,PQC_CRC32");
   end_result();
 }
 
@@ -1070,20 +1083,37 @@ static bool bytes_equal_constant_time(const uint8_t *left, const uint8_t *right,
   return diff == 0;
 }
 
-static bool pqc_confirmation_tag(const uint8_t *shared_secret, uint8_t *out_tag) {
-  static constexpr const char transcript[] = "PQC-SAT|ML-KEM-512|KEY_CONFIRM|v1";
+static bool hmac_sha256_tag(const uint8_t *key, size_t key_len, const uint8_t *data, size_t data_len, uint8_t *out_tag) {
   const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
   if (info == nullptr) {
     return false;
   }
-  const int rc = mbedtls_md_hmac(
-      info,
+  const int rc = mbedtls_md_hmac(info, key, key_len, data, data_len, out_tag);
+  return rc == 0;
+}
+
+static bool pqc_confirmation_tag(const uint8_t *shared_secret, uint8_t *out_tag) {
+  static constexpr const char transcript[] = "PQC-SAT|ML-KEM-512|KEY_CONFIRM|v1";
+  return hmac_sha256_tag(
       shared_secret,
       CRYPTO_BYTES,
       reinterpret_cast<const unsigned char *>(transcript),
       strlen(transcript),
       out_tag);
-  return rc == 0;
+}
+
+static bool mission_payload_from_fields(size_t field_count, char *fields[], uint8_t *payload, size_t max_len, size_t *payload_len) {
+  if (field_count >= 5) {
+    return parse_hex_payload(fields[4], payload, max_len, payload_len);
+  }
+
+  const size_t default_len = strlen(MISSION_DEFAULT_PAYLOAD);
+  if (default_len > max_len) {
+    return false;
+  }
+  memcpy(payload, MISSION_DEFAULT_PAYLOAD, default_len);
+  *payload_len = default_len;
+  return true;
 }
 
 static void print_pqc_sizes() {
@@ -1420,6 +1450,149 @@ static void handle_pqc_bench(const char *request_id, size_t field_count, char *f
   print_kv_u32("elapsed_us", micros() - started);
   print_kv_u32("heap", ESP.getFreeHeap());
   print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  end_result();
+}
+
+static void handle_mission(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count < 4 || field_count > 5) {
+    print_error(request_id, "BAD_ARGS", "expected_CLASSIC_PQC_PQC_CRC32_payloadhex");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  const bool scenario_classic = strcmp(fields[3], "CLASSIC") == 0;
+  const bool scenario_classic_crc = strcmp(fields[3], "CLASSIC_CRC32") == 0;
+  const bool scenario_pqc = strcmp(fields[3], "PQC") == 0;
+  const bool scenario_pqc_crc = strcmp(fields[3], "PQC_CRC32") == 0 || strcmp(fields[3], "PQC+CRC32") == 0;
+  if (!scenario_classic && !scenario_classic_crc && !scenario_pqc && !scenario_pqc_crc) {
+    print_error(request_id, "BAD_SCENARIO", "expected_CLASSIC_PQC_PQC_CRC32");
+    return;
+  }
+
+  uint8_t payload[MAX_EXPERIMENT_PAYLOAD];
+  size_t payload_len = 0;
+  if (!mission_payload_from_fields(field_count, fields, payload, sizeof(payload), &payload_len)) {
+    print_error(request_id, "BAD_PAYLOAD", "expected_even_hex_payload");
+    return;
+  }
+
+  const bool use_pqc = scenario_pqc || scenario_pqc_crc;
+  const bool use_crc = scenario_classic_crc || scenario_pqc_crc;
+  const char *scenario = scenario_pqc_crc ? "PQC_CRC32" : (scenario_pqc ? "PQC" : (scenario_classic_crc ? "CLASSIC_CRC32" : "CLASSIC"));
+
+  bool key_match = true;
+  bool tag_ready = false;
+  bool tag_match = false;
+  bool crc_match = true;
+  uint32_t keygen_us = 0;
+  uint32_t encap_us = 0;
+  uint32_t decap_us = 0;
+  uint32_t tag_us = 0;
+  uint32_t verify_us = 0;
+  uint32_t crc_us = 0;
+  uint32_t crc_tx = 0;
+  uint32_t crc_rx = 0;
+  uint32_t bytes_crypto = CLASSIC_TAG_BYTES;
+
+  const uint32_t started = micros();
+  if (use_pqc) {
+    uint32_t op_started = micros();
+    int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
+    keygen_us = micros() - op_started;
+    if (rc != 0) {
+      print_pqc_error_result(request_id, "mission_keygen", rc, micros() - started);
+      return;
+    }
+
+    op_started = micros();
+    rc = crypto_kem_enc(pqc_ct, pqc_ss_enc, pqc_pk);
+    encap_us = micros() - op_started;
+    if (rc != 0) {
+      print_pqc_error_result(request_id, "mission_encap", rc, micros() - started);
+      return;
+    }
+
+    op_started = micros();
+    rc = crypto_kem_dec(pqc_ss_dec, pqc_ct, pqc_sk);
+    decap_us = micros() - op_started;
+    if (rc != 0) {
+      print_pqc_error_result(request_id, "mission_decap", rc, micros() - started);
+      return;
+    }
+
+    key_match = pqc_shared_secrets_match(pqc_ss_enc, pqc_ss_dec);
+    pqc_keypair_ready = true;
+    pqc_ciphertext_ready = true;
+    pqc_shared_secret_ready = key_match;
+    bytes_crypto = CRYPTO_CIPHERTEXTBYTES + PQC_CONFIRM_TAG_BYTES;
+
+    op_started = micros();
+    const bool tag_a = hmac_sha256_tag(pqc_ss_enc, CRYPTO_BYTES, payload, payload_len, pqc_fault_tag_enc);
+    tag_us = micros() - op_started;
+    op_started = micros();
+    const bool tag_b = hmac_sha256_tag(pqc_ss_dec, CRYPTO_BYTES, payload, payload_len, pqc_fault_tag_dec);
+    verify_us = micros() - op_started;
+    tag_ready = tag_a && tag_b;
+    tag_match = tag_ready && bytes_equal_constant_time(pqc_fault_tag_enc, pqc_fault_tag_dec, PQC_CONFIRM_TAG_BYTES);
+  } else {
+    uint8_t classic_tag_tx[CLASSIC_TAG_BYTES];
+    uint8_t classic_tag_rx[CLASSIC_TAG_BYTES];
+    uint32_t op_started = micros();
+    const bool tag_a = hmac_sha256_tag(classic_demo_key, sizeof(classic_demo_key), payload, payload_len, classic_tag_tx);
+    tag_us = micros() - op_started;
+    op_started = micros();
+    const bool tag_b = hmac_sha256_tag(classic_demo_key, sizeof(classic_demo_key), payload, payload_len, classic_tag_rx);
+    verify_us = micros() - op_started;
+    tag_ready = tag_a && tag_b;
+    tag_match = tag_ready && bytes_equal_constant_time(classic_tag_tx, classic_tag_rx, CLASSIC_TAG_BYTES);
+  }
+
+  if (use_crc) {
+    const uint32_t crc_started = micros();
+    crc_tx = crc32_bytes(payload, payload_len);
+    crc_rx = crc32_bytes(payload, payload_len);
+    crc_us = micros() - crc_started;
+    crc_match = crc_tx == crc_rx;
+  }
+
+  const bool delivered = key_match && tag_match && (!use_crc || crc_match);
+  const uint32_t elapsed_us = micros() - started;
+  const uint32_t checksum_bytes = use_crc ? 4U : 0U;
+  const uint32_t bytes_total = static_cast<uint32_t>(payload_len) + bytes_crypto + checksum_bytes;
+
+  begin_result(request_id, "OK");
+  print_kv("scenario", scenario);
+  print_kv("op", "mission_message");
+  print_kv("message", "HELLO_UFF");
+  print_kv("result", delivered ? "DELIVERED" : "REJECTED");
+  print_kv("crypto", use_pqc ? PQC_TARGET : CLASSIC_TARGET);
+  print_kv("checksum", use_crc ? "CRC32" : "NONE");
+  print_kv("confirmation", use_pqc ? PQC_CONFIRMATION : "HMAC-SHA256");
+  print_kv_bool("key_match", key_match);
+  print_kv_bool("tag_ready", tag_ready);
+  print_kv_bool("tag_match", tag_match);
+  print_kv_bool("crc_match", crc_match);
+  print_kv_u32("payload_len", payload_len);
+  print_kv_hex_u32("payload_crc32", crc32_bytes(payload, payload_len));
+  if (use_crc) {
+    print_kv_hex_u32("crc_tx", crc_tx);
+    print_kv_hex_u32("crc_rx", crc_rx);
+  }
+  print_kv_u32("bytes_payload", payload_len);
+  print_kv_u32("bytes_crypto", bytes_crypto);
+  print_kv_u32("bytes_checksum", checksum_bytes);
+  print_kv_u32("bytes_total", bytes_total);
+  print_kv_u32("keygen_us", keygen_us);
+  print_kv_u32("encap_us", encap_us);
+  print_kv_u32("decap_us", decap_us);
+  print_kv_u32("tag_us", tag_us);
+  print_kv_u32("verify_us", verify_us);
+  print_kv_u32("crc_us", crc_us);
+  print_kv_u32("elapsed_us", elapsed_us);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  print_kv("profile", active_profile);
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
   end_result();
 }
 
@@ -1967,6 +2140,9 @@ static void send_help_detail(const char *request_id, const char *command) {
   } else if (strcmp(command, "PQC_BENCH") == 0) {
     print_kv("usage", "PQC_BENCH n");
     print_kv("does", "benchmark keygen encap decap");
+  } else if (strcmp(command, "MISSION") == 0) {
+    print_kv("usage", "MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]");
+    print_kv("does", "envia mensagem e mede custo por cenario");
   } else if (strcmp(command, "PERIPHERALS") == 0) {
     print_kv("usage", "PERIPHERALS");
     print_kv("does", "detecta OLED APDS HTU MMA");
@@ -2033,7 +2209,7 @@ static void send_help(const char *request_id, size_t field_count, char *fields[]
   print_kv("usage", "HELP [COMMAND]");
   print_kv("cmd1", "HELLO,PING,STATUS,TELEMETRY,FAULT,PERIPHERALS");
   print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_FAULT,PQC_BENCH");
-  print_kv("cmd3", "I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ,ANALOG,DIGITAL");
+  print_kv("cmd3", "MISSION,I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ,ANALOG,DIGITAL");
   print_kv("cmd4", "RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS");
   print_kv("cmd5", "HELP");
   end_result();
@@ -2082,6 +2258,8 @@ static void process_frame(char *line) {
     handle_pqc_fault(request_id, field_count, fields);
   } else if (strcmp(command, "PQC_BENCH") == 0) {
     handle_pqc_bench(request_id, field_count, fields);
+  } else if (strcmp(command, "MISSION") == 0) {
+    handle_mission(request_id, field_count, fields);
   } else if (strcmp(command, "PERIPHERALS") == 0) {
     send_peripherals(request_id);
   } else if (strcmp(command, "I2C_SCAN") == 0) {

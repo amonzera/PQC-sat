@@ -8,10 +8,10 @@ afirmado.
 
 ## 1. Ideia em uma frase
 
-O PQC-SAT mostra que, em um sistema embarcado, nao basta escolher um algoritmo
-criptografico moderno: tambem e preciso lidar com falhas de bits, confirmar se
-as duas pontas chegaram ao mesmo segredo e registrar resultados de forma
-auditavel.
+O PQC-SAT mostra que, em um sistema embarcado, criptografia mais forte pode
+custar mais CPU, RAM, tempo e trafego; e que esse custo aumenta quando, alem
+da criptografia pos-quantica, tambem exigimos verificacao de integridade por
+checksum.
 
 ## 2. A historia da apresentacao
 
@@ -19,18 +19,29 @@ Imagine um pequeno computador embarcado em um satelite educacional. Esse
 computador recebe mensagens e tambem executa criptografia. Em ambiente espacial,
 radiação pode causar falhas transitorias, como inverter um bit em um byte.
 
-No nosso seminario, nao usamos radiacao fisica. Em vez disso, simulamos o
-efeito de forma controlada:
+No nosso seminario, a demonstracao principal envia uma mensagem curta pelo
+"satelite" em tres cenarios:
+
+1. `CLASSIC`: mensagem autenticada com HMAC-SHA256;
+2. `PQC`: mensagem autenticada depois de acordo de segredo com ML-KEM-512;
+3. `PQC_CRC32`: o mesmo fluxo PQC com CRC32 no payload.
+
+Depois disso, usamos bit-flips para mostrar por que integridade importa. Nao
+usamos radiacao fisica. Em vez disso, simulamos o efeito de forma controlada:
 
 1. escolhemos um dado;
 2. invertemos um bit;
 3. observamos se o erro passa despercebido ou se e detectado;
 4. repetimos a mesma falha com e sem mecanismo de integridade;
-5. conectamos isso com uma sessao real de ML-KEM-512 na placa ESP32/Wisdom.
+5. conectamos isso com o custo real de uma sessao ML-KEM-512 na placa
+   ESP32/Wisdom.
 
 A mensagem principal e simples:
 
-- sem protecao, uma falha pode virar **falha silenciosa**;
+- criptografia classica simetrica e barata para o hardware;
+- PQC aumenta o custo, mas prepara a comunicacao para o mundo pos-quantico;
+- PQC mais checksum aumenta a robustez de integridade e acrescenta custo;
+- sem protecao de integridade, uma falha pode virar **falha silenciosa**;
 - com CRC32 no payload, a mesma falha vira **erro detectado**;
 - em ML-KEM, a decapsulacao nao denuncia automaticamente todo ciphertext
   alterado; a deteccao operacional vem da comparacao/confirmacao da chave.
@@ -54,6 +65,8 @@ apresentacao. Ele mostra:
 
 O dashboard nao deve ficar poluindo a apresentacao com comandos de bancada.
 Por isso, os botoes visuais foram reduzidos ao roteiro principal.
+Hoje os botoes centrais da apresentacao sao `CLÁSSICA`, `PQC`, `PQC+CRC`,
+`DEMO`, `FALHA`, `STATUS`, `EXPORT` e `OLED`.
 
 ### Hardware Wisdom/ESP32
 
@@ -75,6 +88,9 @@ Funcionalidades validadas na placa:
 - `PQC_INFO`;
 - `PQC_FAULT`;
 - `PQC_BENCH`;
+- `MISSION CLASSIC`;
+- `MISSION PQC`;
+- `MISSION PQC_CRC32`;
 - `FAULT CRC32` para payload;
 - perfis `BASELINE` e `OBC-1U-LIMITED`.
 
@@ -95,6 +111,38 @@ Resultados importantes:
 - `PQC_KAT`: passou;
 - `PQC_FAULT 0 0x01 NONE`: retornou `KEY_MISMATCH`;
 - `PQC_FAULT 0 0x01 CONFIRM`: retornou `PROTOCOL_REJECT`.
+
+### Entrega de mensagem da missao
+
+O comando `MISSION` e o fluxo mais importante para a apresentacao final.
+
+Ele executa uma entrega de mensagem curta no firmware e retorna metricas:
+
+- tempo total;
+- bytes transmitidos;
+- heap/RAM livre;
+- perfil de CPU;
+- resultado da entrega;
+- custo de HMAC;
+- custo de ML-KEM quando o cenario usa PQC;
+- custo de CRC32 quando o cenario usa checksum.
+
+Os tres comandos sao:
+
+```text
+MISSION CLASSIC
+MISSION PQC
+MISSION PQC_CRC32
+```
+
+Leitura para explicar em sala:
+
+- `CLASSIC` mostra o custo de proteger uma mensagem com criptografia classica
+  simetrica;
+- `PQC` mostra o custo de estabelecer segredo com ML-KEM-512 antes de proteger
+  a mensagem;
+- `PQC_CRC32` mostra o custo adicional de colocar um guardiao de integridade
+  no payload.
 
 ### Bit-flips manuais
 
@@ -144,6 +192,7 @@ O JSON guarda:
 - eventos da demo;
 - status do hardware;
 - informacoes PQC;
+- comparacao `CLASSIC`, `PQC` e `PQC_CRC32`;
 - resumo de sucesso/falha.
 
 Isso permite apresentar a demo e depois mostrar que os resultados foram
@@ -156,6 +205,11 @@ Fonte principal:
 ```text
 logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json
 ```
+
+Esse arquivo e o aceite anterior ao comando `MISSION`. Para a apresentacao
+consolidada, gere um JSON novo com os comandos documentados em
+`METRICAS_CONSOLIDADAS.md` e use esse JSON como fonte principal da comparacao
+`CLASSIC` versus `PQC` versus `PQC_CRC32`.
 
 Resumo do aceite final:
 
@@ -197,6 +251,14 @@ Leitura simples:
 - mesmo assim, ML-KEM-512 continuou funcionando;
 - a confirmacao de chave foi capaz de rejeitar uma sessao divergente;
 - CRC32 detectou todos os bit-flips de payload testados no aceite.
+
+Metricas novas que devem ser consolidadas apos gravar o firmware atualizado:
+
+| Cenario | O que mostrar |
+|---|---|
+| `MISSION CLASSIC` | `elapsed_us`, `bytes_total`, `heap`, `tag_match`, `result` |
+| `MISSION PQC` | `elapsed_us`, `bytes_total`, `heap`, `key_match`, `tag_match`, `result` |
+| `MISSION PQC_CRC32` | `elapsed_us`, `bytes_total`, `heap`, `key_match`, `tag_match`, `crc_match`, `result` |
 
 ## 5. Como explicar os termos para uma pessoa leiga
 
@@ -292,8 +354,9 @@ Mostra apenas metricas essenciais para a apresentacao:
 
 - CPU;
 - RAM;
+- CLÁSSICA;
 - PQC;
-- CHECK.
+- PQC+CRC.
 
 Essas metricas foram reduzidas para nao poluir a tela.
 
@@ -315,13 +378,12 @@ Mostra a parte experimental:
 Tem botoes somente para o roteiro visual:
 
 - `DEMO`;
-- `PAUSA`;
-- `STATUS`;
+- `CLÁSSICA`;
 - `PQC`;
-- `CHK ON`;
-- `CHK OFF`;
+- `PQC+CRC`;
+- `STATUS`;
 - `FALHA`;
-- `CRC32`;
+- `PAUSA`;
 - `EXPORT`;
 - `OLED`.
 
@@ -377,20 +439,52 @@ No dashboard, clique:
 
 ```text
 STATUS
-PQC
 ```
 
 O que esperar:
 
 - `STATUS` atualiza CPU, heap/RAM e estado da placa;
-- `PQC` consulta informacoes do backend ML-KEM-512.
 
 Explique:
 
-> Antes de injetar falhas, confirmamos que a placa esta viva e que o backend
-> PQC esta pronto.
+> Antes de enviar mensagens, confirmamos que a placa esta viva, qual perfil de
+> CPU esta ativo e quanta memoria ainda esta livre.
 
-### Passo 2: rodar demo automatica
+### Passo 2: enviar mensagens nos tres cenarios
+
+Clique, nesta ordem:
+
+```text
+CLÁSSICA
+PQC
+PQC+CRC
+```
+
+Ou digite:
+
+```text
+MISSION CLASSIC
+MISSION PQC
+MISSION PQC_CRC32
+```
+
+O que acontece:
+
+1. `CLASSIC` autentica a mensagem com HMAC-SHA256;
+2. `PQC` executa ML-KEM-512, deriva segredo e autentica a mensagem;
+3. `PQC_CRC32` repete o fluxo PQC e adiciona CRC32 no payload;
+4. o topo do dashboard atualiza tempo e bytes;
+5. o overlay mostra mensagem entregue;
+6. LEDs/bargraph reforcam visualmente o aumento de custo.
+
+Como explicar:
+
+> A mensagem enviada e pequena. Mesmo assim, quando trocamos o baseline
+> classico por PQC, o custo cresce. Quando adicionamos checksum ao fluxo PQC,
+> ganhamos mais integridade observavel e tambem somamos mais trabalho ao
+> hardware.
+
+### Passo 3: rodar demo automatica de falhas
 
 Clique:
 
@@ -419,7 +513,7 @@ Como explicar:
 > A comparacao e justa porque usamos a mesma lista de falhas nos dois cenarios.
 > A unica diferenca e a presenca ou ausencia do guardiao CRC32.
 
-### Passo 3: demonstrar manualmente
+### Passo 4: demonstrar falha manualmente
 
 Para mostrar sem automatizar:
 
@@ -437,7 +531,7 @@ O que esperar:
 - com `CHECKSUM ON`, a falha tende a aparecer como `DETECTED_GUARD`;
 - `CRC_CHECK` forca uma tentativa com CRC32.
 
-### Passo 4: exportar
+### Passo 5: exportar
 
 Clique:
 
@@ -471,18 +565,37 @@ Esses comandos existem e sao uteis, mas devem ficar no terminal/HELP ou no
 | `PQC_KAT` | Importante para bancada, mas tecnico demais para o fluxo visual |
 | `PQC_BENCH` | Gera dados, mas nao e a demo principal |
 | `PQC_FAULT` | Essencial para explicar resultado, mas melhor mostrar como tabela |
-| `LED`, `RGB`, `BARGRAPH` | Efeito visual de hardware, mas nao explica a tese central |
+| `LED`, `RGB`, `BARGRAPH` | Efeito visual de hardware; no dashboard eles sao acionados indiretamente por `MISSION` |
 | sensores | Extras da placa, fora do argumento principal |
 
 Isso evita que a apresentacao vire uma lista de comandos e mantém o foco:
 
 ```text
-falha -> deteccao -> PQC real -> confirmacao -> limites
+mensagem -> custo -> PQC real -> checksum -> falha/deteccao -> limites
 ```
 
 ## 9. Como explicar os resultados finais
 
-### Resultado 1: CRC32 detectou o payload alterado
+### Resultado 1: CLASSIC, PQC e PQC+CRC têm custos diferentes
+
+Use a frase:
+
+> A mesma mensagem de missao pode ser entregue com criptografia classica,
+> com PQC, ou com PQC mais checksum. O que muda e o custo observado no
+> hardware: tempo, bytes e memoria.
+
+Base:
+
+```text
+MISSION CLASSIC
+MISSION PQC
+MISSION PQC_CRC32
+```
+
+Use o JSON novo para preencher a tabela final de `elapsed_us`, `bytes_total`
+e `heap`.
+
+### Resultado 2: CRC32 detectou o payload alterado
 
 Use a frase:
 
@@ -495,7 +608,7 @@ Base:
 13/13 DETECTED_GUARD no aceite final
 ```
 
-### Resultado 2: ML-KEM funcionou na Wisdom
+### Resultado 3: ML-KEM funcionou na Wisdom
 
 Use a frase:
 
@@ -509,7 +622,7 @@ PQC_KAT = kat=pass
 pk=800, sk=1632, ct=768, ss=32
 ```
 
-### Resultado 3: bit-flip em ciphertext causa divergencia
+### Resultado 4: bit-flip em ciphertext causa divergencia
 
 Use a frase:
 
@@ -522,7 +635,7 @@ Base:
 PQC_FAULT NONE -> KEY_MISMATCH
 ```
 
-### Resultado 4: confirmacao transforma divergencia em rejeicao
+### Resultado 5: confirmacao transforma divergencia em rejeicao
 
 Use a frase:
 
@@ -535,7 +648,7 @@ Base:
 PQC_FAULT CONFIRM -> PROTOCOL_REJECT
 ```
 
-### Resultado 5: limitar CPU aumenta custo, mas nao quebra a demo
+### Resultado 6: limitar CPU aumenta custo, mas nao quebra a demo
 
 Use a tabela:
 
@@ -557,6 +670,8 @@ Nao diga:
 - "medimos consumo em watts";
 - "CRC32 resolve seguranca";
 - "ML-KEM detecta sozinho qualquer ciphertext corrompido";
+- "ML-KEM cifra diretamente a mensagem";
+- "HMAC-SHA256 e equivalente a ECDH";
 - "o experimento prova resistencia a radiacao real";
 - "o ESP32 representa todos os OBCs de CubeSat";
 - "checksum de ciphertext e a contribuicao principal".
@@ -565,6 +680,8 @@ Diga:
 
 - "a Wisdom representa um OBC COTS educacional";
 - "simulamos bit-flips manualmente";
+- "CLASSIC e um baseline simetrico de mensagem autenticada";
+- "PQC usa ML-KEM para estabelecer segredo antes de autenticar a mensagem";
 - "CRC32 mostra deteccao de integridade no payload";
 - "ML-KEM-512 foi executado na placa";
 - "a confirmacao de chave e o ponto de deteccao operacional";
@@ -588,7 +705,7 @@ Resultado esperado:
 
 ```text
 stage8_acceptance_json=logs/<timestamp>_stage8_acceptance_dev-ttyusb0.json
-summary={"dashboard_demo_ok": true, "failed": 0, "ok": true, "pqc_bench_runs": 2, "records": 77}
+summary={"dashboard_demo_ok": true, "failed": 0, "mission_runs": <n>, "ok": true, "pqc_bench_runs": 2, ...}
 ```
 
 Se os numeros mudarem, chame o agente e peça:
@@ -607,6 +724,7 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 | `tools/stage8_acceptance.py` | Runner de aceite longo/manual |
 | `APRESENTACAO_ROTEIRO.md` | Roteiro resumido de 20 minutos |
 | `GUIA_DIDATICO_APRESENTACAO.md` | Este guia completo |
+| `METRICAS_CONSOLIDADAS.md` | Como medir e apresentar CLASSIC, PQC e PQC+CRC |
 | `ROADMAP.md` | Historico tecnico consolidado |
 | `hardware_command_reference.md` | Comandos completos de bancada |
 | `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json` | Evidencia principal do aceite |
@@ -615,22 +733,25 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 
 ### Abertura
 
-> Nosso projeto mostra um problema simples: em sistemas embarcados, uma falha
-> de bit pode passar despercebida. Isso e importante em contextos como CubeSats,
-> onde usamos hardware COTS e podemos ter falhas transitorias. A pergunta e:
-> como diferenciar uma corrupcao silenciosa de um erro detectado?
+> Nosso projeto mostra um desafio atual: o mundo esta migrando para
+> criptografia pos-quantica, mas hardware embarcado tem CPU, RAM e energia
+> limitadas. Em um contexto inspirado em CubeSat, queremos ver quanto custa
+> sair de uma mensagem classica autenticada para PQC e depois para PQC com
+> checksum.
 
 ### Apresentar o experimento
 
 > Usamos uma BlackBoard Wisdom com ESP32 como OBC educacional e um dashboard no
-> notebook. O dashboard injeta bit-flips em um payload e compara dois cenarios:
-> sem CRC32 e com CRC32. A mesma campanha de falhas roda nos dois casos.
+> notebook. Primeiro enviamos uma mensagem em tres cenarios: CLASSIC, PQC e
+> PQC+CRC. Depois usamos bit-flips para mostrar a diferenca entre falha
+> silenciosa e erro detectado.
 
 ### Explicar a demo
 
-> No cenario A, a falha altera bytes e o sistema aceita. Isso aparece como
-> SILENT. No cenario B, ativamos CRC32. A mesma alteracao passa a ser detectada,
-> aparecendo como DETECTED_GUARD.
+> No envio CLASSIC, a placa usa HMAC-SHA256. No envio PQC, ela executa
+> ML-KEM-512 para chegar a um segredo e autenticar a mensagem. No envio
+> PQC+CRC, ela adiciona CRC32 ao payload. A faixa superior mostra tempo, bytes,
+> CPU e RAM para comparar o impacto.
 
 ### Conectar com PQC
 
@@ -641,10 +762,11 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 
 ### Interpretar resultados
 
-> No aceite final tivemos 77 registros, 0 falhas, 60 comandos no long-run, dois
-> benchmarks PQC e demo A/B bem-sucedida. No payload, 13 de 13 falhas com CRC32
-> foram detectadas. No ML-KEM, a confirmacao de chave rejeitou a sessao
-> divergente.
+> No aceite anterior tivemos 77 registros, 0 falhas, 60 comandos no long-run,
+> dois benchmarks PQC e demo A/B bem-sucedida. Para a apresentacao final,
+> usamos o JSON novo de MISSION para preencher a comparacao CLASSIC, PQC e
+> PQC+CRC. No payload, CRC32 detecta a alteracao; no ML-KEM, a confirmacao de
+> chave rejeita a sessao divergente.
 
 ### Fechar com limites
 
@@ -661,12 +783,14 @@ Antes da apresentacao:
 2. conferir `/dev/ttyUSB0`;
 3. abrir `python3 dashboard.py --port /dev/ttyUSB0`;
 4. clicar `STATUS`;
-5. clicar `PQC`;
-6. rodar `DEMO 5`;
-7. explicar A/B;
-8. mostrar `EXPORT_JSON`;
-9. citar o JSON de aceite;
-10. fechar com limites.
+5. clicar `CLÁSSICA`;
+6. clicar `PQC`;
+7. clicar `PQC+CRC`;
+8. rodar `DEMO 5`;
+9. explicar A/B;
+10. mostrar `EXPORT_JSON`;
+11. citar o JSON de aceite e o JSON novo de métricas;
+12. fechar com limites.
 
 Se algo falhar:
 
@@ -686,8 +810,10 @@ Experimento:
   Wisdom/ESP32 + dashboard Python.
 
 Demo:
-  A: payload sem CRC32 -> falhas silenciosas.
-  B: mesmo payload com CRC32 -> falhas detectadas.
+  CLASSIC: HMAC-SHA256 -> baseline classico.
+  PQC: ML-KEM-512 + HMAC -> custo pos-quantico.
+  PQC+CRC: ML-KEM-512 + HMAC + CRC32 -> integridade adicional.
+  A/B bit-flip: sem CRC32 -> silencioso; com CRC32 -> detectado.
 
 PQC:
   ML-KEM-512 real na placa.
@@ -699,6 +825,7 @@ Resultado:
   13/13 DETECTED_GUARD em payload CRC32.
   PQC_KAT passou.
   Benchmarks em 240 MHz e 80 MHz medidos.
+  MISSION gera JSON novo para comparar tempo, bytes e heap.
 
 Limites:
   Nao e radiacao fisica.

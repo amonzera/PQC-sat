@@ -60,11 +60,15 @@ class SerialProtocolTests(unittest.TestCase):
 
     def test_command_catalog_includes_help_and_oled(self):
         self.assertIn("HELP", FIRMWARE_COMMAND_NAMES)
+        self.assertIn("MISSION", FIRMWARE_COMMAND_NAMES)
+        self.assertIn("MISSION", DEMO_FIRMWARE_COMMAND_NAMES)
         lines = command_help_lines()
         rendered = "\n".join(lines)
         self.assertIn("OLED STANDBY", rendered)
+        self.assertIn("MISSION PQC_CRC32", rendered)
         full_rendered = "\n".join(command_help_lines(demo_only=False))
         self.assertIn("OLED INIT|CLEAR|TEST|STANDBY", full_rendered)
+        self.assertIn("MISSION CLASSIC|PQC|PQC_CRC32", full_rendered)
 
     def test_pqc_bench_commands_are_full_catalog_only(self):
         for command_name in ("PQC_INFO", "PQC_KAT", "PQC_KEYGEN", "PQC_ENCAP", "PQC_DECAP", "PQC_FAULT", "PQC_BENCH"):

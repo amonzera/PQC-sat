@@ -6,17 +6,18 @@ Versão revisada em 2026-06-18.
 
 O PQC-SAT deve demonstrar, em uma atividade de aproximadamente 20 minutos,
 que segurança embarcada depende tanto do algoritmo criptográfico quanto da
-integridade da implementação e do protocolo.
+integridade da implementação e do protocolo, e que a migração para PQC aumenta
+o custo em hardware limitado.
 
-A interface visual já existe e o primeiro experimento mensurável também: o
-dashboard muta um payload determinístico, registra eventos e compara os
-cenários `NONE` e `CRC32`. O backend PQC real já está instalado na Wisdom com
+A interface visual já existe e agora possui dois experimentos complementares.
+O fluxo principal de apresentação envia uma mensagem curta pela Wisdom nos
+cenários `CLASSIC`, `PQC` e `PQC_CRC32`, registrando tempo, bytes, heap,
+confirmação e checksum. O fluxo de apoio muta um payload determinístico,
+registra eventos e compara `NONE` e `CRC32` para explicar falha silenciosa
+versus erro detectado. O backend PQC real já está instalado na Wisdom com
 ML-KEM-512 e medição nos perfis `BASELINE` e `OBC-1U-LIMITED`. O firmware
 também executa bit-flip manual em ciphertext ML-KEM e classifica o efeito com
-comparação de segredos ou confirmação HMAC-SHA256 da chave derivada. O modo
-`DEMO` automatiza a apresentação A/B. A etapa 8 foi consolidada com
-fechamento de software, roteiro, material-base, aceitação serial, campanha
-prolongada e validação física de projetor/legibilidade confirmada pelo usuário.
+comparação de segredos ou confirmação HMAC-SHA256 da chave derivada.
 
 ## 2. Baseline auditado
 
@@ -29,6 +30,7 @@ prolongada e validação física de projetor/legibilidade confirmada pelo usuár
 | Seed isolada do experimento | Funcional |
 | Mutação real de bytes | Funcional no dashboard |
 | ML-KEM real | Funcional na Wisdom com `mlkem-native` v1.1.0, commit `d2cae2b` |
+| Mensagem CLASSIC/PQC/PQC+CRC | Implementada no firmware por `MISSION CLASSIC|PQC|PQC_CRC32` |
 | Interface serial PQC | `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH` funcionais |
 | Medição PQC na placa | `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`; `PQC_KAT` passou no hardware gravado |
 | Falha em ciphertext ML-KEM | `PQC_FAULT index mask [CONFIRM|NONE]` validado na placa e exportado no JSON |
@@ -92,11 +94,22 @@ projeto sem reconstruir decisões antigas:
   de estudo e condução da apresentação para público leigo em criptografia,
   consolidando objetivo, passo a passo, resultados, comandos, limites e fala
   sugerida.
+- 2026-06-18: objetivo final do seminário consolidado como comparação de custo
+  e segurança entre `CLASSIC`, `PQC` e `PQC_CRC32`; firmware ganhou
+  `MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]`, dashboard ganhou botões
+  correspondentes, overlay de mensagem entregue, métricas superiores
+  `CLÁSSICA`/`PQC`/`PQC+CRC`, exportação JSON em `metrics.mission` e efeitos
+  lúdicos de LED/bargraph por cenário.
+- 2026-06-18: criado `METRICAS_CONSOLIDADAS.md` com metodologia de coleta,
+  campos do JSON, comandos curtos/longos e limites científicos para a
+  comparação final.
 
-O dashboard já pode demonstrar `SILENT` versus `DETECTED_GUARD` em payload,
-executar `RUN_BATTERY` A/B, executar `DEMO` com overlay calculado e exportar
-sessões em JSON. A coleta técnica, a campanha prolongada e a validação de
-projetor/legibilidade já foram concluídas para a apresentação atual.
+O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
+`PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar
+`RUN_BATTERY` A/B, executar `DEMO` com overlay calculado e exportar sessões em
+JSON. A coleta técnica antiga, a campanha prolongada e a validação de
+projetor/legibilidade já foram concluídas; a coleta final com `MISSION` deve
+ser rodada manualmente antes da apresentação e analisada por JSON.
 
 ## 3. Gate 0 - protocolo experimental
 
@@ -236,19 +249,23 @@ linear rígida.
    clicáveis da demo.
    Eles podem ser digitados no terminal textual avançado quando a placa estiver
    conectada.
-3. Manter `PQC_INFO` como fonte de alvo, backend, fonte, commit, licença,
+3. Manter `MISSION CLASSIC|PQC|PQC_CRC32` como comando principal da
+   apresentação para entrega de mensagem e comparação de custo.
+4. Manter `PQC_INFO` como fonte de alvo, backend, fonte, commit, licença,
    perfil, tempo e memória.
-4. Medição inicial de tempo, heap, heap mínimo e flash nos perfis `BASELINE` e
+5. Medição inicial de tempo, heap, heap mínimo e flash nos perfis `BASELINE` e
    `OBC-1U-LIMITED` concluída em 2026-06-17.
-5. Integrar os resultados no dashboard/JSON sem exportar segredos completos.
+6. Integrar os resultados no dashboard/JSON sem exportar segredos completos.
 
 ### Trilha software demonstrável
 
 1. Manter payload/CRC32 e ciphertext ML-KEM com confirmação de chave como
    base de coleta. A antiga Etapa 06 foi consolidada neste roadmap.
-2. Manter `DEMO` como campanha visual automatizada. A antiga Etapa 07 foi
+2. Manter `MISSION` como fluxo visual central da apresentação: `CLASSIC`,
+   `PQC` e `PQC_CRC32`, com métricas superiores e overlay de mensagem.
+3. Manter `DEMO` como campanha visual automatizada de apoio. A antiga Etapa 07 foi
    consolidada neste roadmap.
-3. Etapa 08 consolidada neste roadmap: robustez de software, aceitação serial,
+4. Etapa 08 consolidada neste roadmap: robustez de software, aceitação serial,
    campanha de 30 minutos e projetor concluídos.
 
 Etapas 01 a 08 já estão implementadas e seus markdowns foram removidos. A
@@ -258,9 +275,11 @@ dado medido, simulação e pendência.
 ### Trilha hardware
 
 1. Manter firmware, bridge serial e comandos de bancada estáveis.
-2. Usar `FAULT NONE|CRC32 payload_hex index mask` apenas como validação real
+2. Usar `MISSION CLASSIC|PQC|PQC_CRC32` como coleta curta principal antes da
+   apresentação.
+3. Usar `FAULT NONE|CRC32 payload_hex index mask` apenas como validação real
    do experimento de payload na Wisdom.
-3. Medir `PROFILE BASELINE` e `PROFILE OBC-1U-LIMITED` antes de qualquer
+4. Medir `PROFILE BASELINE` e `PROFILE OBC-1U-LIMITED` antes de qualquer
    afirmação de limitação operacional.
 
 ### Fora do caminho crítico
@@ -474,6 +493,9 @@ Implementado no dashboard:
 - amostras `PQC_*` exportadas em JSON com tempos, KAT, `key_match`,
   tamanhos, `key_confirmed`, `tag_match` e CRCs curtos, sem segredos
   completos.
+- comando `MISSION CLASSIC|PQC|PQC_CRC32` exportado em
+  `metrics.mission.scenarios`, permitindo comparar tempo total, subtempos,
+  bytes, heap, `key_match`, `tag_match`, `crc_match` e `result`.
 
 O firmware antigo proposto chamava `checkIntegrity()` sem inicializar os
 valores armazenados. Isso deve ser impedido por uma API explícita:
@@ -564,6 +586,7 @@ falha conhecida nos cenários testados".
 ### Obrigatória
 
 - dashboard funcional sem hardware e com hardware conectado;
+- entrega de mensagem demonstrável em `CLASSIC`, `PQC` e `PQC_CRC32`;
 - campanha reproduzível;
 - comparação A/B baseada em bytes;
 - JSON;
@@ -575,15 +598,17 @@ falha conhecida nos cenários testados".
 
 - ESP32 conectado por bridge serial;
 - ML-KEM-512 real;
+- `MISSION CLASSIC|PQC|PQC_CRC32` compilado no firmware para coleta
+  comparativa;
 - `PQC_FAULT` real em ciphertext ML-KEM com confirmação de chave;
 - `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`;
 - medição de tempo e memória no dispositivo.
 
-O hardware, a campanha prolongada, o projetor validado e o modo `DEMO`
-sustentam a demonstração.
-O guia didático, o roteiro, a base de slides e os limites científicos já estão
-documentados em `GUIA_DIDATICO_APRESENTACAO.md` e
-`APRESENTACAO_ROTEIRO.md`.
+O hardware, a campanha prolongada anterior, o projetor validado, `MISSION` e o
+modo `DEMO` sustentam a demonstração.
+O guia didático, o roteiro, a metodologia de métricas e os limites científicos
+já estão documentados em `GUIA_DIDATICO_APRESENTACAO.md`,
+`METRICAS_CONSOLIDADAS.md` e `APRESENTACAO_ROTEIRO.md`.
 
 ## 11. Referências técnicas para decisões
 

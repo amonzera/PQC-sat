@@ -1,37 +1,44 @@
 # Roteiro de apresentacao - PQC-SAT
 
-Objetivo do seminario: mostrar, em 20 minutos, que em um sistema embarcado a
-seguranca depende do algoritmo criptografico, da integridade do protocolo e do
-comportamento sob falhas transitórias simuladas.
+Objetivo do seminario: mostrar, em 20 minutos, que a transição para
+criptografia pós-quântica aumenta a demanda de hardware em sistemas
+embarcados, e que a demanda cresce ainda mais quando adicionamos mecanismos de
+integridade como checksum.
 
 ## Mensagem central
 
-O ESP32/Wisdom representa um OBC COTS educacional. O dashboard injeta
-bit-flips controlados e compara dois cenarios didaticos:
+O ESP32/Wisdom representa um OBC COTS educacional inspirado em CubeSat. A
+demonstração principal envia uma mensagem curta em três cenários:
 
-- **A / sem guardiao**: a corrupcao do payload passa como falha silenciosa.
-- **B / CRC32**: a mesma falha é detectada.
+- **CLASSIC**: mensagem autenticada com HMAC-SHA256;
+- **PQC**: mensagem autenticada depois de acordo de segredo com ML-KEM-512;
+- **PQC+CRC**: o mesmo fluxo PQC com CRC32 adicional no payload.
 
-Em paralelo, a placa executa ML-KEM-512 real. Quando o bit-flip atinge um
-ciphertext ML-KEM, a decapsulacao nao "detecta" sozinha a falha: o harness
-observa `KEY_MISMATCH`, e a confirmacao HMAC-SHA256 transforma divergencia de
-chave em `PROTOCOL_REJECT`.
+A parte de bit-flip continua como apoio visual para consistência: sem
+guardião, a corrupção vira falha silenciosa; com CRC32, a mesma alteração é
+detectada. Quando o bit-flip atinge ciphertext ML-KEM, a decapsulação não
+"detecta" sozinha a falha: o harness observa `KEY_MISMATCH`, e a confirmação
+HMAC-SHA256 transforma divergência de chave em `PROTOCOL_REJECT`.
 
 ## Cinco slides
 
 1. **Problema**: CubeSats usam COTS; falhas transitórias podem inverter bits.
-2. **Experimento**: Wisdom + notebook, payload, ML-KEM-512, bit-flip manual e
-   guardiao CRC32.
-3. **Demo visual**: A/B com a mesma campanha de falhas: sem checksum versus
-   CRC32.
-4. **Resultados medidos**: benchmarks PQC, falha ML-KEM com confirmacao e
-   campanha de 30 minutos.
-5. **Conclusao e limites**: checksum protege transporte; confirmacao protege a
-   aceitacao da sessao; energia real exige medidor externo.
+2. **Experimento**: Wisdom + notebook, mensagem de missão, ML-KEM-512,
+   HMAC-SHA256, CRC32 e bit-flip manual.
+3. **Demo visual**: enviar `CLASSIC`, `PQC` e `PQC+CRC`; depois mostrar
+   falha silenciosa versus detecção por CRC32.
+4. **Resultados medidos**: tempos, bytes, heap, benchmark PQC, falha ML-KEM
+   com confirmação e campanha de aceite.
+5. **Conclusão e limites**: PQC aumenta custo, checksum soma integridade, e
+   energia real exigiria medidor externo.
 
 ## Resultados para apresentar
 
 Fonte principal: `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json`.
+
+Essa fonte é o aceite anterior ao comando `MISSION`. Para a apresentação
+consolidada, gere um JSON novo seguindo `METRICAS_CONSOLIDADAS.md` e use ele
+como fonte principal dos três cenários.
 
 | Medida | Resultado |
 |---|---|
@@ -53,34 +60,46 @@ ML-KEM-512, mas a operacao continua funcional. O custo de checksum no payload
 é baixo e suficiente para demonstrar a diferenca entre falha silenciosa e erro
 detectado.
 
+Campos que devem entrar na tabela final após a coleta `MISSION`:
+
+| Cenário | Tempo total | Bytes | Heap livre | Resultado |
+|---|---:|---:|---:|---|
+| `CLASSIC` | `elapsed_us` | `bytes_total` | `heap` | `DELIVERED` |
+| `PQC` | `elapsed_us` | `bytes_total` | `heap` | `DELIVERED` |
+| `PQC_CRC32` | `elapsed_us` | `bytes_total` | `heap` | `DELIVERED` |
+
 ## Sequencia da demo
 
 1. Abrir:
    `python3 dashboard.py --port /dev/ttyUSB0`
 2. Confirmar estado essencial:
-   `STATUS`, `PQC_STATUS`
-3. Executar:
+   `STATUS`
+3. Enviar mensagens:
+   `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32`
+4. Executar apoio visual de falhas:
    `DEMO 5`
-4. Mostrar manualmente:
+5. Mostrar manualmente:
    `CHECKSUM OFF`, `INJECT_FAULT`, `CHECKSUM ON`, `INJECT_FAULT`, `CRC_CHECK`
-5. Exportar:
+6. Exportar:
    `EXPORT_JSON`
 
-O painel de botoes deve ficar restrito ao fluxo acima. Comandos de bancada
-como `PING`, `TELEMETRY`, `RUN_BATTERY`, sensores, LED, RGB, bargraph,
-`PQC_KAT`, `PQC_FAULT` e `PQC_BENCH` ficam no HELP/terminal textual ou no
-`tools/serial_console.py`.
+O painel de botões deve ficar restrito ao fluxo acima. LED e bargraph são
+acionados automaticamente pelos botões de missão como reforço lúdico do custo
+relativo. Comandos de bancada como `PING`, `TELEMETRY`, `RUN_BATTERY`,
+sensores, `PQC_KAT`, `PQC_FAULT` e `PQC_BENCH` ficam no HELP/terminal textual
+ou no `tools/serial_console.py`.
 
 ## Roteiro de fala
 
 | Tempo | Foco |
 |---|---|
 | 0-5 min | Contexto: COTS, CubeSat, falhas transitórias e PQC |
-| 5-8 min | Modelo: payload, ciphertext, bit-flip e classificacoes |
-| 8-10 min | Rodar `DEMO 5` |
-| 10-15 min | Interpretar timeline, JSON e tabela de resultados |
-| 15-18 min | Explicar ML-KEM real, `KEY_MISMATCH` e `PROTOCOL_REJECT` |
-| 18-20 min | Limites, conclusao e perguntas |
+| 5-8 min | Modelo: mensagem, HMAC, ML-KEM, CRC32 e bit-flip |
+| 8-11 min | Rodar `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32` |
+| 11-14 min | Interpretar CPU/RAM/tempo/bytes no topo do dashboard |
+| 14-17 min | Rodar `DEMO 5` e explicar falha silenciosa versus CRC32 |
+| 17-19 min | Explicar ML-KEM real, `KEY_MISMATCH` e `PROTOCOL_REJECT` |
+| 19-20 min | Limites, conclusao e perguntas |
 
 ## Limites que devem ser ditos
 
@@ -116,7 +135,7 @@ Resultado esperado:
 
 ```text
 stage8_acceptance_json=logs/<timestamp>_stage8_acceptance_dev-ttyusb0.json
-summary={"dashboard_demo_ok": true, "failed": 0, "ok": true, "pqc_bench_runs": 2, "records": 77}
+summary={"dashboard_demo_ok": true, "failed": 0, "mission_runs": <n>, "ok": true, "pqc_bench_runs": 2, ...}
 ```
 
 Depois de rodar, chame o agente apenas para analisar o JSON gerado e atualizar

@@ -58,17 +58,16 @@ DEMO_RESULTS_SECONDS = 8.0
 HELP_HINT_LINES = (
     "Botões: comandos visuais da demo.",
     "Terminal: HELP mostra comandos avançados.",
-    "Ex.: PQC_KAT, I2C_SCAN, HELP LED",
+    "Ex.: MISSION PQC, PQC_KAT, HELP LED",
 )
 COMMAND_BUTTONS = (
     ("DEMO", "DEMO"),
-    ("PAUSA", "DEMO_PAUSE"),
+    ("CLÁSSICA", "MISSION CLASSIC"),
+    ("PQC", "MISSION PQC"),
+    ("PQC+CRC", "MISSION PQC_CRC32"),
     ("STATUS", "STATUS"),
-    ("PQC", "PQC_STATUS"),
-    ("CHK ON", "CHECKSUM ON"),
-    ("CHK OFF", "CHECKSUM OFF"),
     ("FALHA", "INJECT_FAULT"),
-    ("CRC32", "CRC_CHECK"),
+    ("PAUSA", "DEMO_PAUSE"),
     ("EXPORT", "EXPORT_JSON"),
     ("OLED", "OLED STANDBY"),
 )
@@ -1052,6 +1051,8 @@ class DashboardPanel:
         self.demo_run_id = ""
         self.demo_summary = {}
         self.demo_export_path = None
+        self.last_mission = {}
+        self.mission_effect_timer = 0.0
         self.effect_timer = 0.0
         self.effect_result = ""
         self.effect_label = ""
@@ -1132,6 +1133,11 @@ class DashboardPanel:
             status = self._run_experiment_command(self.guard_mode, parts[1:])
         elif command_name in {"CHECKSUM", "GUARD"}:
             status = self._execute_checksum_command(command_name, parts[1:])
+        elif command_name == "MISSION":
+            mission_status = self._execute_mission_command(parts[1:])
+            if mission_status is None:
+                return
+            status = mission_status
         elif cmd_upper == "PQC_STATUS":
             if self.serial_connected:
                 self._queue_serial_command("PQC_INFO", visible=True)
@@ -1176,6 +1182,33 @@ class DashboardPanel:
             status = "DESCONHECIDO"
 
         self._append_history(cmd_upper, status)
+
+    def _execute_mission_command(self, args):
+        if len(args) != 1:
+            return "INVALID_INPUT"
+        scenario = args[0].upper().replace("+", "_")
+        if scenario not in {"CLASSIC", "PQC", "PQC_CRC32"}:
+            return "INVALID_INPUT"
+        if self.serial_client is None or not self.serial_connected:
+            self.session_status = "AGUARDANDO SAT"
+            return "SAT OFF"
+
+        command = f"MISSION {scenario}"
+        self._queue_serial_command(command, visible=True)
+        for effect_command in self._mission_effect_commands(scenario):
+            self._queue_serial_command(effect_command, visible=False)
+        self.session_status = f"MISSÃO {scenario}"
+        return None
+
+    @staticmethod
+    def _mission_effect_commands(scenario):
+        if scenario == "CLASSIC":
+            return ("BARGRAPH 25", "LED BLUE")
+        if scenario == "PQC":
+            return ("BARGRAPH 75", "LED MAGENTA")
+        if scenario == "PQC_CRC32":
+            return ("BARGRAPH 100", "LED GREEN")
+        return ()
 
     def _execute_checksum_command(self, command_name, args):
         if command_name == "GUARD":
@@ -1267,6 +1300,8 @@ class DashboardPanel:
         self.demo_run_id = ""
         self.demo_summary = {}
         self.demo_export_path = None
+        self.last_mission = {}
+        self.mission_effect_timer = 0.0
         self._active_campaign_run_id = "manual"
         self._set_checksum_enabled(False)
         self._refresh_experiment_metrics()
@@ -1321,6 +1356,7 @@ class DashboardPanel:
             "host": self._host_metrics_summary(),
             "checksum": checksum_metrics(self.experiment_events),
             "pqc": self._pqc_metrics_summary(),
+            "mission": self._mission_metrics_summary(),
         }
 
     def _host_metrics_summary(self):
@@ -1406,6 +1442,28 @@ class DashboardPanel:
                 "key_match": fault.get("key_match"),
                 "key_confirmed": fault.get("key_confirmed"),
                 "confirm_us": fault.get("confirm_us"),
+            },
+        }
+
+    def _mission_metrics_summary(self):
+        scenarios = {}
+        for sample in self.hardware_samples:
+            mission = sample.get("mission")
+            if not mission:
+                continue
+            scenario = mission.get("scenario")
+            if scenario:
+                scenarios[scenario] = mission
+
+        classic_us = _optional_int(scenarios.get("CLASSIC", {}).get("elapsed_us"))
+        pqc_us = _optional_int(scenarios.get("PQC", {}).get("elapsed_us"))
+        pqc_crc_us = _optional_int(scenarios.get("PQC_CRC32", {}).get("elapsed_us"))
+        return {
+            "scenarios": scenarios,
+            "ratios": {
+                "pqc_vs_classic": round(pqc_us / classic_us, 2) if classic_us and pqc_us else None,
+                "pqc_crc32_vs_classic": round(pqc_crc_us / classic_us, 2) if classic_us and pqc_crc_us else None,
+                "crc32_over_pqc": round(pqc_crc_us / pqc_us, 2) if pqc_us and pqc_crc_us else None,
             },
         }
 
@@ -1622,6 +1680,8 @@ class DashboardPanel:
         self.cursor_blink += dt
         if self.effect_timer > 0:
             self.effect_timer = max(0.0, self.effect_timer - dt)
+        if self.mission_effect_timer > 0:
+            self.mission_effect_timer = max(0.0, self.mission_effect_timer - dt)
         self._advance_demo(dt)
         self._poll_telemetry(dt)
         self._drain_serial_events()
@@ -1681,6 +1741,13 @@ class DashboardPanel:
         elif command.startswith("PQC_"):
             self.hardware_payload = payload
             self._update_pqc_label(payload)
+        elif command.startswith("MISSION"):
+            self.hardware_payload = payload
+            self.last_mission = dict(payload)
+            self.mission_effect_timer = 5.0
+            scenario = payload.get("scenario", "MISSION")
+            result = payload.get("result", "")
+            self.session_status = f"{scenario} {result}".strip()
         self._record_hardware_sample(command, payload)
 
     def _update_pqc_label(self, payload):
@@ -1743,6 +1810,22 @@ class DashboardPanel:
             "before",
             "after",
         }
+        mission_metric_keys = {
+            "scenario",
+            "message",
+            "crypto",
+            "checksum",
+            "payload_len",
+            "payload_crc32",
+            "bytes_payload",
+            "bytes_crypto",
+            "bytes_checksum",
+            "bytes_total",
+            "tag_us",
+            "verify_us",
+            "crc_us",
+            "crc_match",
+        }
         metric_keys = {
             "uptime_ms",
             "cpu_mhz",
@@ -1753,7 +1836,7 @@ class DashboardPanel:
             "cpu_load_pct",
             "radio",
             "profile",
-        } | pqc_metric_keys
+        } | pqc_metric_keys | mission_metric_keys
         if not any(key in payload for key in metric_keys):
             return
 
@@ -1794,6 +1877,9 @@ class DashboardPanel:
         pqc_sample = self._pqc_sample_export(command, payload)
         if pqc_sample:
             sample["pqc"] = pqc_sample
+        mission_sample = self._mission_sample_export(command, payload)
+        if mission_sample:
+            sample["mission"] = mission_sample
         self.hardware_samples.append(sample)
         self.session_dirty = True
         if len(self.hardware_samples) > 512:
@@ -1868,6 +1954,50 @@ class DashboardPanel:
                 sample[key] = _optional_int(payload[key])
         return sample
 
+    def _mission_sample_export(self, command, payload):
+        source_command = command.split()[0].upper()
+        if source_command != "MISSION" and "scenario" not in payload:
+            return {}
+
+        text_fields = (
+            "scenario",
+            "op",
+            "message",
+            "result",
+            "crypto",
+            "checksum",
+            "confirmation",
+            "payload_crc32",
+            "crc_tx",
+            "crc_rx",
+        )
+        numeric_fields = (
+            "key_match",
+            "tag_ready",
+            "tag_match",
+            "crc_match",
+            "payload_len",
+            "bytes_payload",
+            "bytes_crypto",
+            "bytes_checksum",
+            "bytes_total",
+            "keygen_us",
+            "encap_us",
+            "decap_us",
+            "tag_us",
+            "verify_us",
+            "crc_us",
+            "elapsed_us",
+        )
+        sample = {"command": source_command}
+        for key in text_fields:
+            if key in payload:
+                sample[key] = payload[key]
+        for key in numeric_fields:
+            if key in payload:
+                sample[key] = _optional_int(payload[key])
+        return sample
+
     def draw(self, surface, t, satellite):
         """Desenha todos os paineis da interface."""
         self._draw_fault_effect(surface, t, satellite)
@@ -1876,6 +2006,7 @@ class DashboardPanel:
         self._draw_top_bar(surface, t)
         self._draw_top_metrics(surface, t)
         self._draw_demo_overlay(surface, t)
+        self._draw_mission_overlay(surface, t)
         self._draw_bottom_bar(surface, t)
 
     def _draw_fault_effect(self, surface, t, satellite):
@@ -2090,6 +2221,13 @@ class DashboardPanel:
                 "key_match",
                 "key_confirmed",
                 "tag_match",
+                "scenario",
+                "crypto",
+                "checksum",
+                "bytes_total",
+                "tag_us",
+                "verify_us",
+                "crc_us",
                 "keygen_avg_us",
                 "encap_avg_us",
                 "decap_avg_us",
@@ -2364,12 +2502,21 @@ class DashboardPanel:
         lines.extend(command_help_lines(include_dashboard=True, demo_only=False))
         return lines
 
+    def _top_metrics_rows(self):
+        left_edge = 340
+        right_edge = WIDTH - 420
+        width = right_edge - left_edge
+        if width < 320:
+            return 0
+        columns = 5 if width >= 1100 else 3 if width >= 620 else 2
+        return math.ceil(len(self._metric_tiles()) / columns)
+
     def _draw_demo_overlay(self, surface, t):
         if self.demo_state == "IDLE":
             return
 
         center_x = WIDTH // 2
-        y = 154
+        y = 154 + max(0, self._top_metrics_rows() - 1) * 50
         width = min(560, max(360, WIDTH - 760))
         rect = pygame.Rect(center_x - width // 2, y, width, 118)
         panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
@@ -2415,6 +2562,43 @@ class DashboardPanel:
         if self.demo_export_path:
             name = Path(self.demo_export_path).name
             surface.blit(self._render_clipped(FONT_LABEL, f"JSON: {name}", C_ACCENT_GREEN, rect.width - 28), (rect.x + 250, rect.y + 88))
+
+    def _draw_mission_overlay(self, surface, t):
+        if self.mission_effect_timer <= 0 or not self.last_mission:
+            return
+
+        center_x = WIDTH // 2
+        y = 154 + max(0, self._top_metrics_rows() - 1) * 50
+        if self.demo_state != "IDLE":
+            y += 132
+        width = min(560, max(360, WIDTH - 760))
+        rect = pygame.Rect(center_x - width // 2, y, width, 126)
+        scenario = str(self.last_mission.get("scenario", "MISSION"))
+        result = str(self.last_mission.get("result", ""))
+        crypto = str(self.last_mission.get("crypto", "--"))
+        checksum = str(self.last_mission.get("checksum", "NONE"))
+        elapsed = _format_elapsed(self.last_mission.get("elapsed_us"))
+        bytes_total = self.last_mission.get("bytes_total", "--")
+        tag_match = self.last_mission.get("tag_match", "--")
+        color = C_ACCENT_GREEN if result == "DELIVERED" else C_ACCENT_RED
+
+        panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        alpha = int(180 + 35 * math.sin(t * 7))
+        pygame.draw.rect(panel, (*C_PANEL_BG, 225), (0, 0, rect.width, rect.height), border_radius=8)
+        pygame.draw.rect(panel, (*color, max(120, alpha)), (0, 0, rect.width, rect.height), 1, border_radius=8)
+        surface.blit(panel, rect.topleft)
+
+        title = f"MENSAGEM {result or 'EM CURSO'}"
+        surface.blit(self._render_clipped(FONT_BODY, title, color, rect.width - 28), (rect.x + 14, rect.y + 12))
+        lines = [
+            f"Cenário: {scenario}",
+            f"Crypto: {crypto}   Checksum: {checksum}",
+            f"Tempo: {elapsed}   Tráfego: {bytes_total}B",
+            f"Tag/recebimento: {'OK' if str(tag_match) == '1' else tag_match}",
+        ]
+        for idx, line in enumerate(lines):
+            line_color = C_TEXT_PRIMARY if idx < 3 else C_TEXT_DIM
+            surface.blit(self._render_clipped(FONT_LABEL, line, line_color, rect.width - 28), (rect.x + 14, rect.y + 42 + idx * 17))
 
     def _draw_top_bar(self, surface, t):
         """Barra superior com titulo e status."""
@@ -2462,7 +2646,7 @@ class DashboardPanel:
             return
 
         tiles = self._metric_tiles()
-        columns = 4 if width >= 1020 else 3 if width >= 620 else 2
+        columns = 5 if width >= 1100 else 3 if width >= 620 else 2
         gap = 8
         tile_h = 42
         tile_w = (width - gap * (columns - 1)) // columns
@@ -2512,38 +2696,46 @@ class DashboardPanel:
             cpu_color = C_ACCENT_GREEN if cpu_load < 70 else C_ACCENT_ORANGE
 
         ram_detail = f"min {_format_bytes(min_heap)}" if min_heap is not None else ""
-        checksum = checksum_metrics(self.experiment_events)
-        if checksum["events"]:
-            checksum_value = f"DET {checksum['detection_rate_pct']:.0f}%"
-            checksum_detail = f"ovh {checksum['avg_overhead_us']:.0f}us"
-            checksum_color = C_ACCENT_GREEN if checksum["detection_rate_pct"] >= 95 else C_ACCENT_ORANGE
-        else:
-            checksum_value = self.guard_mode
-            checksum_detail = "sem eventos"
-            checksum_color = C_ACCENT_CYAN if self.guard_mode == "CRC32" else C_ACCENT_ORANGE
-
         pqc_summary = self._pqc_metrics_summary()
         bench = pqc_summary.get("bench", {})
-        fault = pqc_summary.get("fault", {})
-        if bench.get("keygen_avg_us") is not None:
-            pqc_value = f"K {_format_elapsed(bench.get('keygen_avg_us'))}"
-            pqc_detail = f"E {_format_elapsed(bench.get('encap_avg_us'))} D {_format_elapsed(bench.get('decap_avg_us'))}"
-            pqc_color = C_ACCENT_PURPLE
-        elif fault.get("result"):
-            pqc_value = str(fault["result"]).replace("PROTOCOL_", "PROTO ")
-            pqc_detail = str(fault.get("confirmation", ""))
-            pqc_color = C_ACCENT_ORANGE if fault["result"] == "PROTOCOL_REJECT" else C_ACCENT_RED
-        else:
-            pqc_value = self.pqc_algorithm.replace("ML-KEM-512 ", "")
-            pqc_detail = "backend"
-            pqc_color = C_ACCENT_PURPLE
+        mission_summary = self._mission_metrics_summary()
+        scenarios = mission_summary.get("scenarios", {})
+        classic_value, classic_detail, classic_color = self._mission_tile_values(
+            scenarios.get("CLASSIC"),
+            fallback_value="--",
+            fallback_detail="HMAC",
+            ready_color=C_ACCENT_GREEN,
+        )
+        pqc_value, pqc_detail, pqc_color = self._mission_tile_values(
+            scenarios.get("PQC"),
+            fallback_value=f"K {_format_elapsed(bench.get('keygen_avg_us'))}" if bench.get("keygen_avg_us") is not None else "--",
+            fallback_detail="ML-KEM" if bench.get("keygen_avg_us") is None else f"E {_format_elapsed(bench.get('encap_avg_us'))}",
+            ready_color=C_ACCENT_PURPLE,
+        )
+        pqc_crc_value, pqc_crc_detail, pqc_crc_color = self._mission_tile_values(
+            scenarios.get("PQC_CRC32"),
+            fallback_value="--",
+            fallback_detail="ML-KEM+CRC",
+            ready_color=C_ACCENT_ORANGE,
+        )
 
         return (
             ("CPU", cpu_value, str(profile), cpu_color),
             ("RAM", f"{_format_bytes(heap)} livre", ram_detail, C_ACCENT_GREEN if heap else C_ACCENT_ORANGE),
+            ("CLÁSSICA", classic_value, classic_detail, classic_color),
             ("PQC", pqc_value, pqc_detail, pqc_color),
-            ("CHECK", checksum_value, checksum_detail, checksum_color),
+            ("PQC+CRC", pqc_crc_value, pqc_crc_detail, pqc_crc_color),
         )
+
+    def _mission_tile_values(self, mission, *, fallback_value, fallback_detail, ready_color):
+        if not mission:
+            return fallback_value, fallback_detail, C_TEXT_DIM if fallback_value == "--" else ready_color
+        elapsed = _format_elapsed(mission.get("elapsed_us"))
+        bytes_total = mission.get("bytes_total")
+        result = str(mission.get("result", ""))
+        detail = f"{bytes_total}B {result}" if bytes_total is not None else result
+        color = ready_color if result == "DELIVERED" else C_ACCENT_RED
+        return elapsed, detail, color
 
     def _draw_bottom_bar(self, surface, t):
         """Barra inferior com informacoes de sistema."""

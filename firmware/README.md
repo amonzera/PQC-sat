@@ -2,10 +2,10 @@
 
 Este diretorio contem o firmware do projeto para a RoboCore BlackBoard Wisdom.
 Ele implementa o bridge serial `V1`, inventario da placa e comandos de bancada
-para exercitar os perifericos integrados. Nesta etapa, ele tambem executa um
-experimento pequeno de payload com bit-flip e CRC32 e executa ML-KEM-512 real
-com `mlkem-native`; a campanha completa de radiacao simulada ainda fica no
-dashboard/host.
+para exercitar os perifericos integrados. Ele também executa um experimento
+pequeno de payload com bit-flip e CRC32, ML-KEM-512 real com `mlkem-native` e
+o comando `MISSION` para comparar entrega de mensagem em `CLASSIC`, `PQC` e
+`PQC_CRC32`.
 
 O objetivo desta etapa e dominar a comunicacao ESP32/notebook e preservar o
 potencial da Wisdom para a demonstracao: sensores, atuadores, OLED, entradas
@@ -145,6 +145,9 @@ STATUS
 TELEMETRY
 FAULT NONE 5051432D5341547C54454D503D32342E357C5354415455533D4F4B 0 0x01
 FAULT CRC32 5051432D5341547C54454D503D32342E357C5354415455533D4F4B 0 0x01
+MISSION CLASSIC
+MISSION PQC
+MISSION PQC_CRC32
 SENSOR_READ ACCEL
 OLED STANDBY
 LED TEST
@@ -163,6 +166,9 @@ Para a sequencia completa de bancada, use `../hardware_command_reference.md`.
 - A interface PQC real existe: `PQC_INFO` reporta alvo, backend, variante,
   commit, licença, tamanhos e métricas; `PQC_KAT`, `PQC_KEYGEN`,
   `PQC_ENCAP`, `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH` executam no firmware.
+- O comando `MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]` entrega uma mensagem
+  curta e retorna tempos, bytes, heap, resultado, confirmação, checksum e
+  subtempos de ML-KEM quando aplicável.
 - A injecao de falhas existe em dois caminhos: payload serial com
   `FAULT NONE|CRC32 ...` e ciphertext ML-KEM com
   `PQC_FAULT index mask [CONFIRM|NONE]`.
@@ -179,9 +185,10 @@ Para a sequencia completa de bancada, use `../hardware_command_reference.md`.
 
 O proximo marco do firmware e manter esta base estável enquanto a etapa de
 apresentação automatizada é implementada. Novas mudanças de firmware devem
-preservar `PQC_KAT`, `PQC_FAULT`, `PQC_BENCH 100` e `FAULT CRC32` como testes
-de regressão, sem expor chave privada, segredo compartilhado completo ou
-material suficiente para reconstruir a sessao.
+preservar `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32`, `PQC_KAT`,
+`PQC_FAULT`, `PQC_BENCH 100` e `FAULT CRC32` como testes de regressão, sem
+expor chave privada, segredo compartilhado completo ou material suficiente
+para reconstruir a sessao.
 
 Sequencia minima de bancada:
 
@@ -193,6 +200,9 @@ PQC_ENCAP
 PQC_DECAP
 PQC_FAULT 0 0x01 CONFIRM
 PQC_BENCH n
+MISSION CLASSIC
+MISSION PQC
+MISSION PQC_CRC32
 ```
 
 Validação real em placa após upload:
@@ -205,6 +215,14 @@ PQC_FAULT 0 0x01 NONE         result=KEY_MISMATCH confirmation=NONE key_match=0
 PQC_BENCH 100 BASELINE        ok=100 keygen_avg_us=3301 encap_avg_us=3864 decap_avg_us=4988
 PQC_BENCH 100 OBC-1U-LIMITED  ok=100 keygen_avg_us=10045 encap_avg_us=11769 decap_avg_us=15194
 FAULT CRC32 ... 0 0x01        result=DETECTED_GUARD crc_before=0xDFFEC3A1 crc_after=0x7989C815
+```
+
+Validação funcional do novo fluxo de apresentação:
+
+```text
+MISSION CLASSIC      result=DELIVERED crypto=HMAC-SHA256 checksum=NONE tag_match=1 elapsed_us=<medido>
+MISSION PQC          result=DELIVERED crypto=ML-KEM-512 checksum=NONE key_match=1 tag_match=1 elapsed_us=<medido>
+MISSION PQC_CRC32    result=DELIVERED crypto=ML-KEM-512 checksum=CRC32 key_match=1 tag_match=1 crc_match=1 elapsed_us=<medido>
 ```
 
 Medição comparativa registrada em 2026-06-17:

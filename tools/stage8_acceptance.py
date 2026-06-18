@@ -34,8 +34,14 @@ SMOKE_COMMANDS = (
     "PQC_FAULT 0 0x01 CONFIRM",
     "PQC_FAULT 0 0x01 NONE",
     "PQC_BENCH 100",
+    "MISSION CLASSIC",
+    "MISSION PQC",
+    "MISSION PQC_CRC32",
     "PROFILE OBC-1U-LIMITED",
     "PQC_BENCH 100",
+    "MISSION CLASSIC",
+    "MISSION PQC",
+    "MISSION PQC_CRC32",
     "FAULT CRC32 5051432D534154 0 0x01",
     "PROFILE BASELINE",
     "OLED STANDBY",
@@ -48,6 +54,9 @@ LONG_COMMANDS = (
     "TELEMETRY",
     "STATUS",
     "PQC_INFO",
+    "MISSION CLASSIC",
+    "MISSION PQC",
+    "MISSION PQC_CRC32",
     "FAULT CRC32 5051432D534154 0 0x01",
 )
 
@@ -217,11 +226,17 @@ def summarize(records: list[dict[str, object]], dashboard_demo: dict[str, object
         for record in records
         if str(record.get("command", "")).startswith("PQC_BENCH") and record.get("ok")
     ]
+    mission_runs = [
+        record
+        for record in records
+        if str(record.get("command", "")).startswith("MISSION") and record.get("ok")
+    ]
     return {
         "records": len(records),
         "failed": len(failed),
         "dashboard_demo_ok": bool(dashboard_demo and dashboard_demo.get("ok")),
         "pqc_bench_runs": len(pqc_bench),
+        "mission_runs": len(mission_runs),
         "ok": not failed and (dashboard_demo is None or bool(dashboard_demo.get("ok"))),
     }
 

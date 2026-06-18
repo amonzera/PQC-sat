@@ -28,6 +28,7 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PQC_DECAP", "decapsula ciphertext armazenado e compara segredo"),
     CommandInfo("PQC_FAULT index mask [CONFIRM|NONE]", "aplica bit-flip em ciphertext ML-KEM e testa confirmação"),
     CommandInfo("PQC_BENCH n", "executa n rodadas keygen/encap/decap, 1..100"),
+    CommandInfo("MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]", "envia mensagem curta e mede custo/bytes/segurança por cenário"),
     CommandInfo("PERIPHERALS", "detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C"),
     CommandInfo("I2C_SCAN", "varre o barramento I2C SDA21/SCL22"),
     CommandInfo("FEATURES [CORE|I2C|GPIO|ANALOG|EXPANSION]", "lista grupos de recursos conhecidos"),
@@ -57,6 +58,7 @@ DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("CHECKSUM ON|OFF|TOGGLE|STATUS", "liga/desliga o guardião CRC32 do fluxo manual"),
     CommandInfo("GUARD NONE|CRC32", "define explicitamente o guardião ativo"),
     CommandInfo("PQC_STATUS", "consulta PQC_INFO na placa ou mostra pendência local"),
+    CommandInfo("MISSION CLASSIC|PQC|PQC_CRC32", "executa entrega de mensagem nos cenários da apresentação"),
     CommandInfo("CRC_CHECK", "aplica bit-flip e verifica CRC32 real"),
     CommandInfo("EXPORT_JSON", "salva eventos e métricas em JSON"),
     CommandInfo("SAVE_SESSION", "alias de EXPORT_JSON"),
@@ -72,6 +74,9 @@ DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = (
 DEMO_FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PING", "confirma que a placa respondeu ao painel"),
     CommandInfo("STATUS", "mostra perfil, CPU, memória e rádio"),
+    CommandInfo("MISSION CLASSIC", "envia mensagem com autenticação clássica HMAC-SHA256"),
+    CommandInfo("MISSION PQC", "envia mensagem com segredo estabelecido por ML-KEM-512"),
+    CommandInfo("MISSION PQC_CRC32", "envia mensagem com ML-KEM-512 mais CRC32 no payload"),
     CommandInfo("TELEMETRY", "atualiza telemetria real da Wisdom"),
     CommandInfo("SENSOR_READ TEMP_HUM", "lê temperatura e umidade"),
     CommandInfo("SENSOR_READ ACCEL", "lê aceleração para demonstrar movimento"),
@@ -100,6 +105,8 @@ def is_demo_firmware_command(command_line: str) -> bool:
     name = parts[0]
     if name in {"PING", "STATUS", "TELEMETRY"}:
         return len(parts) == 1
+    if name == "MISSION":
+        return len(parts) == 2 and parts[1] in {"CLASSIC", "PQC", "PQC_CRC32"}
     if name == "SENSOR_READ":
         return len(parts) == 2 and parts[1] in {"TEMP_HUM", "ACCEL", "APDS"}
     if name == "OLED":
