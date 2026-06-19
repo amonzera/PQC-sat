@@ -83,9 +83,9 @@ projeto sem reconstruir decisões antigas:
   pré-apresentação.
 - 2026-06-18: verificação final detectou a Wisdom em `/dev/ttyUSB0` como
   CP2102N/Silicon Labs. Após liberação da porta, a aceitação de hardware da
-  etapa 8 passou com `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json`:
-  1.816,87 s de execução, 77 registros, 0 falhas, 60 comandos no long-run,
-  2 benchmarks PQC, 13 `DETECTED_GUARD` em payload CRC32 e demo headless do
+  etapa 8 passou e foi consolidada com `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`:
+  1.817,23 s de execução, 83 registros, 0 falhas, 27 MISSION runs,
+  2 benchmarks PQC, 8 `DETECTED_GUARD` em payload CRC32 e demo headless do
   dashboard com 5/5 falhas silenciosas em A e 5/5 detectadas em B.
 - 2026-06-18: polimento final de apresentação removeu polling automático de
   `TELEMETRY`, reduziu os blocos clicáveis aos comandos centrais da demo e
@@ -550,7 +550,7 @@ Entregas:
 - runner `tools/stage8_acceptance.py` implementado para aceitação serial,
   benchmark, campanha prolongada e demo headless com exportação JSON;
 - campanha prolongada validada por
-  `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json`;
+  `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`;
 - projetor validado por confirmação do usuário em 2026-06-18, após ajuste
   visual para reduzir botões e métricas;
 - roteiro de 20 minutos e base de até cinco slides em

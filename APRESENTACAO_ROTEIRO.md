@@ -34,39 +34,38 @@ HMAC-SHA256 transforma divergência de chave em `PROTOCOL_REJECT`.
 
 ## Resultados para apresentar
 
-Fonte principal: `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json`.
-
-Essa fonte é o aceite anterior ao comando `MISSION`. Para a apresentação
-consolidada, gere um JSON novo seguindo `METRICAS_CONSOLIDADAS.md` e use ele
-como fonte principal dos três cenários.
+Fonte principal: `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`.
 
 | Medida | Resultado |
 |---|---|
-| Aceitacao final | 1.816,87 s, 77 registros, 0 falhas |
-| Long-run | 60 comandos seriais, sem timeout |
+| Aceitacao final | 1.817,23 s, 83 registros, 0 falhas |
+| MISSION runs | 27 (9 CLASSIC, 9 PQC, 9 PQC_CRC32) |
 | Demo A/B | 5/5 falhas silenciosas em A; 5/5 detectadas em B |
-| CRC32 payload | 13/13 `DETECTED_GUARD` no aceite final |
+| CRC32 payload | 8/8 `DETECTED_GUARD` no aceite final |
 | `PQC_KAT` | `kat=pass`, `ss_crc32=0xD9DA8D6C` |
 | `PQC_FAULT CONFIRM` | `PROTOCOL_REJECT`, `confirmation=HMAC-SHA256` |
 | `PQC_FAULT NONE` | `KEY_MISMATCH` |
 
 | Perfil | `keygen_avg_us` | `encap_avg_us` | `decap_avg_us` |
 |---|---:|---:|---:|
-| `BASELINE` 240 MHz | 3304 | 3867 | 4991 |
-| `OBC-1U-LIMITED` 80 MHz | 10064 | 11789 | 15214 |
+| `BASELINE` 240 MHz | 3.298 | 3.861 | 4.985 |
+| `OBC-1U-LIMITED` 80 MHz | 10.056 | 11.780 | 15.204 |
 
 Leitura didatica: limitar o ESP32 para 80 MHz aumenta o custo temporal do
 ML-KEM-512, mas a operacao continua funcional. O custo de checksum no payload
 é baixo e suficiente para demonstrar a diferenca entre falha silenciosa e erro
 detectado.
 
-Campos que devem entrar na tabela final após a coleta `MISSION`:
+Comparacao MISSION BASELINE (240 MHz, media de 8 amostras):
 
-| Cenário | Tempo total | Bytes | Heap livre | Resultado |
+| Cenario | Tempo total (us) | Bytes | Heap livre | Resultado |
 |---|---:|---:|---:|---|
-| `CLASSIC` | `elapsed_us` | `bytes_total` | `heap` | `DELIVERED` |
-| `PQC` | `elapsed_us` | `bytes_total` | `heap` | `DELIVERED` |
-| `PQC_CRC32` | `elapsed_us` | `bytes_total` | `heap` | `DELIVERED` |
+| `CLASSIC` | 721 | 73 | 201.412 | DELIVERED |
+| `PQC` | 13.536 | 841 | 201.412 | DELIVERED |
+| `PQC_CRC32` | 13.367 | 845 | 201.412 | DELIVERED |
+
+Razoes: PQC e 18,8x mais lento e 11,5x maior que CLASSIC.
+CRC32 adiciona ~10 us e +4 bytes sobre PQC.
 
 ## Sequencia da demo
 
@@ -118,7 +117,7 @@ ou no `tools/serial_console.py`.
 - `python3 -m compileall -q dashboard.py tools tests`
 - `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -m unittest discover`
 - `python3 -m platformio run -e robocore_wisdom_esp32`
-- Conferir `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json`
+- Conferir `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`
 - Projetor/legibilidade: validado em 2026-06-18
 
 Baterias longas de hardware para consolidação final não devem ser iniciadas por

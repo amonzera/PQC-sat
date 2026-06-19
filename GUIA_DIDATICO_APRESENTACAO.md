@@ -181,8 +181,8 @@ O projeto exporta JSON para que os resultados nao dependam apenas da animacao.
 
 Arquivos principais de resultado:
 
-- `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json`;
-- `logs/20260618T183829Z_sim-42.json`.
+- `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`;
+- `logs/20260618T234008Z_sim-42.json`.
 
 O JSON guarda:
 
@@ -203,25 +203,22 @@ registrados de forma auditavel.
 Fonte principal:
 
 ```text
-logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json
+logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json
 ```
 
-Esse arquivo e o aceite anterior ao comando `MISSION`. Para a apresentacao
-consolidada, gere um JSON novo com os comandos documentados em
-`METRICAS_CONSOLIDADAS.md` e use esse JSON como fonte principal da comparacao
-`CLASSIC` versus `PQC` versus `PQC_CRC32`.
+Esse arquivo e o aceite consolidado com os comandos `MISSION` incluidos.
 
 Resumo do aceite final:
 
 | Medida | Resultado |
 |---|---|
-| Tempo total | 1.816,87 s |
-| Registros | 77 |
+| Tempo total | 1.817,23 s |
+| Registros | 83 |
 | Falhas no aceite | 0 |
-| Comandos no long-run | 60 |
+| Comandos no long-run | 27 MISSION runs |
 | Benchmarks PQC | 2 |
 | Demo headless | OK |
-| Payload CRC32 | 13/13 `DETECTED_GUARD` |
+| Payload CRC32 | 8/8 `DETECTED_GUARD` |
 
 Resultados da demo A/B:
 
@@ -242,8 +239,8 @@ Benchmark ML-KEM-512:
 
 | Perfil | CPU | `keygen_avg_us` | `encap_avg_us` | `decap_avg_us` |
 |---|---:|---:|---:|---:|
-| `BASELINE` | 240 MHz | 3304 | 3867 | 4991 |
-| `OBC-1U-LIMITED` | 80 MHz | 10064 | 11789 | 15214 |
+| `BASELINE` | 240 MHz | 3298 | 3861 | 4985 |
+| `OBC-1U-LIMITED` | 80 MHz | 10056 | 11780 | 15204 |
 
 Leitura simples:
 
@@ -252,15 +249,278 @@ Leitura simples:
 - a confirmacao de chave foi capaz de rejeitar uma sessao divergente;
 - CRC32 detectou todos os bit-flips de payload testados no aceite.
 
-Metricas novas que devem ser consolidadas apos gravar o firmware atualizado:
+Comparacao MISSION (BASELINE, 240 MHz):
 
-| Cenario | O que mostrar |
-|---|---|
-| `MISSION CLASSIC` | `elapsed_us`, `bytes_total`, `heap`, `tag_match`, `result` |
-| `MISSION PQC` | `elapsed_us`, `bytes_total`, `heap`, `key_match`, `tag_match`, `result` |
-| `MISSION PQC_CRC32` | `elapsed_us`, `bytes_total`, `heap`, `key_match`, `tag_match`, `crc_match`, `result` |
+| Cenario | `elapsed_us` (avg) | `bytes_total` | `heap` | `result` |
+|---|---:|---:|---:|---|
+| CLASSIC | 721 | 73 | 201.412 | DELIVERED |
+| PQC | 13.536 | 841 | 201.412 | DELIVERED |
+| PQC_CRC32 | 13.367 | 845 | 201.412 | DELIVERED |
 
-## 5. Como explicar os termos para uma pessoa leiga
+Razoes observadas no BASELINE (240 MHz):
+
+- PQC e 18,8x mais lento que CLASSIC em tempo;
+- PQC transmite 11,5x mais bytes que CLASSIC;
+- CRC32 adiciona ~10 us e +4 bytes sobre o fluxo PQC.
+
+## 5. Fundamentos de criptografia para quem nunca viu
+
+Esta secao foi escrita para quem nunca estudou criptografia. Ela explica, do
+zero, cada conceito que aparece no projeto. Se voce ja conhece o assunto, pode
+pular direto para a secao 6.
+
+### 5.1 Criptografia simetrica vs. assimetrica
+
+**O que e uma chave?**
+
+Uma chave criptografica e como uma senha que tranca e destranca dados. Sem a
+chave correta, os dados ficam ilegíveis.
+
+**Criptografia simetrica** -- a mesma chave dos dois lados.
+
+Analogia: imagine uma caixa com um cadeado. O remetente e o destinatario tem
+copias da mesma chave. O remetente tranca a caixa, envia, e o destinatario
+abre com sua copia.
+
+```text
+  Remetente                      Destinatario
+     |                               |
+     |--- [caixa trancada] --------> |
+     |    mesma chave K              |
+     |    tranca com K               abre com K
+```
+
+Problema: como entregar a primeira copia da chave com seguranca?
+
+**Criptografia assimetrica** -- chave publica + chave privada.
+
+Analogia: pense em uma caixa de correio. Qualquer pessoa pode colocar uma
+carta pela abertura (chave publica), mas so o dono tem a chave para abrir a
+caixa (chave privada).
+
+```text
+  Qualquer pessoa                Dono da caixa
+     |                               |
+     |--- carta pela abertura -----> |
+     |    chave publica (aberta)     chave privada (secreta)
+     |    qualquer um pode enviar    so o dono pode ler
+```
+
+**No nosso projeto:**
+
+- HMAC-SHA256 usa uma chave **simetrica** (as duas pontas compartilham o
+  mesmo segredo);
+- ML-KEM gera pares **assimetricos** (chave publica + chave privada).
+
+### 5.2 Por que a criptografia atual esta ameacada
+
+Os algoritmos classicos mais usados (RSA e ECDH) dependem de problemas
+matematicos que sao muito dificeis para computadores normais:
+
+- **RSA**: fatorar numeros enormes (ex.: encontrar os dois primos que, quando
+  multiplicados, dao um numero de 2048 bits);
+- **ECDH**: o problema do logaritmo discreto em curvas elipticas.
+
+Em 1994, Peter Shor publicou um **algoritmo quantico** que consegue fatorar
+numeros exponencialmente mais rapido. Um computador quantico suficientemente
+poderoso poderia quebrar RSA e ECDH em horas, em vez de bilhoes de anos.
+
+Isso e chamado de **ameaca quantica**. Ela ainda nao existe em escala
+pratica, mas o risco e real por causa da estrategia "harvest now, decrypt
+later" -- um adversario pode capturar dados cifrados hoje e descriptografa-los
+no futuro, quando tiver um computador quantico.
+
+Por isso existe a **criptografia pos-quantica (PQC)**: algoritmos projetados
+para resistir tanto a computadores classicos quanto a quanticos.
+
+### 5.3 O que e um KEM (Mecanismo de Encapsulamento de Chave)
+
+Um KEM **nao e cifra**. Ele nao serve para esconder uma mensagem diretamente.
+Ele serve para duas partes combinarem um segredo compartilhado de forma
+segura.
+
+Passo a passo:
+
+```text
+  Alice                              Bob
+    |                                  |
+    |--- keygen() --->  pk (publica)   |
+    |                   sk (privada)   |
+    |                                  |
+    |       pk          encap(pk) ---> |
+    |                   ct + ss_bob    |
+    |                                  |
+    |  <--- ct -------- ct             |
+    |  decap(sk, ct)                   |
+    |  ss_alice                        |
+    |                                  |
+    |  ss_alice == ss_bob  (segredo!)  |
+```
+
+Legenda:
+
+- `pk` = chave publica (pode ser enviada abertamente);
+- `sk` = chave privada (nunca sai da posse de Alice);
+- `ct` = ciphertext (dado criptografico que carrega o segredo encapsulado);
+- `ss` = shared secret (segredo compartilhado que as duas pontas derivam).
+
+Depois desse processo, Alice e Bob possuem o mesmo segredo (`ss`), que pode
+ser usado para criptografia simetrica ou autenticacao.
+
+**No nosso projeto:** o ESP32 faz os dois papeis (Alice e Bob) no mesmo chip
+para medir o custo computacional de cada etapa.
+
+### 5.4 Por que reticulados resistem a computadores quanticos
+
+ML-KEM e baseado no problema **Learning With Errors (LWE)** sobre
+reticulados (lattices).
+
+Intuicao: imagine uma grade (grid) em muitas dimensoes. Encontrar o vetor
+mais curto nessa grade e extremamente dificil, mesmo para computadores
+quanticos.
+
+```text
+  2D (facil de visualizar)        nD (impossivel de resolver por forca bruta)
+
+    *   *   *   *   *              *  *  *  *  *  *  *  *  *  *  *
+    *   *   *   *   *              *  *  *  *  *  *  *  *  *  *  *
+    *   *   *   *   *              *  *  *  *  *  *  *  *  *  *  *
+    *   *   *   *   *              (centenas de dimensoes...)
+```
+
+Nenhum algoritmo quantico conhecido oferece vantagem significativa para
+problemas de reticulados (diferente do algoritmo de Shor para fatoracao).
+
+Por isso, o NIST escolheu ML-KEM como padrao para troca de chaves
+pos-quantica.
+
+### 5.5 O que o HMAC-SHA256 faz por dentro
+
+**SHA-256** e uma funcao hash: recebe qualquer dado e produz uma
+"impressao digital" fixa de 256 bits. Se voce mudar 1 bit da entrada,
+a saida muda completamente.
+
+```text
+  "Hello"   --SHA256-->  185f8db3...
+  "Hello!"  --SHA256-->  334d016f...   (completamente diferente)
+```
+
+**HMAC** combina uma chave secreta com SHA-256. Somente quem possui a chave
+correta consegue produzir a etiqueta (tag) correta.
+
+Formula simplificada:
+
+```text
+  HMAC(key, msg) = SHA256(key XOR opad || SHA256(key XOR ipad || msg))
+```
+
+Analogia: e como assinar uma carta com um carimbo secreto. Qualquer pessoa
+pode ler a carta, mas somente quem tem o carimbo consegue forjar a assinatura.
+
+**No nosso projeto:** HMAC-SHA256 e usado para:
+
+- autenticar a mensagem da missao;
+- confirmar que as duas pontas derivaram o mesmo segredo ML-KEM.
+
+### 5.6 O que o CRC32 faz por dentro
+
+CRC = Cyclic Redundancy Check (Verificacao de Redundancia Ciclica).
+
+O CRC32 trata os dados como um polinomio e divide por um polinomio fixo
+(`0xEDB88320`). O resto dessa divisao e o valor CRC32 (4 bytes).
+
+```text
+  dados originais  --divisao polinomial-->  resto = CRC32 (4 bytes)
+
+  Se QUALQUER bit mudar --> o resto muda --> corrupcao detectada
+```
+
+**Importante: CRC32 NAO e criptografia.**
+
+- Ele **nao esconde** dados;
+- Ele **nao autentica** (nao usa chave secreta);
+- Ele **so detecta alteracoes acidentais**.
+
+Um atacante pode modificar os dados E recalcular o CRC32 para que bata.
+Para seguranca contra atacantes, use HMAC.
+
+**No nosso projeto:** CRC32 demonstra deteccao de integridade com custo
+minimo (~10 microssegundos, +4 bytes).
+
+### 5.7 NIST e FIPS 203
+
+- **NIST** = National Institute of Standards and Technology (EUA);
+- Em 2016, o NIST abriu uma competicao publica para encontrar algoritmos
+  pos-quanticos;
+- Em 2024, o NIST publicou **FIPS 203** -- o padrao oficial para ML-KEM
+  (Module Lattice Key Encapsulation Mechanism);
+- **ML-KEM-512** e a variante mais leve (nivel de seguranca 1, equivalente
+  a AES-128).
+
+Nosso projeto usa ML-KEM-512 porque ele tem as menores chaves e o menor
+custo computacional -- ideal para hardware limitado.
+
+Tamanhos de chave:
+
+| Elemento | Tamanho |
+|---|---:|
+| Chave publica (`pk`) | 800 bytes |
+| Chave privada (`sk`) | 1.632 bytes |
+| Ciphertext (`ct`) | 768 bytes |
+| Segredo compartilhado (`ss`) | 32 bytes |
+
+### 5.8 O que acontece dentro do ESP32 quando enviamos MISSION PQC_CRC32
+
+Quando o dashboard envia `MISSION PQC_CRC32`, o firmware executa estas
+etapas em sequencia:
+
+1. **keygen**: gera par de chaves ML-KEM-512 (~3.679 us)
+2. **encap**: encapsula um segredo usando a chave publica (~3.988 us)
+3. **decap**: decapsula o ciphertext com a chave privada (~5.087 us)
+4. **Compara**: verifica se `ss_alice == ss_bob` (`key_match`)
+5. **HMAC tag**: calcula tag de autenticacao sobre a mensagem usando o
+   segredo derivado (~435 us)
+6. **HMAC verify**: recalcula e compara a tag (~163 us)
+7. **CRC32 TX**: calcula CRC32 do payload (~5 us)
+8. **CRC32 RX**: recalcula CRC32 e compara (~5 us)
+9. **Total**: ~13.367 us para completar a entrega da mensagem
+
+```text
+  Fluxo no firmware (PQC_CRC32):
+
+  keygen -----> encap -----> decap -----> compara ss
+  (3.679 us)    (3.988 us)   (5.087 us)
+                                           |
+                                           v
+                                     HMAC tag (435 us)
+                                           |
+                                           v
+                                     HMAC verify (163 us)
+                                           |
+                                           v
+                                     CRC32 TX (5 us)
+                                           |
+                                           v
+                                     CRC32 RX (5 us)
+                                           |
+                                           v
+                                     DELIVERED (~13.367 us total)
+```
+
+### 5.9 Tabela comparativa: criptografia classica vs PQC
+
+| Aspecto | Classica (HMAC-SHA256) | PQC (ML-KEM-512 + HMAC) |
+|---|---|---|
+| O que faz | Autentica mensagem | Estabelece segredo + autentica |
+| Tipo de chave | Simetrica fixa | Assimetrica gerada por sessao |
+| Tamanho de chave | 32 bytes | pk=800, sk=1.632 bytes |
+| Bytes transmitidos | 73 | 841 |
+| Tempo (240 MHz) | ~721 us | ~13.536 us |
+| Tempo (80 MHz) | ~1.283 us | ~38.646 us |
+| Resiste a quantico | Sim (chave simetrica) | Sim (reticulados) |
+| Custo de adicionar CRC32 | N/A | +10 us, +4 bytes |
+
+## 6. Como explicar os termos para uma pessoa leiga
 
 ### O que e um payload?
 
@@ -340,7 +600,7 @@ E um mecanismo para calcular uma etiqueta de autenticacao usando uma chave.
 Aqui, ele serve para confirmar se as duas pontas realmente chegaram ao mesmo
 segredo.
 
-## 6. O que aparece na tela
+## 7. O que aparece na tela
 
 ### Centro da tela
 
@@ -390,7 +650,7 @@ Tem botoes somente para o roteiro visual:
 O terminal textual continua existindo abaixo dos botoes. Ele aceita comandos
 avancados, mas esses comandos nao devem virar parte principal da apresentacao.
 
-## 7. Sequencia recomendada para apresentar
+## 8. Sequencia recomendada para apresentar
 
 ### Antes de abrir o dashboard
 
@@ -552,7 +812,7 @@ Explique:
 > A animacao ajuda a entender, mas o JSON e a evidencia. Ele registra eventos,
 > resultados e metricas para auditoria.
 
-## 8. Comandos que funcionam, mas nao devem ser foco visual
+## 9. Comandos que funcionam, mas nao devem ser foco visual
 
 Esses comandos existem e sao uteis, mas devem ficar no terminal/HELP ou no
 `tools/serial_console.py`:
@@ -574,7 +834,7 @@ Isso evita que a apresentacao vire uma lista de comandos e mantém o foco:
 mensagem -> custo -> PQC real -> checksum -> falha/deteccao -> limites
 ```
 
-## 9. Como explicar os resultados finais
+## 10. Como explicar os resultados finais
 
 ### Resultado 1: CLASSIC, PQC e PQC+CRC têm custos diferentes
 
@@ -605,7 +865,7 @@ Use a frase:
 Base:
 
 ```text
-13/13 DETECTED_GUARD no aceite final
+8/8 DETECTED_GUARD no aceite final
 ```
 
 ### Resultado 3: ML-KEM funcionou na Wisdom
@@ -654,15 +914,15 @@ Use a tabela:
 
 | Perfil | Keygen | Encap | Decap |
 |---|---:|---:|---:|
-| 240 MHz | 3304 us | 3867 us | 4991 us |
-| 80 MHz | 10064 us | 11789 us | 15214 us |
+| 240 MHz | 3298 us | 3861 us | 4985 us |
+| 80 MHz | 10056 us | 11780 us | 15204 us |
 
 Use a frase:
 
 > O perfil limitado deixa o algoritmo mais lento, mas a operacao continua
 > funcional. Isso ajuda a discutir custo computacional em hardware embarcado.
 
-## 10. O que nao afirmar
+## 11. O que nao afirmar
 
 Nao diga:
 
@@ -688,7 +948,7 @@ Diga:
 - "energia real exigiria medidor externo";
 - "o objetivo e didatico e reproduzivel".
 
-## 11. Bateria longa de hardware
+## 12. Bateria longa de hardware
 
 Regra atual do projeto:
 
@@ -714,7 +974,7 @@ Se os numeros mudarem, chame o agente e peça:
 analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 ```
 
-## 12. Arquivos importantes
+## 13. Arquivos importantes
 
 | Arquivo | Uso |
 |---|---|
@@ -727,9 +987,9 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 | `METRICAS_CONSOLIDADAS.md` | Como medir e apresentar CLASSIC, PQC e PQC+CRC |
 | `ROADMAP.md` | Historico tecnico consolidado |
 | `hardware_command_reference.md` | Comandos completos de bancada |
-| `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json` | Evidencia principal do aceite |
+| `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json` | Evidencia principal do aceite |
 
-## 13. Sugestao de fala completa
+## 14. Sugestao de fala completa
 
 ### Abertura
 
@@ -762,11 +1022,12 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 
 ### Interpretar resultados
 
-> No aceite anterior tivemos 77 registros, 0 falhas, 60 comandos no long-run,
-> dois benchmarks PQC e demo A/B bem-sucedida. Para a apresentacao final,
-> usamos o JSON novo de MISSION para preencher a comparacao CLASSIC, PQC e
-> PQC+CRC. No payload, CRC32 detecta a alteracao; no ML-KEM, a confirmacao de
-> chave rejeita a sessao divergente.
+> No aceite final tivemos 83 registros, 0 falhas, 27 MISSION runs, dois
+> benchmarks PQC e demo A/B bem-sucedida. CLASSIC entrega em 721 us com 73
+> bytes; PQC custa 13.536 us com 841 bytes; PQC+CRC custa 13.367 us com 845
+> bytes. PQC e 18,8x mais lento, mas prepara o sistema para o mundo
+> pos-quantico. No payload, CRC32 detecta a alteracao (8/8 DETECTED_GUARD);
+> no ML-KEM, a confirmacao de chave rejeita a sessao divergente.
 
 ### Fechar com limites
 
@@ -775,7 +1036,7 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 > falha de bit, integridade, criptografia pos-quantica em hardware embarcado e
 > confirmacao de protocolo.
 
-## 14. Checklist para ensaio
+## 15. Checklist para ensaio
 
 Antes da apresentacao:
 
@@ -800,7 +1061,7 @@ Se algo falhar:
 - se um comando de bancada for necessario, usar terminal textual ou
   `tools/serial_console.py`, nao criar novo botao na demo.
 
-## 15. Resumo de uma pagina
+## 16. Resumo de uma pagina
 
 ```text
 Problema:
@@ -810,10 +1071,11 @@ Experimento:
   Wisdom/ESP32 + dashboard Python.
 
 Demo:
-  CLASSIC: HMAC-SHA256 -> baseline classico.
-  PQC: ML-KEM-512 + HMAC -> custo pos-quantico.
-  PQC+CRC: ML-KEM-512 + HMAC + CRC32 -> integridade adicional.
+  CLASSIC: HMAC-SHA256 -> baseline classico (721 us, 73 bytes).
+  PQC: ML-KEM-512 + HMAC -> custo pos-quantico (13.536 us, 841 bytes).
+  PQC+CRC: ML-KEM + HMAC + CRC32 -> integridade adicional (13.367 us, 845 bytes).
   A/B bit-flip: sem CRC32 -> silencioso; com CRC32 -> detectado.
+  PQC e 18,8x mais lento e 11,5x mais pesado que CLASSIC.
 
 PQC:
   ML-KEM-512 real na placa.
@@ -821,11 +1083,11 @@ PQC:
   Confirmacao HMAC-SHA256 -> PROTOCOL_REJECT.
 
 Resultado:
-  77 registros, 0 falhas no aceite.
-  13/13 DETECTED_GUARD em payload CRC32.
+  83 registros, 0 falhas no aceite.
+  8/8 DETECTED_GUARD em payload CRC32.
   PQC_KAT passou.
   Benchmarks em 240 MHz e 80 MHz medidos.
-  MISSION gera JSON novo para comparar tempo, bytes e heap.
+  CLASSIC=721 us / PQC=13.536 us / PQC_CRC32=13.367 us.
 
 Limites:
   Nao e radiacao fisica.

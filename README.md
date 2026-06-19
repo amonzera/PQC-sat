@@ -270,22 +270,18 @@ Estado atual:
   autosave no fechamento, cleanup preservando traceback, cache de superfícies,
   métricas essenciais no topo, testes headless de resoluções, runner de aceitação em
   `tools/stage8_acceptance.py` e roteiro em `APRESENTACAO_ROTEIRO.md`.
-  A aceitação de hardware passou em
-  `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json` com 1.816,87 s,
-  77 registros, 0 falhas, 2 benchmarks PQC e demo headless OK.
-
-Próximo corte: gravar o firmware com `MISSION`, rodar a coleta manual curta
-dos três cenários em `METRICAS_CONSOLIDADAS.md` e anexar o JSON final ao
-material do seminário.
+  A aceitação de hardware passou e foi consolidada em
+  `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json` com 1.817,23 s,
+  83 registros, 0 falhas, 27 MISSION runs, 2 benchmarks PQC e demo headless OK.
 
 Validação real em placa após upload em 2026-06-18: `PQC_KAT` retornou
 `kat=pass` com `ss_crc32=0xD9DA8D6C`; `PQC_FAULT 0 0x01 CONFIRM` retornou
 `PROTOCOL_REJECT`; `PQC_FAULT 0 0x01 NONE` retornou `KEY_MISMATCH`;
-`PQC_BENCH 100` em `BASELINE` retornou `ok=100`, `keygen_avg_us=3301`,
-`encap_avg_us=3864`, `decap_avg_us=4988`; `PQC_BENCH 100` em
-`OBC-1U-LIMITED` retornou `ok=100`, `keygen_avg_us=10045`,
-`encap_avg_us=11769`, `decap_avg_us=15194`; `FAULT CRC32 ... 0 0x01`
-retornou `DETECTED_GUARD`. Nenhum comando imprime chave privada, segredo
+`PQC_BENCH 100` em `BASELINE` retornou `ok=100`, `keygen_avg_us=3298`,
+`encap_avg_us=3861`, `decap_avg_us=4985`; `PQC_BENCH 100` em
+`OBC-1U-LIMITED` retornou `ok=100`, `keygen_avg_us=10056`,
+`encap_avg_us=11780`, `decap_avg_us=15204`; `FAULT CRC32 ... 0 0x01`
+retornou `DETECTED_GUARD` (8/8 detectados). Nenhum comando imprime chave privada, segredo
 compartilhado completo ou material suficiente para reconstruir a sessão.
 
 ## Estrutura

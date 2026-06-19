@@ -88,9 +88,9 @@ implementar.
 - telemetria automática desligada no dashboard; `TELEMETRY`, `PING`, LED, RGB,
   bargraph, sensores e comandos de bancada ficam no HELP/terminal textual, não
   como botões da apresentação;
-- aceitação hardware da etapa 8 validada em
-  `logs/20260618T183829Z_stage8_acceptance_dev-ttyusb0.json`, com 1.816,87 s,
-  77 registros, 0 falhas, 2 benchmarks PQC e demo headless OK;
+- aceitação hardware da etapa 8 validada e consolidada em
+  `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`, com 1.817,23 s,
+  83 registros, 0 falhas, 27 MISSION runs, 2 benchmarks PQC e demo headless OK;
 - roteiro de apresentação criado em `APRESENTACAO_ROTEIRO.md`, com cinco
   slides, sequência de demo, limites científicos e checklist pré-apresentação;
 - metodologia de métricas consolidada em `METRICAS_CONSOLIDADAS.md`.

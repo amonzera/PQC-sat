@@ -33,6 +33,6 @@ Se aceitar também formatos editáveis, anexe o PPTX e o DOCX.
 Os materiais distinguem explicitamente:
 
 - protótipo já implementado;
-- resultados ainda simulados;
+- resultados reais medidos no hardware (ESP32/Wisdom);
 - metodologia proposta;
 - limitações e critérios de validade.

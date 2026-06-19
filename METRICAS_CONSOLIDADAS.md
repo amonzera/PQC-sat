@@ -131,6 +131,102 @@ LEDs/bargraph da Wisdom também são usados como reforço lúdico:
 Esses efeitos não são métricas científicas; são apoio visual para a turma
 perceber o crescimento de custo.
 
+## 4.5. Resultados reais consolidados
+
+Fonte principal:
+
+```text
+logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json
+```
+
+Aceite final: 83 registros, 0 falhas, 27 MISSION runs, 2 PQC_BENCH (100 rounds
+cada), demo A/B headless OK, duracao 1.817,23 s.
+
+### MISSION — BASELINE (240 MHz, 8 amostras)
+
+| Campo | CLASSIC | PQC | PQC_CRC32 |
+|---|---:|---:|---:|
+| `elapsed_us` (avg) | 721 | 13.536 | 13.367 |
+| `elapsed_us` (min) | 681 | 13.211 | 13.110 |
+| `elapsed_us` (max) | 773 | 13.813 | 14.114 |
+| `elapsed_us` (stdev) | 33 | 174 | 454 |
+| `keygen_us` (avg) | 0 | 3.923 | 3.679 |
+| `encap_us` (avg) | 0 | 3.975 | 3.988 |
+| `decap_us` (avg) | 0 | 5.026 | 5.087 |
+| `tag_us` (avg) | 528 | 421 | 435 |
+| `verify_us` (avg) | 166 | 165 | 163 |
+| `crc_us` (avg) | 0 | 0 | 10 |
+| `bytes_total` | 73 | 841 | 845 |
+| `heap` | 201.412 | 201.412 | 201.412 |
+| `min_heap` | 197.624 | 197.624 | 197.624 |
+| `result` | DELIVERED | DELIVERED | DELIVERED |
+| `key_match` | 1 (100%) | 1 (100%) | 1 (100%) |
+| `tag_match` | 1 (100%) | 1 (100%) | 1 (100%) |
+| `crc_match` | 1 (100%) | 1 (100%) | 1 (100%) |
+
+### MISSION — OBC-1U-LIMITED (80 MHz, 1 amostra)
+
+| Campo | CLASSIC | PQC | PQC_CRC32 |
+|---|---:|---:|---:|
+| `elapsed_us` | 1.283 | 38.646 | 38.647 |
+| `keygen_us` | 0 | 10.411 | 10.360 |
+| `encap_us` | 0 | 11.821 | 11.793 |
+| `decap_us` | 0 | 15.197 | 15.231 |
+| `tag_us` | 794 | 738 | 723 |
+| `verify_us` | 465 | 465 | 491 |
+| `crc_us` | 0 | 0 | 30 |
+| `bytes_total` | 73 | 841 | 845 |
+| `heap` | 201.412 | 201.412 | 201.412 |
+| `result` | DELIVERED | DELIVERED | DELIVERED |
+
+### Razoes observadas
+
+| Comparacao | Tempo | Bytes |
+|---|---:|---:|
+| PQC / CLASSIC (BASELINE) | 18,8x | 11,5x |
+| PQC_CRC32 / CLASSIC (BASELINE) | 18,5x | 11,6x |
+| PQC / CLASSIC (OBC-1U-LIMITED) | 30,1x | 11,5x |
+| PQC_CRC32 / CLASSIC (OBC-1U-LIMITED) | 30,1x | 11,6x |
+| CRC32 custo adicional sobre PQC (BASELINE) | ~10 us | +4 bytes |
+| CRC32 custo adicional sobre PQC (OBC-1U-LIMITED) | ~30 us | +4 bytes |
+
+Leitura didatica:
+
+- A 240 MHz, PQC custa quase 19 vezes mais tempo que o baseline classico.
+- A 80 MHz, a mesma operacao PQC custa 30 vezes mais, porque o ML-KEM sofre
+  mais com CPU reduzida do que o HMAC puro.
+- O CRC32 adiciona custo negligivel (~10 us a 240 MHz, ~30 us a 80 MHz),
+  mostrando que verificacao de integridade no payload e barata.
+- O trafego PQC e 11,5x maior que o classico porque inclui chave publica
+  (800 bytes) e ciphertext (768 bytes).
+- A heap permaneceu constante em todos os cenarios: a criptografia PQC nao
+  causou fragmentacao perceptivel nos testes.
+
+### PQC_BENCH (100 rounds)
+
+| Perfil | CPU | `keygen_avg_us` | `encap_avg_us` | `decap_avg_us` |
+|---|---:|---:|---:|---:|
+| BASELINE | 240 MHz | 3.298 | 3.861 | 4.985 |
+| OBC-1U-LIMITED | 80 MHz | 10.056 | 11.780 | 15.204 |
+
+Fator de desaceleracao 80/240 MHz: keygen ~3,0x, encap ~3,1x, decap ~3,0x.
+
+### Testes de seguranca
+
+| Teste | Resultado |
+|---|---|
+| PQC_KAT | `kat=pass`, `ss_crc32=0xD9DA8D6C` |
+| PQC_FAULT 0 0x01 CONFIRM | `PROTOCOL_REJECT`, `key_match=0` |
+| PQC_FAULT 0 0x01 NONE | `KEY_MISMATCH`, `key_match=0` |
+| FAULT CRC32 (aceite) | 8/8 `DETECTED_GUARD` |
+
+### Demo A/B
+
+| Cenario | Resultado |
+|---|---|
+| A, sem CRC32 | 5/5 falhas silenciosas |
+| B, com CRC32 | 5/5 falhas detectadas |
+
 ## 5. Coleta curta para ensaio
 
 Depois de gravar o firmware atualizado:

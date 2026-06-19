@@ -1,100 +1,103 @@
-# Roteiro de apresentação - PQC-SAT
+# Roteiro de apresentacao - PQC-SAT
 
-Tempo planejado: 18–20 minutos.
+Tempo planejado: 18-20 minutos.
 
-## Slide 1 — Abertura (1 min)
+Este roteiro reflete o estado final do projeto, com ML-KEM-512 executando no
+hardware, MISSION nos tres cenarios funcionando, e metricas consolidadas.
 
-“O PQC-SAT é uma proposta didática para mostrar que um algoritmo
-criptográfico forte não resolve sozinho falhas físicas, de comunicação ou de
-integridade.”
+## Slide 1 — Problema (3-5 min)
 
-Apresente o CubeSat como contexto e deixe claro que o trabalho possui um
-protótipo visual funcional. Diferencie o que já está implementado da
-metodologia experimental descrita.
+Contexto: CubeSats usam COTS; falhas transitorias podem inverter bits. O mundo
+esta migrando para criptografia pos-quantica, mas hardware embarcado tem CPU,
+RAM e energia limitadas.
 
-## Slide 2 — Motivação (2 min)
+Frase de abertura sugerida:
 
-- CubeSats usam componentes COTS por custo e disponibilidade.
-- Falhas transitórias podem inverter bits em memória ou mensagens.
-- ML-KEM protege contra ameaças quânticas, mas não contra toda corrupção.
+> Nosso projeto mostra um desafio atual: o mundo esta migrando para
+> criptografia pos-quantica, mas hardware embarcado tem recursos limitados. Em
+> um contexto inspirado em CubeSat, queremos ver quanto custa sair de uma
+> mensagem classica autenticada para PQC e depois para PQC com checksum.
 
-Frase de transição: “A pergunta deixa de ser apenas se o algoritmo é seguro e
-passa a incluir se a implementação percebe que algo foi alterado.”
+## Slide 2 — Experimento (3 min)
 
-## Slide 3 — Pergunta e hipótese (2 min)
+Explique a montagem: Wisdom/ESP32 + dashboard Python + notebook.
 
-Leia a pergunta principal e explique:
+Tres cenarios de entrega de mensagem:
 
-- sem proteção, um dado alterado pode ser aceito;
-- com guardião, a alteração pode ser percebida;
-- a comparação precisa usar exatamente as mesmas falhas.
+- CLASSIC: mensagem autenticada com HMAC-SHA256 (baseline classico);
+- PQC: mensagem autenticada apos acordo de segredo com ML-KEM-512;
+- PQC+CRC: o mesmo fluxo PQC com CRC32 adicional no payload.
 
-## Slide 4 — Arquitetura (2 min)
+Alem disso, bit-flips demonstram a diferenca entre falha silenciosa e erro
+detectado.
 
-Explique notebook, UART e ESP32. Destaque:
+## Slide 3 — Demo visual (3-6 min)
 
-- o notebook controla e registra;
-- o ESP32 representa o OBC;
-- o modo simulado garante que a apresentação não dependa do hardware.
+Sequencia da demo ao vivo:
 
-## Slide 5 — Protótipo atual (2 min)
+1. Abrir: `python3 dashboard.py --port /dev/ttyUSB0`
+2. Confirmar estado: `STATUS`
+3. Enviar mensagens: `CLASSIC`, `PQC`, `PQC+CRC` (botoes do dashboard)
+4. Executar campanha de falhas: `DEMO 5`
+5. Mostrar manualmente: `CHECKSUM OFF`, `INJECT_FAULT`, `CHECKSUM ON`, `INJECT_FAULT`
+6. Exportar: `EXPORT_JSON`
 
-Mostre o dashboard:
+## Slide 4 — Resultados medidos (3 min)
 
-- visualização do CubeSat;
-- telemetria;
-- console;
-- indicadores explícitos de simulação.
+Fonte: `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`
 
-Não diga que ML-KEM ou CRC já estão executando. Use: “a interface está pronta;
-o núcleo experimental aparece como arquitetura proposta”.
+Aceite final: 83 registros, 0 falhas, 27 MISSION runs.
 
-## Slide 6 — Metodologia A/B (3 min)
+| Cenario | Tempo (us) | Bytes | Resultado |
+|---|---:|---:|---|
+| CLASSIC | 721 | 73 | DELIVERED |
+| PQC | 13.536 | 841 | DELIVERED |
+| PQC_CRC32 | 13.367 | 845 | DELIVERED |
 
-Explique a campanha:
+Razoes: PQC e 18,8x mais lento e 11,5x maior que CLASSIC em bytes.
+CRC32 adiciona ~10 us e +4 bytes sobre PQC.
 
-1. gerar o payload;
-2. aplicar o mesmo bit-flip;
-3. cenário A sem CRC;
-4. cenário B com CRC-32;
-5. classificar e registrar.
+Benchmark ML-KEM-512 (100 rounds):
 
-Evite apresentar porcentagens antes da coleta.
+| Perfil | keygen (us) | encap (us) | decap (us) |
+|---|---:|---:|---:|
+| BASELINE 240 MHz | 3.298 | 3.861 | 4.985 |
+| OBC-1U-LIMITED 80 MHz | 10.056 | 11.780 | 15.204 |
 
-## Slide 7 — Perfil OBC (2 min)
+Testes de seguranca:
 
-Explique que o ESP32 será testado:
+- PQC_KAT: kat=pass
+- PQC_FAULT CONFIRM: PROTOCOL_REJECT
+- PQC_FAULT NONE: KEY_MISMATCH
+- FAULT CRC32: 8/8 DETECTED_GUARD
+- Demo A/B: 5/5 silenciosas sem CRC, 5/5 detectadas com CRC
 
-- em baseline;
-- sob o perfil `OBC-1U-LIMITED`.
+## Slide 5 — Conclusao e limites (2 min)
 
-Reforce que 80 MHz e 256 KiB são limites experimentais, não uma descrição de
-todos os CubeSats.
+PQC aumenta custo, checksum soma integridade, e a demonstracao funciona em
+hardware real.
 
-## Slide 8 — Métricas (2 min)
+Limites que devem ser ditos:
 
-Liste resultados, tempo, memória, firmware, robustez e CSV. Diga:
+- A Wisdom nao e um CubeSat real; ela representa um OBC COTS didatico.
+- OBC-1U-LIMITED e uma politica experimental, nao uma especificacao universal.
+- ML-KEM nao rejeita automaticamente todo ciphertext corrompido. A deteccao
+  operacional vem da confirmacao da chave derivada.
+- O JSON usa proxy de energia por tempo de CPU. Watts/joules exigem medidor
+  externo.
+- Bit-flips por software nao reproduzem radiacao real.
 
-“O resultado esperado é redução de falhas silenciosas, mas a conclusão final
-dependerá dos dados coletados.”
+Frase de fechamento:
 
-## Slide 9 — Limitações e validade (2 min)
-
-Apresente claramente:
-
-- bit-flips por software não reproduzem radiação real;
-- o perfil OBC é didático;
-- o protótipo atual ainda não produz resultados experimentais;
-- consumo energético exige instrumentação.
-
-Explique que separar proposta, protótipo e resultados fortalece a validade do
-seminário.
-
-## Slide 10 — Conclusão (1–2 min)
-
-Feche com:
-
-“A contribuição do projeto é tornar visível que a segurança depende do
-algoritmo, da implementação, do protocolo e do hardware.”
+> O experimento e didatico e reproduzivel. A contribuicao do projeto e tornar
+> visivel que a seguranca depende do algoritmo, da implementacao, do protocolo
+> e do hardware. PQC em hardware limitado e possivel, mas tem custo.
 
 Abra para perguntas.
+
+## Checklist final
+
+- `python3 -m compileall -q dashboard.py tools tests`
+- `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -m unittest discover`
+- Conferir `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`
+- Projetor/legibilidade validada
