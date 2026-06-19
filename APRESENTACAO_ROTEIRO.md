@@ -71,22 +71,24 @@ CRC32 adiciona ~10 us e +4 bytes sobre PQC.
 
 1. Abrir:
    `python3 dashboard.py --port /dev/ttyUSB0`
-2. Confirmar estado essencial:
-   `STATUS`
-3. Enviar mensagens:
-   `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32`
-4. Executar apoio visual de falhas:
-   `DEMO 5`
-5. Mostrar manualmente:
-   `CHECKSUM OFF`, `INJECT_FAULT`, `CHECKSUM ON`, `INJECT_FAULT`, `CRC_CHECK`
-6. Exportar:
-   `EXPORT_JSON`
+2. Enviar mensagem em modo clássico:
+   - Clique em `CLÁSSICA` (o botão fica azul) e em seguida clique em `ENVIAR MSG`.
+3. Enviar mensagem em modo pós-quântico (PQC) sem integridade:
+   - Clique em `PQC` (o botão fica roxo).
+   - Clique em `CHECKSUM` para desativar a integridade (o botão fica com estilo padrão/apagado).
+   - Clique em `ENVIAR MSG`.
+4. Enviar mensagem em modo pós-quântico (PQC) com integridade:
+   - Clique em `PQC` (o botão fica roxo).
+   - Clique em `CHECKSUM` para ativar a integridade (o botão fica verde).
+   - Clique em `ENVIAR MSG`.
+5. Apoio visual de falhas transitórias (Bit-Flips) de forma manual:
+   - **Caso A (Corrupção Silenciosa):** Certifique-se de que o `CHECKSUM` está desativado (botão apagado), clique em `FALHA` -> Observar erro silencioso (`SILENT` na timeline).
+   - **Caso B (Erro Detectado):** Certifique-se de que o `CHECKSUM` está ativado (botão verde), clique em `FALHA` -> Observar detecção do erro pelo guardião (`DETECTED_GUARD` na timeline).
 
-O painel de botões deve ficar restrito ao fluxo acima. LED e bargraph são
-acionados automaticamente pelos botões de missão como reforço lúdico do custo
-relativo. Comandos de bancada como `PING`, `TELEMETRY`, `RUN_BATTERY`,
-sensores, `PQC_KAT`, `PQC_FAULT` e `PQC_BENCH` ficam no HELP/terminal textual
-ou no `tools/serial_console.py`.
+> [!NOTE]
+> Todos os logs oficiais e dados numéricos consolidados foram gravados através de baterias automatizadas de longa duração via terminal (como o script `tools/stage8_acceptance.py`), garantindo rigor científico sem poluir o dashboard visual.
+
+O painel de botões do dashboard agora é puramente manual e focado no roteiro interativo acima. Comandos técnicos adicionais ficam no HELP/terminal ou no console serial.
 
 ## Roteiro de fala
 
@@ -94,9 +96,9 @@ ou no `tools/serial_console.py`.
 |---|---|
 | 0-5 min | Contexto: COTS, CubeSat, falhas transitórias e PQC |
 | 5-8 min | Modelo: mensagem, HMAC, ML-KEM, CRC32 e bit-flip |
-| 8-11 min | Rodar `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32` |
-| 11-14 min | Interpretar CPU/RAM/tempo/bytes no topo do dashboard |
-| 14-17 min | Rodar `DEMO 5` e explicar falha silenciosa versus CRC32 |
+| 8-11 min | Enviar as mensagens dinâmicas (`CLÁSSICA`, `PQC`, `PQC + CHECKSUM`) e observar o tempo relativo de cada uma |
+| 11-14 min | Interpretar CPU e RAM (consumo / total) na faixa superior do dashboard |
+| 14-17 min | Demonstrar manualmente falha silenciosa vs. detecção (botões `CHECKSUM` e `FALHA`) |
 | 17-19 min | Explicar ML-KEM real, `KEY_MISMATCH` e `PROTOCOL_REJECT` |
 | 19-20 min | Limites, conclusao e perguntas |
 

@@ -42,9 +42,8 @@ implementar.
 - Terra, CubeSat, estrelas, nebulosa e partículas procedurais;
 - painel de telemetria e console;
 - comandos locais do dashboard: `INJECT_FAULT`, `BIT_FLIP`, `PQC_STATUS`,
-  `CRC_CHECK`, `EXPORT_JSON`, `SAVE_SESSION`, `RUN_BATTERY`, `DEMO`,
-  `DEMO_PAUSE`, `DEMO_RESUME`, `DEMO_STOP`, `DEMO_RESTART`,
-  `MISSION CLASSIC|PQC|PQC_CRC32`, `RESET_SESSION` e `HELP`;
+  `CRC_CHECK`, `RUN_BATTERY`, `RESET_SESSION`, `SEND_MESSAGE`,
+  `TOGGLE_CLASSIC`, `TOGGLE_PQC`, `TOGGLE_CHECKSUM` e `HELP`;
 - firmware serial `V1` para a RoboCore BlackBoard Wisdom;
 - bridge serial Python e console `tools/serial_console.py`;
 - modo padrão de `dashboard.py` tenta detectar a Wisdom e encaminha comandos do
@@ -75,15 +74,14 @@ implementar.
 - eventos de payload exportam overhead do guardião em `guard_prepare_us`,
   `guard_verify_us` e `guard_overhead_us`.
 - faixa superior mostra CPU em MHz e `% ativo` observado em janela móvel de
-  5s, RAM e métricas resumidas dos cenários `CLÁSSICA`, `PQC` e `PQC+CRC`;
-- modo apresentação A/B implementado com `DEMO`, pausa, retomada, parada,
-  reinício, snapshots A/B, overlay calculado e exportação JSON.
+  5s, e a RAM formatada como consumo de heap / total disponível;
+- modo apresentação interativo e manual com seletores de criptografia (Clássica/PQC) e integridade (Checksum);
 - `PQC_FAULT index mask [CONFIRM|NONE]` implementado no firmware para
   corromper ciphertext ML-KEM real e classificar `KEY_MISMATCH` ou
   `PROTOCOL_REJECT` por confirmação HMAC-SHA256 da chave derivada.
 - etapa 8 de software implementada com splash opcional, `--no-splash`,
   autosave no fechamento, cleanup preservando traceback, cache de superfícies
-  grandes, faixa superior focada em CPU/RAM/CLÁSSICA/PQC/PQC+CRC e testes
+  grandes, faixa superior focada em CPU/RAM e testes
   headless para 1920x1080 e 1366x768;
 - telemetria automática desligada no dashboard; `TELEMETRY`, `PING`, LED, RGB,
   bargraph, sensores e comandos de bancada ficam no HELP/terminal textual, não
@@ -141,10 +139,10 @@ ML-KEM/FIPS 203.
 - Não carregue imagens, sons ou fontes externas sem decisão explícita.
 - Não mostre `ESP32 ONLINE`, `CRC ON` ou `ML-KEM ativo` sem evidência real.
 - O dashboard é a superfície da apresentação ao vivo. Mantenha como blocos
-  clicáveis apenas comandos pertinentes ao roteiro visual e didático:
-  `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32`, falha manual,
-  consulta essencial de estado, exportação, demo automatizada e controles
-  visuais necessários. O terminal textual do painel pode encaminhar
+  clicáveis apenas os comandos do roteiro didático e manual: `"ENVIAR MSG"`,
+  `"CLÁSSICA"`, `"PQC"`, `"CHECKSUM"` e `"FALHA"`. A simulação automatizada
+  (`DEMO`), controle de pausa (`PAUSA`) e exportação direta (`EXPORT`) foram
+  removidos do painel visual. O terminal textual do painel pode encaminhar
   comandos avançados de firmware quando a placa estiver conectada, inclusive
   bancada, inventário, debug e PQC técnico, desde que isso não vire botão ou
   fluxo principal da apresentação.
@@ -154,6 +152,10 @@ ML-KEM/FIPS 203.
   bancada. Não apague capacidade técnica só porque ela não aparece no
   conjunto de botões; apenas separe a superfície visual da demo da superfície
   textual de engenharia.
+- Os logs oficiais e métricas consolidadas do projeto devem ser registrados e
+  coletados exclusivamente através de baterias de testes longas e controladas
+  no terminal (como o script `tools/stage8_acceptance.py`), e NUNCA a partir de
+  demonstrações manuais ou campanhas visuais ao vivo no dashboard.
 - Resultados experimentais devem vir de bytes mutados e verificações reais.
 - Mantenha a aleatoriedade do experimento separada da aleatoriedade visual.
 - Trate `OBC-1U-LIMITED` como perfil experimental, não como especificação

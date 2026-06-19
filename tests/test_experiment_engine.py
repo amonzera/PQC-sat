@@ -331,29 +331,82 @@ class DashboardCommandTests(unittest.TestCase):
             },
         )
 
-        tiles = {label: value for label, value, _detail, _color in panel._metric_tiles()}
+        tiles = {label: (value, detail) for label, value, detail, _color in panel._metric_tiles()}
 
-        self.assertTrue(tiles["CPU"].startswith("80 MHz "))
-        self.assertIn("%", tiles["CPU"])
-        self.assertIn("KB livre", tiles["RAM"])
-        self.assertIn("PQC", tiles)
-        self.assertIn("CLÁSSICA", tiles)
-        self.assertIn("PQC+CRC", tiles)
-        self.assertNotIn("DISCO", tiles)
-        self.assertNotIn("HOST", tiles)
+        self.assertTrue(tiles["CPU"][0].startswith("80 MHz "))
+        self.assertIn("%", tiles["CPU"][0])
+        self.assertIn("KB /", tiles["RAM"][0])
+        self.assertIn("livre", tiles["RAM"][1])
+        self.assertNotIn("PQC", tiles)
+        self.assertNotIn("CLÁSSICA", tiles)
+        self.assertNotIn("PQC+CRC", tiles)
 
     def test_presentation_buttons_focus_live_mission_scenarios(self):
         commands = [command for _label, command in dashboard.COMMAND_BUTTONS]
 
-        self.assertIn("DEMO", commands)
-        self.assertIn("MISSION CLASSIC", commands)
-        self.assertIn("MISSION PQC", commands)
-        self.assertIn("MISSION PQC_CRC32", commands)
+        self.assertIn("SEND_MESSAGE", commands)
+        self.assertIn("TOGGLE_CLASSIC", commands)
+        self.assertIn("TOGGLE_PQC", commands)
+        self.assertIn("TOGGLE_CHECKSUM", commands)
         self.assertIn("INJECT_FAULT", commands)
+        self.assertNotIn("DEMO", commands)
+        self.assertNotIn("DEMO_PAUSE", commands)
+        self.assertNotIn("EXPORT_JSON", commands)
+        self.assertNotIn("MISSION CLASSIC", commands)
+        self.assertNotIn("MISSION PQC", commands)
+        self.assertNotIn("MISSION PQC_CRC32", commands)
         self.assertNotIn("TELEMETRY", commands)
         self.assertNotIn("PING", commands)
-        self.assertNotIn("RGB TEST", commands)
-        self.assertNotIn("BARGRAPH 75", commands)
+
+    def test_dashboard_toggle_classic_and_pqc_switches_exclusively(self):
+        panel = dashboard.DashboardPanel()
+        
+        # Initial state should be: PQC active, classic inactive
+        self.assertTrue(panel.pqc_enabled)
+        self.assertFalse(panel.classic_enabled)
+
+        # Toggle classic ON should disable PQC
+        panel._execute_command("TOGGLE_CLASSIC")
+        self.assertTrue(panel.classic_enabled)
+        self.assertFalse(panel.pqc_enabled)
+
+        # Toggle classic ON again (which means trying to turn it off) should switch to PQC
+        panel._execute_command("TOGGLE_CLASSIC")
+        self.assertFalse(panel.classic_enabled)
+        self.assertTrue(panel.pqc_enabled)
+
+        # Toggle PQC OFF should switch to Classic
+        panel._execute_command("TOGGLE_PQC")
+        self.assertTrue(panel.classic_enabled)
+        self.assertFalse(panel.pqc_enabled)
+
+    def test_dashboard_send_message_routes_to_correct_mission(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+
+        # Case 1: PQC active, checksum disabled -> MISSION PQC
+        panel.pqc_enabled = True
+        panel.classic_enabled = False
+        panel.checksum_enabled = False
+        panel._execute_command("SEND_MESSAGE")
+        self.assertIn("MISSION PQC", fake.sent)
+
+        # Case 2: PQC active, checksum enabled -> MISSION PQC_CRC32
+        fake.sent.clear()
+        panel.pqc_enabled = True
+        panel.classic_enabled = False
+        panel.checksum_enabled = True
+        panel._execute_command("SEND_MESSAGE")
+        self.assertIn("MISSION PQC_CRC32", fake.sent)
+
+        # Case 3: Classic active, checksum enabled -> MISSION CLASSIC (checksum ignored)
+        fake.sent.clear()
+        panel.pqc_enabled = False
+        panel.classic_enabled = True
+        panel.checksum_enabled = True
+        panel._execute_command("SEND_MESSAGE")
+        self.assertIn("MISSION CLASSIC", fake.sent)
 
     def test_dashboard_does_not_poll_telemetry_automatically(self):
         fake = FakeSerialClient()
@@ -557,8 +610,6 @@ class DashboardCommandTests(unittest.TestCase):
         data = panel._build_export_document()
         scenario = data["metrics"]["mission"]["scenarios"]["PQC_CRC32"]
         self.assertEqual(scenario["elapsed_us"], 37180)
-        tiles = {label: value for label, value, _detail, _color in panel._metric_tiles()}
-        self.assertIn("ms", tiles["PQC+CRC"])
 
     def test_run_battery_pairs_none_and_crc32_with_same_fault_ids(self):
         panel = dashboard.DashboardPanel()
@@ -598,48 +649,7 @@ class DashboardCommandTests(unittest.TestCase):
         run_ids = [event.campaign_run_id for event in panel.experiment_events]
         self.assertEqual(run_ids, ["battery-001", "battery-001", "battery-002", "battery-002"])
 
-    def test_demo_runs_ab_campaign_with_same_faults_and_exportable_overlay(self):
-        panel = dashboard.DashboardPanel()
-        panel.export_session = lambda log_dir=dashboard.DEFAULT_LOG_DIR: Path("demo.json")
 
-        panel._execute_command("DEMO 3")
-        for _ in range(20):
-            panel.update(dashboard.DEMO_FAULT_INTERVAL_SECONDS)
-
-        events = panel.experiment_events
-        self.assertEqual(len(events), 6)
-        self.assertEqual(panel.demo_state, "RESULTS")
-        self.assertEqual(panel.demo_summary["attempts"], 3)
-        self.assertEqual(panel.demo_summary["none_silent"], 3)
-        self.assertEqual(panel.demo_summary["crc_detected"], 3)
-        self.assertEqual(panel.last_export_path, Path("demo.json"))
-        for index in range(3):
-            self.assertEqual(events[index].guard, "NONE")
-            self.assertEqual(events[index + 3].guard, "CRC32")
-            self.assertEqual(events[index].byte_index, events[index + 3].byte_index)
-            self.assertEqual(events[index].bit_mask, events[index + 3].bit_mask)
-
-        data = panel._build_export_document()
-        self.assertEqual(data["demo"]["summary"]["crc_detection_rate_pct"], 100.0)
-
-    def test_demo_pause_resume_and_stop_do_not_delete_data(self):
-        panel = dashboard.DashboardPanel()
-        panel.export_session = lambda log_dir=dashboard.DEFAULT_LOG_DIR: Path("demo.json")
-
-        panel._execute_command("DEMO 2")
-        panel.update(dashboard.DEMO_FAULT_INTERVAL_SECONDS)
-        panel._execute_command("DEMO_PAUSE")
-        count_after_pause = len(panel.experiment_events)
-        panel.update(dashboard.DEMO_FAULT_INTERVAL_SECONDS * 4)
-        self.assertEqual(len(panel.experiment_events), count_after_pause)
-
-        panel._execute_command("DEMO_RESUME")
-        panel.update(dashboard.DEMO_FAULT_INTERVAL_SECONDS)
-        self.assertGreaterEqual(len(panel.experiment_events), count_after_pause)
-        panel._execute_command("DEMO_STOP")
-
-        self.assertEqual(panel.demo_state, "STOPPED")
-        self.assertGreater(len(panel.experiment_events), 0)
 
 
 if __name__ == "__main__":

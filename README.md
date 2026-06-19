@@ -196,12 +196,7 @@ bancada.
 | `PQC_STATUS` | Consulta `PQC_INFO` quando a placa está online; sem placa, informa pendência local. |
 | `MISSION CLASSIC\|PQC\|PQC_CRC32` | Envia mensagem de missão na placa e mede tempo, bytes, heap e resultado por cenário. |
 | `CRC_CHECK` | Atalho que aplica uma tentativa forçada com CRC32; divergência vira `DETECTED_GUARD`. |
-| `EXPORT_JSON` | Salva a sessão atual em `logs/` com eventos, resumo e métricas de hardware. |
-| `SAVE_SESSION` | Alias de `EXPORT_JSON`. |
 | `RUN_BATTERY n` | Executa bateria A/B com `n` tentativas por cenário, reaplica os mesmos fault specs e exporta JSON. |
-| `DEMO [n]` | Executa campanha A/B visual cronometrada com overlay calculado. |
-| `DEMO_PAUSE\|DEMO_RESUME` | Pausa ou retoma o modo apresentação. |
-| `DEMO_STOP\|DEMO_RESTART` | Para sem apagar dados ou reinicia a demo com a mesma seed. |
 | `RESET_SESSION` | Zera contadores e reinicia a seed da campanha. |
 | `HELP` | Exibe a ajuda avançada do terminal textual do painel. |
 
@@ -220,17 +215,12 @@ comandos avançados, inclusive comandos fora do escopo visual da demo:
 
 | Bloco/comando | Uso na demonstração |
 |---|---|
-| `STATUS` | Mostra CPU, heap e rádio. |
-| `CLÁSSICA` / `MISSION CLASSIC` | Envia mensagem autenticada por HMAC-SHA256 e mede o baseline clássico. |
-| `PQC` / `MISSION PQC` | Envia mensagem após acordo de segredo ML-KEM-512 e mede o custo PQC. |
-| `PQC+CRC` / `MISSION PQC_CRC32` | Repete a mensagem PQC com CRC32 no payload e mede o acréscimo. |
-| `DEMO` | Executa a apresentação A/B automatizada. |
-| `PAUSA` / `DEMO_PAUSE` | Pausa a apresentação A/B. |
-| `FALHA` / `INJECT_FAULT` | Injeta falha determinística respeitando o guardião ativo. |
-| `EXPORT` / `EXPORT_JSON` | Salva a sessão atual em JSON. |
-| `OLED STANDBY` | Restaura o ícone no display. |
+| `ENVIAR MSG` / `SEND_MESSAGE` | Envia a mensagem de missão respeitando as opções ativas nos seletores. |
+| `CLÁSSICA` / `TOGGLE_CLASSIC` | Seletor exclusivo para ativar o modo de criptografia clássica (HMAC-SHA256). |
+| `PQC` / `TOGGLE_PQC` | Seletor exclusivo para ativar o modo de criptografia pós-quântica (ML-KEM-512). |
+| `CHECKSUM` / `TOGGLE_CHECKSUM` | Seletor liga/desliga para o guardião de integridade CRC32 do payload. |
+| `FALHA` / `INJECT_FAULT` | Injeta falha determinística (bit-flip) respeitando o guardião ativo. |
 | `BIT_FLIP [i m]` | Inverte um bit escolhido manualmente. |
-| `SAVE_SESSION` | Alias de exportação. |
 | `RESET_SESSION` | Zera a sessão da demonstração. |
 | `HELP` | Mostra ajuda completa do terminal avançado no painel. |
 
@@ -241,12 +231,12 @@ dashboard; eles não aparecem como blocos clicáveis da demonstração visual.
 Isso inclui `PING`, `TELEMETRY`, `RUN_BATTERY`, `LED`, `RGB`, `BARGRAPH`,
 sensores e comandos PQC de bancada.
 
-Durante a animação, a faixa superior central mostra métricas essenciais: CPU em
-MHz mais `% ativo` observado na janela móvel de 5s, RAM livre e os últimos
-tempos/bytes de `CLÁSSICA`, `PQC` e `PQC+CRC`. Não há polling automático de
-`TELEMETRY`; `STATUS`, `MISSION ...`, `PQC_STATUS` e comandos avançados são
-acionados manualmente pelo botão ou pelo terminal textual. Sem medição real, a
-faixa mostra valores pendentes em vez de preencher números artificiais.
+Durante a animação, a faixa superior central mostra métricas essenciais de hardware: CPU em
+MHz mais `% ativo` observado na janela móvel de 5s, e a RAM formatada como consumo / total
+disponível. Não há polling automático de `TELEMETRY`; `STATUS`, `MISSION ...`, e comandos
+avançados são acionados manualmente pelo botão ou pelo terminal textual. Os custos
+individuais de tempo/tráfego de cada cenário (`CLÁSSICA`, `PQC`, `PQC+CRC`) são exibidos
+diretamente no log do console do painel lateral assim que a mensagem é enviada/recebida.
 Respostas `MISSION` e `PQC_*` entram no JSON como métricas estruturadas,
 incluindo tempos, bytes, KAT, `key_match`, `key_confirmed`, `tag_match`,
 tamanhos e CRCs curtos, sem exportar segredos completos.

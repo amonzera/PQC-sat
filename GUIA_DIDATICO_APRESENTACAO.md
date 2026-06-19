@@ -63,10 +63,8 @@ apresentacao. Ele mostra:
 - modo simulado e modo hardware;
 - exportacao JSON da sessao.
 
-O dashboard nao deve ficar poluindo a apresentacao com comandos de bancada.
 Por isso, os botoes visuais foram reduzidos ao roteiro principal.
-Hoje os botoes centrais da apresentacao sao `CLÁSSICA`, `PQC`, `PQC+CRC`,
-`DEMO`, `FALHA`, `STATUS`, `EXPORT` e `OLED`.
+Hoje os botoes centrais da apresentacao sao `"ENVIAR MSG"`, `"CLÁSSICA"`, `"PQC"`, `"CHECKSUM"` e `"FALHA"`.
 
 ### Hardware Wisdom/ESP32
 
@@ -610,15 +608,12 @@ inspirados em CubeSat.
 
 ### Faixa superior
 
-Mostra apenas metricas essenciais para a apresentacao:
+Mostra apenas metricas essenciais de hardware da maquina/satelite:
 
-- CPU;
-- RAM;
-- CLÁSSICA;
-- PQC;
-- PQC+CRC.
+- CPU (MHz e % de carga ativo em tempo real);
+- RAM (consumo atual de heap / total disponivel, e memoria livre de detalhe).
 
-Essas metricas foram reduzidas para nao poluir a tela.
+Essa faixa nao polui a tela com resultados e foca puramente nos recursos fisicos do sistema.
 
 ### Painel esquerdo
 
@@ -635,17 +630,13 @@ Mostra a parte experimental:
 
 ### Painel direito
 
-Tem botoes somente para o roteiro visual:
+Tem botoes somente para o roteiro visual didatico manual:
 
-- `DEMO`;
-- `CLÁSSICA`;
-- `PQC`;
-- `PQC+CRC`;
-- `STATUS`;
-- `FALHA`;
-- `PAUSA`;
-- `EXPORT`;
-- `OLED`.
+- `"ENVIAR MSG"`;
+- `"CLÁSSICA"`;
+- `"PQC"`;
+- `"CHECKSUM"`;
+- `"FALHA"`.
 
 O terminal textual continua existindo abaixo dos botoes. Ele aceita comandos
 avancados, mas esses comandos nao devem virar parte principal da apresentacao.
@@ -744,73 +735,26 @@ Como explicar:
 > ganhamos mais integridade observavel e tambem somamos mais trabalho ao
 > hardware.
 
-### Passo 3: rodar demo automatica de falhas
+### Passo 3: demonstrar falha transitoria (Bit-Flip) manualmente
 
-Clique:
+Para demonstrar a diferenca pratica entre corrupcao silenciosa e erro detectado sem automatizacao no dashboard:
 
-```text
-DEMO
-```
+1. **Caso A (Corrupcao Silenciosa):**
+   - Clique no botao `"CHECKSUM"` no painel direito para desativar a integridade (o botao deve ficar apagado, com fundo escuro padrao).
+   - Clique em `"FALHA"` para injetar uma falha de bit no payload.
+   - Observe na timeline a esquerda que o status registrado sera `SILENT`, simulando o satelite recebendo dados invalidos sem saber.
 
-Ou digite:
-
-```text
-DEMO 5
-```
-
-O que acontece:
-
-1. o dashboard gera uma lista deterministica de falhas;
-2. aplica essas falhas no cenario A, sem CRC32;
-3. registra falhas silenciosas;
-4. aplica as mesmas falhas no cenario B, com CRC32;
-5. registra erros detectados;
-6. mostra resumo visual;
-7. exporta JSON.
+2. **Caso B (Erro Detectado):**
+   - Clique no botao `"CHECKSUM"` para ativar a integridade (o botao fica verde brilhante).
+   - Clique em `"FALHA"` para injetar uma falha de bit.
+   - Observe na timeline a esquerda que o status registrado sera `DETECTED_GUARD`, mostrando que o satélite interceptou a corrupcao e descartou o pacote corrompido.
 
 Como explicar:
 
-> A comparacao e justa porque usamos a mesma lista de falhas nos dois cenarios.
-> A unica diferenca e a presenca ou ausencia do guardiao CRC32.
+> A comparacao e justa porque a falha atinge o mesmo ponto no pacote. A unica diferenca e a presenca ou ausencia do guardiao de integridade. Sem ele, a alteracao de bits gera corrupcao silenciosa; com ele, garantimos que dados invalidos nao afetem a operacao do CubeSat.
 
-### Passo 4: demonstrar falha manualmente
-
-Para mostrar sem automatizar:
-
-```text
-CHECKSUM OFF
-INJECT_FAULT
-CHECKSUM ON
-INJECT_FAULT
-CRC_CHECK
-```
-
-O que esperar:
-
-- com `CHECKSUM OFF`, a falha tende a aparecer como `SILENT`;
-- com `CHECKSUM ON`, a falha tende a aparecer como `DETECTED_GUARD`;
-- `CRC_CHECK` forca uma tentativa com CRC32.
-
-### Passo 5: exportar
-
-Clique:
-
-```text
-EXPORT
-```
-
-Ou digite:
-
-```text
-EXPORT_JSON
-```
-
-O arquivo vai para `logs/`.
-
-Explique:
-
-> A animacao ajuda a entender, mas o JSON e a evidencia. Ele registra eventos,
-> resultados e metricas para auditoria.
+> [!NOTE]
+> Os logs oficiais e dados numericos consolidados de longo prazo do projeto foram gerados anteriormente usando ferramentas automatizadas via terminal (como o script `tools/stage8_acceptance.py`). O dashboard visual e reservado unicamente para demonstracao e manipulacao didatica ao vivo de forma interativa e manual.
 
 ## 9. Comandos que funcionam, mas nao devem ser foco visual
 
@@ -1010,8 +954,9 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 
 > No envio CLASSIC, a placa usa HMAC-SHA256. No envio PQC, ela executa
 > ML-KEM-512 para chegar a um segredo e autenticar a mensagem. No envio
-> PQC+CRC, ela adiciona CRC32 ao payload. A faixa superior mostra tempo, bytes,
-> CPU e RAM para comparar o impacto.
+> PQC+CRC, ela adiciona CRC32 ao payload. O console do dashboard mostra o
+> tempo e os bytes de custo individual de cada mensagem enviada, enquanto a
+> faixa superior mostra CPU e RAM para comparar o impacto de recursos.
 
 ### Conectar com PQC
 
@@ -1043,15 +988,13 @@ Antes da apresentacao:
 1. conectar a Wisdom;
 2. conferir `/dev/ttyUSB0`;
 3. abrir `python3 dashboard.py --port /dev/ttyUSB0`;
-4. clicar `STATUS`;
-5. clicar `CLÁSSICA`;
-6. clicar `PQC`;
-7. clicar `PQC+CRC`;
-8. rodar `DEMO 5`;
-9. explicar A/B;
-10. mostrar `EXPORT_JSON`;
-11. citar o JSON de aceite e o JSON novo de métricas;
-12. fechar com limites.
+4. clicar em `CLÁSSICA` (botão azul) e depois `ENVIAR MSG` para mostrar o tempo clássico;
+5. clicar em `PQC` (botão roxo) e depois `ENVIAR MSG` para mostrar o tempo PQC;
+6. clicar em `CHECKSUM` (botão verde) e depois `ENVIAR MSG` para mostrar o tempo PQC+Checksum;
+7. desativar `CHECKSUM` e clicar em `FALHA` para demonstrar erro silencioso (`SILENT`);
+8. ativar `CHECKSUM` e clicar em `FALHA` para demonstrar erro detectado (`DETECTED_GUARD`);
+9. citar o JSON de aceite de bateria de testes de longa duração;
+10. fechar com limites.
 
 Se algo falhar:
 

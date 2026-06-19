@@ -112,11 +112,10 @@ Essas razões são as mais fáceis de explicar em sala.
 
 A faixa superior da animação mostra:
 
-- `CPU`: frequência e porcentagem ativa observada em janela curta;
-- `RAM`: heap livre e mínimo observado;
-- `CLÁSSICA`: tempo e bytes do último `MISSION CLASSIC`;
-- `PQC`: tempo e bytes do último `MISSION PQC`;
-- `PQC+CRC`: tempo e bytes do último `MISSION PQC_CRC32`.
+- `CPU`: frequência e porcentagem ativa observada em janela móvel de 5s;
+- `RAM`: consumo atual de heap / total disponível (célula de memória) e memória livre como detalhe.
+
+As métricas de tempo e tráfego de cada cenário (`CLÁSSICA`, `PQC`, `PQC+CRC`) são exibidas diretamente no log do console do painel lateral assim que a mensagem é processada/recebida.
 
 Quando um comando `MISSION` volta da placa, o dashboard mostra um overlay de
 mensagem entregue, com cenário, criptografia, checksum, tempo e tráfego. Os

@@ -36,11 +36,15 @@ detectado.
 Sequencia da demo ao vivo:
 
 1. Abrir: `python3 dashboard.py --port /dev/ttyUSB0`
-2. Confirmar estado: `STATUS`
-3. Enviar mensagens: `CLASSIC`, `PQC`, `PQC+CRC` (botoes do dashboard)
-4. Executar campanha de falhas: `DEMO 5`
-5. Mostrar manualmente: `CHECKSUM OFF`, `INJECT_FAULT`, `CHECKSUM ON`, `INJECT_FAULT`
-6. Exportar: `EXPORT_JSON`
+2. Enviar mensagem clássica: selecionar `CLÁSSICA` (botão azul) e clicar em `ENVIAR MSG`.
+3. Enviar mensagem PQC sem integridade: selecionar `PQC` (botão roxo), desativar `CHECKSUM` (botão apagado) e clicar em `ENVIAR MSG`.
+4. Enviar mensagem PQC com integridade: selecionar `PQC`, ativar `CHECKSUM` (botão verde) e clicar em `ENVIAR MSG`.
+5. Injetar falhas manualmente:
+   - Com `CHECKSUM` desativado, clicar em `FALHA` -> Observar erro silencioso (`SILENT`).
+   - Com `CHECKSUM` ativado, clicar em `FALHA` -> Observar detecção (`DETECTED_GUARD`).
+
+> [!NOTE]
+> Os logs oficiais e dados numéricos consolidados foram gravados através de baterias automatizadas de longa duração via terminal (como o script `tools/stage8_acceptance.py`), garantindo rigor científico sem poluir o dashboard visual.
 
 ## Slide 4 — Resultados medidos (3 min)
 
