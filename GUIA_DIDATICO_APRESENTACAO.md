@@ -306,7 +306,9 @@ Razoes observadas no BASELINE (240 MHz):
 
 Esta seção foi escrita para quem nunca estudou criptografia. Ela explica, do
 zero, cada conceito que aparece no projeto. Se você já conhece o assunto, pode
-pular direto para a seção 6.
+pular direto para a seção 6. Para estudar o funcionamento interno com mais
+detalhe, incluindo pseudoalgoritmos, fórmulas, ML-KEM, HMAC, CRC32 e bit-flips,
+use também `ALGORITMOS_DO_PROJETO.md`.
 
 ### 5.1 Criptografia simetrica vs. assimetrica
 
@@ -977,6 +979,7 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 | `tools/stage8_acceptance.py` | Runner de aceite longo/manual |
 | `APRESENTACAO_ROTEIRO.md` | Roteiro resumido de 20 minutos |
 | `GUIA_DIDATICO_APRESENTACAO.md` | Este guia completo |
+| `ALGORITMOS_DO_PROJETO.md` | Explicação detalhada dos algoritmos usados no firmware e na demo |
 | `METRICAS_CONSOLIDADAS.md` | Como medir e apresentar CLASSIC, PQC e PQC+CRC |
 | `PERGUNTAS_E_RESPOSTAS_SEMINARIO.md` | Banco de perguntas prováveis e respostas para treino |
 | `ROADMAP.md` | Histórico técnico consolidado |

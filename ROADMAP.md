@@ -107,6 +107,10 @@ projeto sem reconstruir decisões antigas:
   perguntas prováveis, respostas curtas e respostas técnicas para defender
   objetivo, métricas, limitações, ML-KEM, HMAC, CRC32, bit-flips e próximos
   passos.
+- 2026-06-19: criado `ALGORITMOS_DO_PROJETO.md` como material de estudo
+  detalhado dos algoritmos do seminário, explicando `CLASSIC`, `PQC`,
+  `PQC_CRC32`, HMAC-SHA256, SHA-256, ML-KEM-512, CRC32, bit-flip, comparação
+  em tempo constante, KAT, `PQC_BENCH` e origem das métricas.
 - 2026-06-19: consolidação final do seminário ajustou o dashboard para usar
   onboarding completo de cinco telas e botão `RESULTADOS` com a bateria real
   `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`; a documentação

@@ -296,6 +296,7 @@ compartilhado completo ou material suficiente para reconstruir a sessão.
 | `tests/` | Testes automatizados do protocolo serial Python. |
 | `hardware_blackboard_wisdom.md` | Inventário e procedimento de bancada da placa RoboCore Wisdom. |
 | `hardware_command_reference.md` | Referência única de comandos completos de hardware/bancada. |
+| `ALGORITMOS_DO_PROJETO.md` | Explicação detalhada de HMAC-SHA256, ML-KEM-512, CRC32, bit-flips e métricas. |
 | `METRICAS_CONSOLIDADAS.md` | Metodologia de comparação CLASSIC, PQC e PQC+CRC32 para o seminário. |
 | `GUIA_DIDATICO_APRESENTACAO.md` | Explicação passo a passo, leiga e completa, do projeto e da demonstração. |
 | `APRESENTACAO_ROTEIRO.md` | Roteiro de 20 minutos, blocos do dashboard, sequência da demo e limites. |
