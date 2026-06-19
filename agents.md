@@ -43,6 +43,7 @@ implementar.
 - painel de telemetria e console;
 - comandos locais do dashboard: `INJECT_FAULT`, `BIT_FLIP`, `PQC_STATUS`,
   `CRC_CHECK`, `RUN_BATTERY`, `RESET_SESSION`, `SEND_MESSAGE`,
+  `SET_PRESET_CLASSIC`, `SET_PRESET_PQC`, `SET_PRESET_PQC_CRC32`,
   `TOGGLE_CLASSIC`, `TOGGLE_PQC`, `TOGGLE_CHECKSUM` e `HELP`;
 - firmware serial `V1` para a RoboCore BlackBoard Wisdom;
 - bridge serial Python e console `tools/serial_console.py`;
@@ -75,7 +76,8 @@ implementar.
   `guard_verify_us` e `guard_overhead_us`.
 - faixa superior mostra CPU em MHz e `% ativo` observado em janela móvel de
   5s, e a RAM formatada como consumo de heap / total disponível;
-- modo apresentação interativo e manual com seletores de criptografia (Clássica/PQC) e integridade (Checksum);
+- modo apresentação interativo e manual com presets `CLÁSSICA`, `PQC` e
+  `PQC+CRC`, seguidos por `ENVIAR MSG`;
 - `PQC_FAULT index mask [CONFIRM|NONE]` implementado no firmware para
   corromper ciphertext ML-KEM real e classificar `KEY_MISMATCH` ou
   `PROTOCOL_REJECT` por confirmação HMAC-SHA256 da chave derivada.
@@ -140,12 +142,19 @@ ML-KEM/FIPS 203.
 - Não mostre `ESP32 ONLINE`, `CRC ON` ou `ML-KEM ativo` sem evidência real.
 - O dashboard é a superfície da apresentação ao vivo. Mantenha como blocos
   clicáveis apenas os comandos do roteiro didático e manual: `"ENVIAR MSG"`,
-  `"CLÁSSICA"`, `"PQC"`, `"CHECKSUM"` e `"FALHA"`. A simulação automatizada
+  `"CLÁSSICA"`, `"PQC"`, `"PQC+CRC"` e `"FALHA"`. A simulação automatizada
   (`DEMO`), controle de pausa (`PAUSA`) e exportação direta (`EXPORT`) foram
   removidos do painel visual. O terminal textual do painel pode encaminhar
   comandos avançados de firmware quando a placa estiver conectada, inclusive
   bancada, inventário, debug e PQC técnico, desde que isso não vire botão ou
   fluxo principal da apresentação.
+- O botão superior `RESULTADOS` e o onboarding fazem parte da apresentação:
+  eles devem resumir a bateria real, conclusões e próximos passos, sem iniciar
+  coletas demoradas nem adicionar comandos técnicos ao menu lateral.
+- `ENVIAR MSG` e `MISSION ...` não podem simular/reproduzir métricas
+  consolidadas quando a placa não estiver conectada. A demo principal deve
+  usar resposta serial real da Wisdom; modo `--simulated` é apenas ensaio
+  visual/layout.
 - Todo comando útil que não pertença à apresentação deve continuar registrado
   para uso técnico em outro lugar: `hardware_command_reference.md`,
   `tools/serial_console.py --all-commands`, documentação de etapa ou scripts de

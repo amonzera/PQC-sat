@@ -1,15 +1,15 @@
 # Firmware ESP32 - PQC-SAT Wisdom
 
 Este diretorio contem o firmware do projeto para a RoboCore BlackBoard Wisdom.
-Ele implementa o bridge serial `V1`, inventario da placa e comandos de bancada
+Ele implementa o bridge serial `V1`, inventário da placa e comandos de bancada
 para exercitar os perifericos integrados. Ele também executa um experimento
 pequeno de payload com bit-flip e CRC32, ML-KEM-512 real com `mlkem-native` e
 o comando `MISSION` para comparar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`.
 
-O objetivo desta etapa e dominar a comunicacao ESP32/notebook e preservar o
-potencial da Wisdom para a demonstracao: sensores, atuadores, OLED, entradas
-analogicas e expansoes ficam identificados no firmware desde o inicio.
+O objetivo desta etapa e dominar a comunicação ESP32/notebook e preservar o
+potencial da Wisdom para a demonstração: sensores, atuadores, OLED, entradas
+analogicas e expansões ficam identificados no firmware desde o inicio.
 
 ## Sketch
 
@@ -19,7 +19,7 @@ Abra no Arduino IDE:
 firmware/esp32_serial_spike/esp32_serial_spike.ino
 ```
 
-Configuracao inicial em Arduino IDE, caso nao use PlatformIO:
+Configuração inicial em Arduino IDE, caso não use PlatformIO:
 
 ```text
 Board: ESP32 Dev Module
@@ -33,8 +33,8 @@ Alternativamente, com PlatformIO:
 python3 -m platformio run -e robocore_wisdom_esp32
 ```
 
-A configuracao usa `board = esp32dev`, adequada para a Wisdom identificada como
-ESP32 classico com conversor CP2102/CP2102N. Se a placa for trocada, revise
+A configuração usa `board = esp32dev`, adequada para a Wisdom identificada como
+ESP32 clássico com conversor CP2102/CP2102N. Se a placa for trocada, revise
 `platformio.ini`.
 
 Para gravar, somente depois de confirmar que o backup da flash original existe:
@@ -57,16 +57,16 @@ V1|request_id|RESULT|status|key=value
 
 ## Comandos
 
-O dashboard da apresentacao usa apenas o subconjunto visual documentado no
-`README.md`. A referencia completa de comandos de hardware, bancada, inventario
-e expansao fica em:
+O dashboard da apresentação usa apenas o subconjunto visual documentado no
+`README.md`. A referência completa de comandos de hardware, bancada, inventário
+e expansão fica em:
 
 ```text
 ../hardware_command_reference.md
 ```
 
-Use essa referencia para testes de firmware, debug de perifericos e manutencao
-da comunicacao serial.
+Use essa referência para testes de firmware, debug de perifericos e manutenção
+da comunicação serial.
 
 ## Mapa da Wisdom usado
 
@@ -76,15 +76,15 @@ da comunicacao serial.
 | OLED | I2C |
 | APDS-9960 gesto/luz/proximidade | I2C |
 | HTU21D temperatura/umidade | I2C |
-| MMA8452QT acelerometro | I2C, INT1 D34, INT2 D35 |
+| MMA8452QT acelerômetro | I2C, INT1 D34, INT2 D35 |
 | Bargraph | D17, D16, D4, D13 |
 | LED RGB | R D19, G D23, B D18 |
-| Botao | D27 |
+| Botão | D27 |
 | Receptor IR | D26 |
 | Sensor de som | VP / A36 |
-| Potenciometro deslizante | VN / A39 |
+| Potenciômetro deslizante | VN / A39 |
 | Servo | D25 |
-| Rele | D33 |
+| Relé | D33 |
 | BRIICK | I2C |
 
 ## Teste pelo computador
@@ -102,7 +102,7 @@ python3 tools/serial_console.py --port /dev/ttyUSB0 --interactive
 Troque `/dev/ttyUSB0` pela porta exibida no seu sistema.
 
 No modo interativo, digite `HELP` para ver a lista completa de comandos no
-terminal. O comando tambem e enviado ao firmware, que retorna os grupos de
+terminal. O comando também e enviado ao firmware, que retorna os grupos de
 comandos aceitos pela placa.
 
 Para usar a mesma placa pelo dashboard:
@@ -112,8 +112,8 @@ python3 dashboard.py
 python3 dashboard.py --port /dev/ttyUSB0
 ```
 
-O dashboard tenta detectar a Wisdom automaticamente. A arte do satelite so e
-liberada depois do handshake `HELLO`; sem a placa, a orbita fica travada.
+O dashboard tenta detectar a Wisdom automaticamente. A arte do satélite só e
+liberada depois do handshake `HELLO`; sem a placa, a órbita fica travada.
 
 Em Linux, se a porta existir mas abrir com `Permission denied`, confirme:
 
@@ -122,7 +122,7 @@ ls -l /dev/ttyUSB0
 groups
 ```
 
-Correção temporaria, ate desconectar a placa:
+Correção temporária, até desconectar a placa:
 
 ```bash
 sudo chmod 666 /dev/ttyUSB0
@@ -137,7 +137,7 @@ sudo usermod -a -G dialout $USER
 Depois da correção permanente, encerre a sessão do sistema e entre novamente
 para o novo grupo valer no terminal.
 
-Sequencia curta para validar a demonstracao apos upload:
+Sequência curta para validar a demonstração apos upload:
 
 ```text
 PING
@@ -156,12 +156,12 @@ BARGRAPH 75
 BARGRAPH 0
 ```
 
-Para a sequencia completa de bancada, use `../hardware_command_reference.md`.
+Para a sequência completa de bancada, use `../hardware_command_reference.md`.
 
 ## Limites desta etapa
 
 - O sketch usa Arduino/PlatformIO para destravar o transporte rapidamente.
-- O backend criptografico aparece como `crypto=ML-KEM-512` e usa
+- O backend criptográfico aparece como `crypto=ML-KEM-512` e usa
   `mlkem-native` v1.1.0 vendorizado em `firmware/lib/mlkem_native`.
 - A interface PQC real existe: `PQC_INFO` reporta alvo, backend, variante,
   commit, licença, tamanhos e métricas; `PQC_KAT`, `PQC_KEYGEN`,
@@ -173,24 +173,24 @@ Para a sequencia completa de bancada, use `../hardware_command_reference.md`.
   `FAULT NONE|CRC32 ...` e ciphertext ML-KEM com
   `PQC_FAULT index mask [CONFIRM|NONE]`.
 - OLED tem suporte minimo de inicializacao, limpeza, padrao de teste e standby
-  com o icone pixel-art do robo/satelite usado no dashboard; texto no display
-  fica para uma biblioteca grafica ou driver proprio posterior.
+  com o ícone pixel-art do robo/satélite usado no dashboard; texto no display
+  fica para uma biblioteca gráfica ou driver próprio posterior.
 - APDS-9960 e MMA8452 usam leituras diretas de registradores suficientes para
   bancada; calibracao fina fica para a etapa de sensores.
 - O nucleo `FAULT` foi validado em placa real para `NONE` e `CRC32`;
   `PQC_FAULT` foi validado em placa real para `CONFIRM` e `NONE`; os testes
   automatizados cobrem o parser Python e o engine deterministico do dashboard.
 
-## Proximo incremento
+## Próximo incremento
 
-O proximo marco do firmware e manter esta base estável enquanto a etapa de
+O próximo marco do firmware e manter esta base estável enquanto a etapa de
 apresentação automatizada é implementada. Novas mudanças de firmware devem
 preservar `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32`, `PQC_KAT`,
 `PQC_FAULT`, `PQC_BENCH 100` e `FAULT CRC32` como testes de regressão, sem
 expor chave privada, segredo compartilhado completo ou material suficiente
-para reconstruir a sessao.
+para reconstruir a sessão.
 
-Sequencia minima de bancada:
+Sequência minima de bancada:
 
 ```text
 PQC_INFO
@@ -238,5 +238,5 @@ PQC_BENCH 5   keygen_avg_us=10101 encap_avg_us=11778 decap_avg_us=15214 elapsed_
 ```
 
 Nenhum comando imprime chaves privadas, segredos completos ou material
-criptografico suficiente para reconstruir a sessao; são usados tamanhos,
+criptográfico suficiente para reconstruir a sessão; são usados tamanhos,
 status, tempos, CRCs curtos e tags resumidos de confirmação.

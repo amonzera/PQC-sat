@@ -1,12 +1,12 @@
-# Referencia de comandos de hardware
+# Referência de comandos de hardware
 
-Este arquivo concentra as possibilidades completas de comunicacao com a
+Este arquivo concentra as possibilidades completas de comunicação com a
 BlackBoard Wisdom pelo protocolo serial `V1`.
 
-Durante a demonstracao ao vivo, os blocos clicaveis do dashboard devem expor
-apenas comandos ligados ao enredo visual do projeto. Comandos de inventario,
-bancada, debug e expansao ficam documentados aqui para desenvolvimento, testes
-e manutencao; eles podem ser enviados pelo terminal textual avancado do painel
+Durante a demonstração ao vivo, os blocos clicáveis do dashboard devem expor
+apenas comandos ligados ao enredo visual do projeto. Comandos de inventário,
+bancada, debug e expansão ficam documentados aqui para desenvolvimento, testes
+e manutenção; eles podem ser enviados pelo terminal textual avançado do painel
 ou pelo console `tools/serial_console.py`.
 
 Comandos locais do dashboard, como `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`,
@@ -35,21 +35,21 @@ Para listar estes comandos no terminal:
 python3 tools/serial_console.py --all-commands
 ```
 
-Para listar apenas os comandos da demonstracao:
+Para listar apenas os comandos da demonstração:
 
 ```bash
 python3 tools/serial_console.py --commands
 ```
 
-## Comandos de apoio da demonstracao
+## Comandos de apoio da demonstração
 
-| Comando | Uso | Papel na demonstracao |
+| Comando | Uso | Papel na demonstração |
 |---|---|---|
 | `STATUS` | `STATUS` | Mostra perfil, CPU, heap, flash e radio sob demanda. |
 | `MISSION` | `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32` | Entrega mensagem curta e mede tempo, bytes, heap e resultado nos três cenários centrais do seminário. |
 | `DEMO` | `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`, `DEMO_STOP`, `DEMO_RESTART` | Comandos locais do dashboard para executar a apresentação A/B cronometrada. |
-| `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Comando serial tecnico usado para validar bit-flip e CRC32 na placa. No dashboard, use `INJECT_FAULT` e `CRC_CHECK`. |
-| `OLED` | `OLED STANDBY` | Restaura o icone robo-satelite no display. |
+| `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Comando serial técnico usado para validar bit-flip e CRC32 na placa. No dashboard, use `INJECT_FAULT` e `CRC_CHECK`. |
+| `OLED` | `OLED STANDBY` | Restaura o ícone robo-satélite no display. |
 
 `PING`, `TELEMETRY`, sensores, LED, RGB e bargraph continuam disponíveis pelo
 HELP/terminal textual e pelo `tools/serial_console.py`, mas não devem aparecer
@@ -127,12 +127,12 @@ Validação pós-upload registrada em 2026-06-18:
 
 ## Comandos completos de bancada
 
-| Comando | Uso | Possibilidade de comunicacao |
+| Comando | Uso | Possibilidade de comunicação |
 |---|---|---|
 | `HELLO` | `HELLO` | Handshake; identifica `PQC-SAT-WISDOM`, placa, protocolo e transporte. |
 | `PING` | `PING` | Teste de ida e volta UART com `uptime_ms`. |
 | `STATUS` | `STATUS` | Estado do ESP32: perfil, chip, CPU, heap, flash e radio. |
-| `TELEMETRY` | `TELEMETRY` | Snapshot de uptime, CPU, heap, potenciometro, som, botao e rele. |
+| `TELEMETRY` | `TELEMETRY` | Snapshot de uptime, CPU, heap, potenciômetro, som, botão e relé. |
 | `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Aplica bit-flip em payload hexadecimal e retorna `result`, byte antes/depois, CRC32 antes/depois e `elapsed_us`. |
 | `PQC_INFO` | `PQC_INFO` | Reporta contrato PQC atual, backend real e métricas. |
 | `PQC_KAT` | `PQC_KAT` | Executa vetor conhecido determinístico e retorna digests curtos. |
@@ -145,25 +145,25 @@ Validação pós-upload registrada em 2026-06-18:
 | `PERIPHERALS` | `PERIPHERALS` | Detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C. |
 | `I2C_SCAN` | `I2C_SCAN` | Varre o barramento I2C em SDA21/SCL22. |
 | `FEATURES` | `FEATURES`, `FEATURES CORE`, `FEATURES I2C`, `FEATURES GPIO`, `FEATURES ANALOG`, `FEATURES EXPANSION` | Lista grupos de recursos conhecidos pela firmware. |
-| `BOARDMAP` | `BOARDMAP`, `BOARDMAP I2C`, `BOARDMAP GPIO`, `BOARDMAP ANALOG`, `BOARDMAP EXPANSION` | Reporta pinos, barramentos e enderecos usados. |
-| `SENSOR_READ` | `SENSOR_READ TEMP_HUM`, `SENSOR_READ ACCEL`, `SENSOR_READ APDS` | Le sensores I2C embarcados. |
-| `ANALOG` | `ANALOG`, `ANALOG POT`, `ANALOG SOUND` | Le potenciometro A39 e sensor de som A36. |
-| `DIGITAL` | `DIGITAL`, `DIGITAL BUTTON`, `DIGITAL IR` | Le botao, receptor IR e interrupcoes do acelerometro. |
+| `BOARDMAP` | `BOARDMAP`, `BOARDMAP I2C`, `BOARDMAP GPIO`, `BOARDMAP ANALOG`, `BOARDMAP EXPANSION` | Reporta pinos, barramentos e endereços usados. |
+| `SENSOR_READ` | `SENSOR_READ TEMP_HUM`, `SENSOR_READ ACCEL`, `SENSOR_READ APDS` | Lê sensores I2C embarcados. |
+| `ANALOG` | `ANALOG`, `ANALOG POT`, `ANALOG SOUND` | Lê potenciômetro A39 e sensor de som A36. |
+| `DIGITAL` | `DIGITAL`, `DIGITAL BUTTON`, `DIGITAL IR` | Lê botão, receptor IR e interrupções do acelerômetro. |
 | `RGB` | `RGB R G B`, `RGB OFF`, `RGB TEST`, `RGB COMMON_ANODE`, `RGB COMMON_CATHODE` | Controla LED RGB e polaridade. |
 | `BARGRAPH` | `BARGRAPH 0..4`, `BARGRAPH 0..100`, `BARGRAPH LEVEL n`, `BARGRAPH PERCENT n`, `BARGRAPH TEST`, `BARGRAPH ACTIVE_HIGH`, `BARGRAPH ACTIVE_LOW` | Controla LEDs de porcentagem e polaridade. |
 | `LED` | `LED ON`, `LED OFF`, `LED TOGGLE`, `LED TEST`, `LED WHITE`, `LED RED`, `LED GREEN`, `LED BLUE`, `LED CYAN`, `LED MAGENTA`, `LED YELLOW` | Controla indicador principal via LED interno mais RGB onboard. |
-| `RELAY` | `RELAY ON`, `RELAY OFF`, `RELAY TOGGLE` | Controla saida de rele em D33. |
+| `RELAY` | `RELAY ON`, `RELAY OFF`, `RELAY TOGGLE` | Controla saída de relé em D33. |
 | `SERVO` | `SERVO 0..180`, `SERVO DETACH`, `SERVO OFF` | Gera PWM para servo em D25 ou solta o canal. |
-| `OLED` | `OLED INIT`, `OLED CLEAR`, `OLED TEST`, `OLED STANDBY` | Controla display OLED e icone standby. |
+| `OLED` | `OLED INIT`, `OLED CLEAR`, `OLED TEST`, `OLED STANDBY` | Controla display OLED e ícone standby. |
 | `PROFILE` | `PROFILE BASELINE`, `PROFILE OBC-1U-LIMITED` | Alterna perfil operacional do ESP32. |
 | `RESET_STATS` | `RESET_STATS` | Zera contadores internos da firmware. |
-| `HELP` | `HELP`, `HELP LED`, `HELP BARGRAPH`, `HELP RGB`, `HELP OLED` | Lista grupos ou explica um comando especifico. |
+| `HELP` | `HELP`, `HELP LED`, `HELP BARGRAPH`, `HELP RGB`, `HELP OLED` | Lista grupos ou explica um comando específico. |
 
-## Politica de uso
+## Política de uso
 
-- Dashboard da apresentacao: somente comandos ligados ao roteiro visual
+- Dashboard da apresentação: somente comandos ligados ao roteiro visual
   principal. Comandos de apoio e bancada ficam no HELP/terminal textual.
-- Bancada, debug e desenvolvimento: qualquer comando desta referencia pode ser
+- Bancada, debug e desenvolvimento: qualquer comando desta referência pode ser
   enviado por `tools/serial_console.py`.
-- Comandos que acionam expansoes fisicas, como `RELAY` e `SERVO`, nao devem
-  aparecer no console da apresentacao sem necessidade explicita.
+- Comandos que acionam expansões físicas, como `RELAY` e `SERVO`, não devem
+  aparecer no console da apresentação sem necessidade explícita.

@@ -62,10 +62,88 @@ HELP_HINT_LINES = (
 )
 COMMAND_BUTTONS = (
     ("ENVIAR MSG", "SEND_MESSAGE"),
-    ("CLÁSSICA", "TOGGLE_CLASSIC"),
-    ("PQC", "TOGGLE_PQC"),
-    ("CHECKSUM", "TOGGLE_CHECKSUM"),
+    ("CLÁSSICA", "SET_PRESET_CLASSIC"),
+    ("PQC", "SET_PRESET_PQC"),
+    ("PQC+CRC", "SET_PRESET_PQC_CRC32"),
     ("FALHA", "INJECT_FAULT"),
+)
+MISSION_PRESET_COMMANDS = {
+    "SET_PRESET_CLASSIC": "CLASSIC",
+    "SET_PRESET_PQC": "PQC",
+    "SET_PRESET_PQC_CRC32": "PQC_CRC32",
+}
+MISSION_OVERLAY_SCENARIOS = ("CLASSIC", "PQC", "PQC_CRC32")
+CONSOLIDATED_ACCEPTANCE_LOG = "logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json"
+CONSOLIDATED_ACCEPTANCE_LABEL = "20260618T234008Z"
+CONSOLIDATED_SUMMARY = {
+    "elapsed_s": 1817.23,
+    "records": 83,
+    "failed": 0,
+    "mission_runs": 27,
+    "pqc_bench_runs": 2,
+    "demo_none_silent": "5/5",
+    "demo_crc_detected": "5/5",
+    "crc_acceptance": "8/8",
+}
+CONSOLIDATED_MISSION_BASELINE = {
+    "CLASSIC": {
+        "label": "CLASSIC (HMAC)",
+        "crypto": "HMAC-SHA256",
+        "checksum": "NONE",
+        "elapsed_us": 721,
+        "bytes_total": 73,
+        "bytes_payload": 41,
+        "bytes_crypto": 32,
+        "bytes_checksum": 0,
+        "keygen_us": 0,
+        "encap_us": 0,
+        "decap_us": 0,
+        "tag_us": 528,
+        "verify_us": 166,
+        "crc_us": 0,
+        "heap": 201412,
+        "result": "DELIVERED",
+    },
+    "PQC": {
+        "label": "PQC (ML-KEM)",
+        "crypto": "ML-KEM-512",
+        "checksum": "NONE",
+        "elapsed_us": 13536,
+        "bytes_total": 841,
+        "bytes_payload": 41,
+        "bytes_crypto": 800,
+        "bytes_checksum": 0,
+        "keygen_us": 3923,
+        "encap_us": 3975,
+        "decap_us": 5026,
+        "tag_us": 421,
+        "verify_us": 165,
+        "crc_us": 0,
+        "heap": 201412,
+        "result": "DELIVERED",
+    },
+    "PQC_CRC32": {
+        "label": "PQC + CRC32",
+        "crypto": "ML-KEM-512",
+        "checksum": "CRC32",
+        "elapsed_us": 13367,
+        "bytes_total": 845,
+        "bytes_payload": 41,
+        "bytes_crypto": 800,
+        "bytes_checksum": 4,
+        "keygen_us": 3679,
+        "encap_us": 3988,
+        "decap_us": 5087,
+        "tag_us": 435,
+        "verify_us": 163,
+        "crc_us": 10,
+        "heap": 201412,
+        "result": "DELIVERED",
+    },
+}
+CONSOLIDATED_PQC_BENCH = (
+    ("BASELINE 240 MHz", "3.298", "3.861", "4.985"),
+    ("LIMITED 80 MHz", "10.056", "11.780", "15.204"),
 )
 
 # --- Paleta de Cores ----------------------------------------------------------
@@ -1020,7 +1098,7 @@ class DashboardPanel:
         self.input_active = True
         self.cursor_blink = 0
         self.session_status = "SIMULADO"
-        self.pqc_algorithm = "ML-KEM-512 (PENDENTE)"
+        self.pqc_algorithm = "ML-KEM-512 (ATIVO - SIMULADO)" if serial_client is None else "ML-KEM-512 (PENDENTE)"
         self.fault_injections = 0
         self.silent_failures = 0
         self.detected_errors = 0
@@ -1037,6 +1115,7 @@ class DashboardPanel:
         self.checksum_enabled = False
         self.pqc_enabled = True
         self.classic_enabled = False
+        self.message_preset = "PQC"
         self.results_overlay_visible = False
         self.top_results_btn_rect = None
         self.guard_mode = "NONE"
@@ -1054,6 +1133,16 @@ class DashboardPanel:
         self.demo_export_path = None
         self.last_mission = {}
         self.mission_effect_timer = 0.0
+        self.mission_overlay_visible = False
+        self.mission_overlay_close_rect = None
+        self.mission_overlays = {}
+        self.mission_overlay_order = []
+        self.mission_overlay_positions = {}
+        self.mission_overlay_rects = {}
+        self.mission_overlay_close_rects = {}
+        self.mission_overlay_drag_rects = {}
+        self.dragging_mission_overlay = None
+        self.mission_drag_offset = (0, 0)
         self.effect_timer = 0.0
         self.effect_result = ""
         self.effect_label = ""
@@ -1095,15 +1184,10 @@ class DashboardPanel:
 
         if getattr(self, "results_overlay_visible", False):
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                w = int(WIDTH * 0.85)
-                h = int(HEIGHT * 0.85)
-                x = (WIDTH - w) // 2
-                y = (HEIGHT - h) // 2
-                close_rect = pygame.Rect(x + w - 190, y + 30, 160, 40)
+                panel_rect, close_rect = self._results_overlay_geometry()
                 if close_rect.collidepoint(event.pos):
                     self.results_overlay_visible = False
                     return
-                panel_rect = pygame.Rect(x, y, w, h)
                 if not panel_rect.collidepoint(event.pos):
                     self.results_overlay_visible = False
                     return
@@ -1115,6 +1199,9 @@ class DashboardPanel:
             elif event.type == pygame.MOUSEWHEEL:
                 return
             return
+
+        if self._handle_mission_overlay_event(event):
+            return True
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1 and self._handle_command_button_click(event.pos):
@@ -1146,6 +1233,44 @@ class DashboardPanel:
                 if len(self.input_text) < 30 and event.unicode.isprintable():
                     self.input_text += event.unicode
 
+    def _handle_mission_overlay_event(self, event):
+        if not getattr(self, "mission_overlay_visible", False):
+            return False
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for scenario in reversed(self.mission_overlay_order):
+                close_rect = self.mission_overlay_close_rects.get(scenario)
+                if close_rect is not None and close_rect.collidepoint(event.pos):
+                    self._close_mission_overlay(scenario)
+                    return True
+
+            for scenario in reversed(self.mission_overlay_order):
+                rect = self.mission_overlay_rects.get(scenario)
+                drag_rect = self.mission_overlay_drag_rects.get(scenario)
+                if drag_rect is not None and drag_rect.collidepoint(event.pos):
+                    self._bring_mission_overlay_to_front(scenario)
+                    rect = self.mission_overlay_rects.get(scenario, drag_rect)
+                    self.dragging_mission_overlay = scenario
+                    self.mission_drag_offset = (event.pos[0] - rect.x, event.pos[1] - rect.y)
+                    return True
+                if rect is not None and rect.collidepoint(event.pos):
+                    self._bring_mission_overlay_to_front(scenario)
+                    return True
+
+        if event.type == pygame.MOUSEMOTION and self.dragging_mission_overlay:
+            scenario = self.dragging_mission_overlay
+            width, height = self._mission_overlay_size()
+            x = event.pos[0] - self.mission_drag_offset[0]
+            y = event.pos[1] - self.mission_drag_offset[1]
+            self.mission_overlay_positions[scenario] = self._clamp_mission_overlay_position(x, y, width, height)
+            return True
+
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging_mission_overlay:
+            self.dragging_mission_overlay = None
+            return True
+
+        return False
+
     def _execute_command(self, cmd):
         """Processa um comando digitado."""
         cmd_clean = cmd.strip()
@@ -1158,63 +1283,31 @@ class DashboardPanel:
 
         if cmd_upper == "INJECT_FAULT":
             status = self._run_experiment_command(self.guard_mode)
+        elif cmd_upper in MISSION_PRESET_COMMANDS:
+            status = self._set_message_preset(MISSION_PRESET_COMMANDS[cmd_upper])
         elif cmd_upper == "SEND_MESSAGE":
-            if self.serial_client is None or not self.serial_connected:
-                # Simulated Mode
-                scenario = "CLASSIC" if self.classic_enabled else ("PQC_CRC32" if self.checksum_enabled else "PQC")
-                self.session_status = f"MISSÃO {scenario}"
-                self.last_mission = {
-                    "scenario": scenario,
-                    "result": "DELIVERED",
-                }
-                if scenario == "CLASSIC":
-                    self.last_mission.update({"elapsed_us": 721, "bytes_total": 73, "heap": 201412})
-                elif scenario == "PQC":
-                    self.last_mission.update({"elapsed_us": 13536, "bytes_total": 841, "heap": 201412})
-                elif scenario == "PQC_CRC32":
-                    self.last_mission.update({"elapsed_us": 13367, "bytes_total": 845, "heap": 201412})
-                
-                self._record_hardware_sample(f"MISSION {scenario}", self.last_mission)
-                self.mission_effect_timer = 5.0
-                
-                elapsed = self.last_mission["elapsed_us"]
-                bytes_total = self.last_mission["bytes_total"]
-                status = f"{_format_elapsed(elapsed)}, {bytes_total} B"
+            mission_status = self._execute_mission_command([self._current_message_scenario()])
+            if mission_status is None:
+                status = "ENVIANDO"
             else:
-                # Hardware Mode
-                if self.classic_enabled:
-                    mission_status = self._execute_mission_command(["CLASSIC"])
-                elif self.pqc_enabled:
-                    if self.checksum_enabled:
-                        mission_status = self._execute_mission_command(["PQC_CRC32"])
-                    else:
-                        mission_status = self._execute_mission_command(["PQC"])
-                else:
-                    mission_status = "INVALID STATE"
-                if mission_status is None:
-                    status = "ENVIANDO"
-                else:
-                    status = mission_status
+                status = mission_status
         elif cmd_upper == "TOGGLE_CLASSIC":
             if self.classic_enabled:
-                self.classic_enabled = False
-                self.pqc_enabled = True
+                self._set_message_preset("PQC")
             else:
-                self.classic_enabled = True
-                self.pqc_enabled = False
-            self.session_dirty = True
+                self._set_message_preset("CLASSIC")
             status = "CLÁSSICA ATIVADA" if self.classic_enabled else "PÓS-QUÂNTICA ATIVADA"
         elif cmd_upper == "TOGGLE_PQC":
             if self.pqc_enabled:
-                self.pqc_enabled = False
-                self.classic_enabled = True
+                self._set_message_preset("CLASSIC")
             else:
-                self.pqc_enabled = True
-                self.classic_enabled = False
-            self.session_dirty = True
+                self._set_message_preset("PQC")
             status = "PÓS-QUÂNTICA ATIVADA" if self.pqc_enabled else "CLÁSSICA ATIVADA"
         elif cmd_upper == "TOGGLE_CHECKSUM":
-            self._set_checksum_enabled(not self.checksum_enabled)
+            enabled = not self.checksum_enabled
+            self._set_checksum_enabled(enabled)
+            if self.pqc_enabled:
+                self.message_preset = "PQC_CRC32" if enabled else "PQC"
             status = "CHECKSUM ATIVADO" if self.checksum_enabled else "CHECKSUM DESATIVADO"
         elif command_name == "BIT_FLIP":
             status = self._run_experiment_command(self.guard_mode, parts[1:])
@@ -1269,12 +1362,41 @@ class DashboardPanel:
 
         self._append_history(cmd_upper, status)
 
+    def _current_message_scenario(self):
+        if self.message_preset in {"CLASSIC", "PQC", "PQC_CRC32"}:
+            return self.message_preset
+        if self.classic_enabled:
+            return "CLASSIC"
+        if self.checksum_enabled:
+            return "PQC_CRC32"
+        return "PQC"
+
+    def _set_message_preset(self, scenario):
+        scenario = scenario.upper().replace("+", "_")
+        if scenario not in {"CLASSIC", "PQC", "PQC_CRC32"}:
+            return "INVALID_INPUT"
+
+        self.message_preset = scenario
+        self.classic_enabled = scenario == "CLASSIC"
+        self.pqc_enabled = scenario in {"PQC", "PQC_CRC32"}
+        self.checksum_enabled = scenario == "PQC_CRC32"
+        self.guard_mode = "CRC32" if self.checksum_enabled else "NONE"
+        self.session_dirty = True
+        labels = {
+            "CLASSIC": "PRESET CLÁSSICO",
+            "PQC": "PRESET PQC",
+            "PQC_CRC32": "PRESET PQC+CRC",
+        }
+        self.session_status = labels[scenario]
+        return labels[scenario]
+
     def _execute_mission_command(self, args):
         if len(args) != 1:
             return "INVALID_INPUT"
         scenario = args[0].upper().replace("+", "_")
         if scenario not in {"CLASSIC", "PQC", "PQC_CRC32"}:
             return "INVALID_INPUT"
+        self._set_message_preset(scenario)
         if self.serial_client is None or not self.serial_connected:
             self.session_status = "AGUARDANDO SAT"
             return "SAT OFF"
@@ -1311,11 +1433,20 @@ class DashboardPanel:
             return "INVALID_INPUT"
         action = args[0]
         if action in {"ON", "CRC32"}:
-            return self._set_checksum_enabled(True)
+            status = self._set_checksum_enabled(True)
+            if self.pqc_enabled:
+                self.message_preset = "PQC_CRC32"
+            return status
         if action in {"OFF", "NONE"}:
-            return self._set_checksum_enabled(False)
+            status = self._set_checksum_enabled(False)
+            if self.pqc_enabled:
+                self.message_preset = "PQC"
+            return status
         if action == "TOGGLE":
-            return self._set_checksum_enabled(not self.checksum_enabled)
+            status = self._set_checksum_enabled(not self.checksum_enabled)
+            if self.pqc_enabled:
+                self.message_preset = "PQC_CRC32" if self.checksum_enabled else "PQC"
+            return status
         if action == "STATUS":
             return f"CHK {self.guard_mode}"
         return "INVALID_INPUT"
@@ -1388,6 +1519,19 @@ class DashboardPanel:
         self.demo_export_path = None
         self.last_mission = {}
         self.mission_effect_timer = 0.0
+        self.mission_overlay_visible = False
+        self.mission_overlay_close_rect = None
+        self.mission_overlays.clear()
+        self.mission_overlay_order.clear()
+        self.mission_overlay_positions.clear()
+        self.mission_overlay_rects.clear()
+        self.mission_overlay_close_rects.clear()
+        self.mission_overlay_drag_rects.clear()
+        self.dragging_mission_overlay = None
+        self.mission_drag_offset = (0, 0)
+        self.message_preset = "PQC"
+        self.classic_enabled = False
+        self.pqc_enabled = True
         self._active_campaign_run_id = "manual"
         self._set_checksum_enabled(False)
         self._refresh_experiment_metrics()
@@ -1794,6 +1938,7 @@ class DashboardPanel:
                 self.serial_status = payload["status"]
                 if self.serial_connected:
                     status = "ONLINE"
+                    self.pqc_algorithm = "ML-KEM-512 (ATIVO)"
                 elif self.serial_status.startswith("OPENING"):
                     status = "OPENING"
                 else:
@@ -1834,12 +1979,59 @@ class DashboardPanel:
             self._update_pqc_label(payload)
         elif command.startswith("MISSION"):
             self.hardware_payload = payload
-            self.last_mission = dict(payload)
-            self.mission_effect_timer = 5.0
+            self._open_mission_overlay(payload)
             scenario = payload.get("scenario", "MISSION")
             result = payload.get("result", "")
             self.session_status = f"{scenario} {result}".strip()
+            if scenario in {"PQC", "PQC_CRC32"}:
+                self.pqc_algorithm = "ML-KEM-512 (ATIVO)"
         self._record_hardware_sample(command, payload)
+
+    @staticmethod
+    def _normalize_mission_scenario(scenario):
+        return str(scenario or "MISSION").upper().replace("+", "_")
+
+    def _open_mission_overlay(self, payload):
+        mission = dict(payload)
+        scenario = self._normalize_mission_scenario(mission.get("scenario", "MISSION"))
+        mission["scenario"] = scenario
+        self.mission_overlays[scenario] = mission
+        if scenario not in self.mission_overlay_order:
+            self.mission_overlay_order.append(scenario)
+        if scenario not in self.mission_overlay_positions:
+            self.mission_overlay_positions[scenario] = self._default_mission_overlay_position(scenario)
+        self._bring_mission_overlay_to_front(scenario)
+        self.last_mission = dict(mission)
+        self.mission_effect_timer = 1.2
+        self.mission_overlay_visible = True
+
+    def _bring_mission_overlay_to_front(self, scenario):
+        if scenario not in self.mission_overlay_order:
+            return
+        self.mission_overlay_order = [item for item in self.mission_overlay_order if item != scenario]
+        self.mission_overlay_order.append(scenario)
+        self._sync_mission_overlay_state()
+
+    def _close_mission_overlay(self, scenario):
+        self.mission_overlays.pop(scenario, None)
+        self.mission_overlay_positions.pop(scenario, None)
+        self.mission_overlay_rects.pop(scenario, None)
+        self.mission_overlay_close_rects.pop(scenario, None)
+        self.mission_overlay_drag_rects.pop(scenario, None)
+        self.mission_overlay_order = [item for item in self.mission_overlay_order if item != scenario]
+        if self.dragging_mission_overlay == scenario:
+            self.dragging_mission_overlay = None
+        self._sync_mission_overlay_state()
+
+    def _sync_mission_overlay_state(self):
+        self.mission_overlay_visible = bool(self.mission_overlay_order)
+        if not self.mission_overlay_order:
+            self.last_mission = {}
+            self.mission_overlay_close_rect = None
+            return
+        top_scenario = self.mission_overlay_order[-1]
+        self.last_mission = dict(self.mission_overlays.get(top_scenario, {}))
+        self.mission_overlay_close_rect = self.mission_overlay_close_rects.get(top_scenario)
 
     def _update_pqc_label(self, payload):
         target = payload.get("pqc_target", "ML-KEM-512")
@@ -2102,169 +2294,180 @@ class DashboardPanel:
         if getattr(self, "results_overlay_visible", False):
             self._draw_results_overlay(surface, t)
 
-    def _draw_results_overlay(self, surface, t):
-        w = int(WIDTH * 0.85)
-        h = int(HEIGHT * 0.85)
+    def _results_overlay_geometry(self):
+        margin = max(26, int(min(WIDTH, HEIGHT) * 0.04))
+        w = min(int(WIDTH * 0.88), WIDTH - margin * 2)
+        h = min(int(HEIGHT * 0.88), HEIGHT - margin * 2)
         x = (WIDTH - w) // 2
         y = (HEIGHT - h) // 2
+        close_w = 118 if WIDTH < 1500 else 150
+        close_rect = pygame.Rect(x + w - close_w - 28, y + 28, close_w, 36)
+        return pygame.Rect(x, y, w, h), close_rect
 
-        # Fundo do painel translúcido
+    def _draw_wrapped_text(self, surface, font, text, color, x, y, max_width, line_spacing=20, max_lines=None):
+        lines = self._wrap_text_for_width(font, text, max_width)
+        if max_lines is not None:
+            lines = lines[:max_lines]
+        for line in lines:
+            surface.blit(self._render_clipped(font, line, color, max_width), (x, y))
+            y += line_spacing
+        return y
+
+    def _scenario_color(self, scenario):
+        if scenario == "PQC_CRC32":
+            return C_ACCENT_GREEN
+        if scenario == "PQC":
+            return C_ACCENT_ORANGE
+        return C_TEXT_PRIMARY
+
+    def _draw_results_overlay(self, surface, t):
+        panel_rect, close_rect = self._results_overlay_geometry()
+        x, y, w, h = panel_rect
+
         panel_surf = pygame.Surface((w, h), pygame.SRCALPHA)
-        panel_surf.fill((12, 14, 30, 235))
+        panel_surf.fill((12, 14, 30, 236))
         surface.blit(panel_surf, (x, y))
 
-        pygame.draw.rect(surface, C_PANEL_BORDER, (x, y, w, h), width=2, border_radius=8)
+        pygame.draw.rect(surface, C_PANEL_BORDER, panel_rect, width=2, border_radius=8)
 
-        # Header do painel
-        header_h = 95
+        header_h = 92
         pygame.draw.rect(surface, C_PANEL_HEADER, (x + 2, y + 2, w - 4, header_h), border_radius=8)
         pygame.draw.line(surface, C_ACCENT_CYAN, (x, y + header_h), (x + w, y + header_h), 2)
 
-        title = FONT_TITLE.render("RESULTADOS CONSOLIDADOS (BATERIA DE HARDWARE REAL)", True, C_ACCENT_CYAN)
-        surface.blit(title, (x + 40, y + 22))
-        sub = FONT_BODY.render("Métricas detalhadas obtidas na campanha prolongada de aceitação (logs/20260618T234008Z)", True, C_TEXT_DIM)
-        surface.blit(sub, (x + 40, y + 55))
+        title_max = max(260, close_rect.x - (x + 36) - 18)
+        title = "RESULTADOS CONSOLIDADOS DA BATERIA REAL"
+        surface.blit(self._render_clipped(FONT_TITLE, title, C_ACCENT_CYAN, title_max), (x + 36, y + 19))
+        subtitle = f"{CONSOLIDATED_ACCEPTANCE_LABEL}: {CONSOLIDATED_SUMMARY['records']} registros, {CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões"
+        surface.blit(self._render_clipped(FONT_BODY, subtitle, C_TEXT_DIM, title_max), (x + 36, y + 54))
 
-        # Botão FECHAR [X]
-        close_rect = pygame.Rect(x + w - 190, y + 30, 160, 40)
-        hovered = close_rect.collidepoint(pygame.mouse.get_pos())
+        try:
+            mouse_pos = pygame.mouse.get_pos()
+        except pygame.error:
+            mouse_pos = (-1, -1)
+        hovered = close_rect.collidepoint(mouse_pos)
         fill_c = (80, 20, 30) if hovered else (50, 15, 22)
         pygame.draw.rect(surface, fill_c, close_rect, border_radius=6)
         pygame.draw.rect(surface, C_ACCENT_RED, close_rect, width=2, border_radius=6)
-        c_txt = FONT_CMD.render("FECHAR [X]", True, C_TEXT_PRIMARY)
-        surface.blit(c_txt, (close_rect.x + (160 - c_txt.get_width()) // 2, close_rect.y + (40 - c_txt.get_height()) // 2))
+        c_txt = FONT_LABEL.render("FECHAR", True, C_TEXT_PRIMARY)
+        surface.blit(c_txt, (close_rect.x + (close_rect.width - c_txt.get_width()) // 2, close_rect.y + (close_rect.height - c_txt.get_height()) // 2))
 
-        # --- Coluna 1 (Esquerda) - Métricas das Missões ---
-        tx = x + int(w * 0.04)
-        ty = y + int(h * 0.16)
-        tw = int(w * 0.44)
-        th = int(h * 0.7)
+        body_x = x + max(24, int(w * 0.035))
+        body_y = y + header_h + 24
+        body_w = w - (body_x - x) * 2
+        gap = 18
+        two_cols = body_w >= 920
+        col_w = (body_w - gap) // 2 if two_cols else body_w
+        col_h = h - (body_y - y) - 32
 
-        pygame.draw.rect(surface, C_PANEL_BG, (tx, ty, tw, th), border_radius=6)
-        pygame.draw.rect(surface, C_PANEL_BORDER, (tx, ty, tw, th), width=1, border_radius=6)
+        if two_cols:
+            left = pygame.Rect(body_x, body_y, col_w, col_h)
+            right = pygame.Rect(body_x + col_w + gap, body_y, col_w, col_h)
+        else:
+            stacked_h = (col_h - gap) // 2
+            left = pygame.Rect(body_x, body_y, col_w, stacked_h)
+            right = pygame.Rect(body_x, body_y + stacked_h + gap, col_w, stacked_h)
+        for rect in (left, right):
+            pygame.draw.rect(surface, C_PANEL_BG, rect, border_radius=6)
+            pygame.draw.rect(surface, C_PANEL_BORDER, rect, width=1, border_radius=6)
 
-        c1_title = FONT_HEADER.render("CUSTO DAS MISSÕES (BASELINE 240 MHz)", True, C_ACCENT_CYAN)
-        surface.blit(c1_title, (tx + 20, ty + 20))
+        # Coluna esquerda: custo das missões.
+        pad = 18
+        lx = left.x + pad
+        ly = left.y + 18
+        lw = left.width - pad * 2
+        surface.blit(self._render_clipped(FONT_HEADER, "CUSTO DAS MISSÕES (240 MHz)", C_ACCENT_CYAN, lw), (lx, ly))
+        ly += 38
 
-        # Tabela
-        tab_y = ty + 60
-        tab_h = int(th * 0.52)
-        pygame.draw.rect(surface, C_PANEL_HEADER, (tx + 20, tab_y, tw - 40, tab_h), border_radius=4)
-        pygame.draw.rect(surface, C_PANEL_BORDER, (tx + 20, tab_y, tw - 40, tab_h), width=1, border_radius=4)
+        table_h = min(170, max(142, int(left.height * 0.36)))
+        pygame.draw.rect(surface, C_PANEL_HEADER, (lx, ly, lw, table_h), border_radius=4)
+        pygame.draw.rect(surface, C_PANEL_BORDER, (lx, ly, lw, table_h), width=1, border_radius=4)
+        headers = ("CENÁRIO", "TEMPO", "BYTES", "STATUS")
+        col_ws = (int(lw * 0.39), int(lw * 0.21), int(lw * 0.16), lw - int(lw * 0.39) - int(lw * 0.21) - int(lw * 0.16) - 8)
+        cx = lx + 10
+        for index, head in enumerate(headers):
+            surface.blit(self._render_clipped(FONT_LABEL, head, C_ACCENT_CYAN, max(40, col_ws[index] - 6)), (cx, ly + 10))
+            cx += col_ws[index]
+        pygame.draw.line(surface, C_PANEL_BORDER, (lx, ly + 33), (lx + lw, ly + 33), 1)
 
-        headers = ["CENÁRIO", "TEMPO", "TRÁFEGO", "STATUS"]
-        col_ws = [int((tw - 60) * 0.45), int((tw - 60) * 0.2), int((tw - 60) * 0.2), int((tw - 60) * 0.15)]
+        row_y = ly + 34
+        row_h = max(30, (table_h - 35) // 3)
+        for idx, scenario in enumerate(("CLASSIC", "PQC", "PQC_CRC32")):
+            result = CONSOLIDATED_MISSION_BASELINE[scenario]
+            if idx % 2:
+                pygame.draw.rect(surface, (15, 20, 38), (lx + 1, row_y, lw - 2, row_h))
+            cells = (
+                result["label"],
+                _format_elapsed(result["elapsed_us"]),
+                f"{result['bytes_total']} B",
+                result["result"],
+            )
+            cx = lx + 10
+            for cell_index, cell in enumerate(cells):
+                color = self._scenario_color(scenario) if cell_index == 0 else C_TEXT_PRIMARY
+                surface.blit(self._render_clipped(FONT_SMALL, cell, color, max(42, col_ws[cell_index] - 8)), (cx, row_y + 8))
+                cx += col_ws[cell_index]
+            if idx < 2:
+                pygame.draw.line(surface, C_PANEL_BORDER, (lx, row_y + row_h), (lx + lw, row_y + row_h), 1)
+            row_y += row_h
 
-        # Cabeçalho da tabela
-        pygame.draw.rect(surface, C_SPACE_BG, (tx + 21, tab_y + 1, tw - 42, 35), border_radius=4)
-        cx = tx + 35
-        for idx, head in enumerate(headers):
-            h_surf = FONT_SMALL.render(head, True, C_ACCENT_CYAN)
-            surface.blit(h_surf, (cx, tab_y + 11))
-            cx += col_ws[idx]
-
-        pygame.draw.line(surface, C_PANEL_BORDER, (tx + 20, tab_y + 36), (tx + tw - 20, tab_y + 36), 1)
-
-        rows = [
-            ("CLASSIC (HMAC)", "721 us", "73 B", "DELIVERED", C_TEXT_PRIMARY),
-            ("PQC (ML-KEM)", "13.536 us", "841 B", "DELIVERED", C_ACCENT_ORANGE),
-            ("PQC_CRC32", "13.367 us", "845 B", "DELIVERED", C_ACCENT_GREEN),
-        ]
-        row_h = (tab_h - 37) // 3
-        ry = tab_y + 37
-        for r_idx, r in enumerate(rows):
-            if r_idx % 2 == 1:
-                pygame.draw.rect(surface, (15, 20, 38), (tx + 21, ry, tw - 42, row_h))
-            cx = tx + 35
-            for idx, cell in enumerate(r[:-1]):
-                c_surf = FONT_SMALL.render(cell, True, r[-1] if idx == 0 else C_TEXT_PRIMARY)
-                surface.blit(c_surf, (cx, ry + (row_h - c_surf.get_height()) // 2))
-                cx += col_ws[idx]
-            if r_idx < 2:
-                pygame.draw.line(surface, C_PANEL_BORDER, (tx + 20, ry + row_h), (tx + tw - 20, ry + row_h), 1)
-            ry += row_h
-
-        # Razões e Notas
-        note_y = tab_y + tab_h + 25
-        notes = [
-            "* PQC é 18,8x mais lento e 11,5x mais pesado em bytes.",
-            "* O guardião CRC32 adiciona apenas ~10 us de overhead.",
-            "* O consumo de RAM (Heap) permanece constante em 201.412 B.",
-            "* Fator de clock: a 80 MHz, o tempo do PQC sobe para 38,6 ms.",
-        ]
+        ly += table_h + 18
+        notes = (
+            "PQC foi 18,8x mais lento e 11,5x maior em bytes que CLASSIC.",
+            "PQC+CRC32 manteve a entrega funcional e adicionou +4 bytes ao pacote.",
+            "A RAM livre ficou estável: 201.412 B de heap nas amostras consolidadas.",
+            "A 80 MHz, PQC subiu para 38,6 ms, evidenciando dependência de CPU.",
+        )
         for note in notes:
-            n_surf = FONT_BODY.render(note, True, C_TEXT_PRIMARY)
-            surface.blit(n_surf, (tx + 20, note_y))
-            note_y += 28
+            ly = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, lx, ly, lw, line_spacing=18, max_lines=2)
+            ly += 3
 
-        # --- Coluna 2 (Direita) - Benchmarks & Campanha de Falhas ---
-        bx = x + int(w * 0.52)
-        by = y + int(h * 0.16)
-        bw = int(w * 0.44)
-        bh = int(h * 0.7)
+        # Coluna direita: segurança, campanha e próximos passos.
+        rx = right.x + pad
+        ry = right.y + 18
+        rw = right.width - pad * 2
+        surface.blit(self._render_clipped(FONT_HEADER, "SEGURANÇA E BENCHMARK", C_ACCENT_CYAN, rw), (rx, ry))
+        ry += 38
 
-        pygame.draw.rect(surface, C_PANEL_BG, (bx, by, bw, bh), border_radius=6)
-        pygame.draw.rect(surface, C_PANEL_BORDER, (bx, by, bw, bh), width=1, border_radius=6)
+        bench_h = min(132, max(112, int(right.height * 0.25)))
+        pygame.draw.rect(surface, C_PANEL_HEADER, (rx, ry, rw, bench_h), border_radius=4)
+        pygame.draw.rect(surface, C_PANEL_BORDER, (rx, ry, rw, bench_h), width=1, border_radius=4)
+        surface.blit(self._render_clipped(FONT_LABEL, "ML-KEM-512, média em us, 100 rounds", C_ACCENT_ORANGE, rw - 20), (rx + 10, ry + 10))
+        b_col_ws = (int(rw * 0.38), int(rw * 0.2), int(rw * 0.2), rw - int(rw * 0.38) - int(rw * 0.2) - int(rw * 0.2) - 8)
+        by = ry + 36
+        for row_index, row in enumerate(CONSOLIDATED_PQC_BENCH):
+            cx = rx + 10
+            for col_index, cell in enumerate(row):
+                surface.blit(self._render_clipped(FONT_SMALL, cell, C_TEXT_PRIMARY, max(40, b_col_ws[col_index] - 8)), (cx, by))
+                cx += b_col_ws[col_index]
+            if row_index == 0:
+                pygame.draw.line(surface, C_PANEL_BORDER, (rx, by + 24), (rx + rw, by + 24), 1)
+            by += 38
+        ry += bench_h + 16
 
-        c2_title = FONT_HEADER.render("BENCHMARKS & SEGURANÇA", True, C_ACCENT_CYAN)
-        surface.blit(c2_title, (bx + 20, by + 20))
+        security_notes = (
+            f"Aceite: {CONSOLIDATED_SUMMARY['records']} registros, {CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões.",
+            "PQC_KAT aprovado: ss_crc32=0xD9DA8D6C.",
+            "Demo A/B: 5/5 silenciosas sem CRC32; 5/5 detectadas com CRC32.",
+            "Aceite serial: 8/8 bit-flips de payload detectados por CRC32.",
+            "PQC_FAULT com confirmação: PROTOCOL_REJECT.",
+        )
+        for note in security_notes:
+            ry = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, rx, ry, rw, line_spacing=18, max_lines=2)
+            ry += 3
 
-        # Sub-painel 2.1: Benchmarks
-        bench_y = by + 60
-        bench_h = int(bh * 0.4)
-        pygame.draw.rect(surface, C_PANEL_HEADER, (bx + 20, bench_y, bw - 40, bench_h), border_radius=4)
-        pygame.draw.rect(surface, C_PANEL_BORDER, (bx + 20, bench_y, bw - 40, bench_h), width=1, border_radius=4)
-
-        b_title = FONT_SMALL.render("BENCHMARK ML-KEM-512 (US, 100 ROUNDS)", True, C_ACCENT_ORANGE)
-        surface.blit(b_title, (bx + 35, bench_y + 12))
-
-        b_headers = ["PERFIL", "KEYGEN", "ENCAP", "DECAP"]
-        b_col_ws = [int((bw - 60) * 0.35), int((bw - 60) * 0.21), int((bw - 60) * 0.22), int((bw - 60) * 0.22)]
-
-        pygame.draw.rect(surface, C_SPACE_BG, (bx + 21, bench_y + 35, bw - 42, 30), border_radius=4)
-        cx = bx + 35
-        for idx, head in enumerate(b_headers):
-            h_surf = FONT_SMALL.render(head, True, C_ACCENT_CYAN)
-            surface.blit(h_surf, (cx, bench_y + 42))
-            cx += b_col_ws[idx]
-
-        b_rows = [
-            ("BASELINE (240 MHz)", "3.298", "3.861", "4.985"),
-            ("LIMITED (80 MHz)", "10.056", "11.780", "15.204")
-        ]
-        b_ry = bench_y + 65
-        b_row_h = (bench_h - 66) // 2
-        for r_idx, r in enumerate(b_rows):
-            cx = bx + 35
-            for idx, cell in enumerate(r):
-                c_surf = FONT_SMALL.render(cell, True, C_TEXT_PRIMARY)
-                surface.blit(c_surf, (cx, b_ry + (b_row_h - c_surf.get_height()) // 2))
-                cx += b_col_ws[idx]
-            if r_idx == 0:
-                pygame.draw.line(surface, C_PANEL_BORDER, (bx + 20, b_ry + b_row_h), (bx + bw - 20, b_ry + b_row_h), 1)
-            b_ry += b_row_h
-
-        # Sub-painel 2.2: Resultados de Segurança
-        sec_y = bench_y + bench_h + 20
-        sec_h = bh - bench_h - 100
-        pygame.draw.rect(surface, C_PANEL_HEADER, (bx + 20, sec_y, bw - 40, sec_h), border_radius=4)
-        pygame.draw.rect(surface, C_PANEL_BORDER, (bx + 20, sec_y, bw - 40, sec_h), width=1, border_radius=4)
-
-        s_title = FONT_SMALL.render("CAMPANHA DE SEGURANÇA E INJEÇÃO", True, C_ACCENT_GREEN)
-        surface.blit(s_title, (bx + 35, sec_y + 12))
-
-        sec_notes = [
-            "  * Aceitação final: 83 registros, 0 falhas.",
-            "  * PQC_KAT Autoteste: PASS (ss_crc32=0xD9DA8D6C).",
-            "  * Demo A/B: 5/5 falhas silenciosas sem checksum;",
-            "               5/5 erros detectados com checksum (8/8).",
-            "  * PQC_FAULT no Ciphertext: PROTOCOL_REJECT obtido.",
-        ]
-        sec_ny = sec_y + 38
-        for note in sec_notes:
-            sn_surf = FONT_SMALL.render(note, True, C_TEXT_PRIMARY)
-            surface.blit(sn_surf, (bx + 30, sec_ny))
-            sec_ny += 22
+        ry += 6
+        pygame.draw.line(surface, C_PANEL_BORDER, (rx, ry), (rx + rw, ry), 1)
+        ry += 14
+        surface.blit(self._render_clipped(FONT_LABEL, "CONCLUSÕES PARA O SEMINÁRIO", C_ACCENT_GREEN, rw), (rx, ry))
+        ry += 24
+        conclusions = (
+            "ML-KEM-512 real funcionou na Wisdom, mas custou muito mais tempo que o baseline simétrico.",
+            "CRC32 é barato e didático para mostrar detecção de corrupção, mas não substitui HMAC.",
+            "Próximo passo científico: medir energia elétrica real com instrumento externo.",
+        )
+        for note in conclusions:
+            ry = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, rx, ry, rw, line_spacing=18, max_lines=2)
+            ry += 3
 
     def _draw_fault_effect(self, surface, t, satellite):
         if self.effect_timer <= 0:
@@ -2573,6 +2776,16 @@ class DashboardPanel:
             return C_ACCENT_GREEN
         return C_TEXT_DIM
 
+    @staticmethod
+    def _history_command_label(command):
+        labels = {
+            "SET_PRESET_CLASSIC": "PRESET CLASSIC",
+            "SET_PRESET_PQC": "PRESET PQC",
+            "SET_PRESET_PQC_CRC32": "PRESET PQC+CRC",
+            "SEND_MESSAGE": "ENVIAR MSG",
+        }
+        return labels.get(command, command)
+
     def _draw_right_panel(self, surface, t):
         """Painel direito: Console de comandos."""
         pw = 380
@@ -2619,10 +2832,8 @@ class DashboardPanel:
                 ts = FONT_LABEL.render(entry["time"], True, C_TEXT_DIM)
                 surface.blit(ts, (x, y + 2))
 
-                # Comando (truncar para caber)
-                cmd_text = entry["cmd"][:18]
-                cs = FONT_SMALL.render(cmd_text, True, C_TEXT_PRIMARY)
-                surface.blit(cs, (x + 75, y))
+                cmd_text = self._history_command_label(entry["cmd"])
+                surface.blit(self._render_clipped(FONT_SMALL, cmd_text, C_TEXT_PRIMARY, 140), (x + 75, y))
 
                 # Status com cor
                 status = entry["status"]
@@ -2640,8 +2851,7 @@ class DashboardPanel:
                 else:
                     s_color = C_ACCENT_CYAN
 
-                ss = FONT_SMALL.render(status[:22], True, s_color)
-                surface.blit(ss, (x + 225, y))
+                surface.blit(self._render_clipped(FONT_SMALL, status, s_color, max(70, cw - 225)), (x + 225, y))
                 y += log_line_h
 
         # --- Separador antes do input ---
@@ -2717,16 +2927,15 @@ class DashboardPanel:
             if command == "SEND_MESSAGE":
                 border = C_ACCENT_CYAN
                 fill = (0, 45, 60) if not hovered else (0, 70, 90)
-            elif command == "TOGGLE_CLASSIC":
-                if self.classic_enabled:
+            elif command in MISSION_PRESET_COMMANDS:
+                active = self._current_message_scenario() == MISSION_PRESET_COMMANDS[command]
+                if command == "SET_PRESET_CLASSIC" and active:
                     border = C_ACCENT_BLUE
                     fill = (0, 35, 80) if not hovered else (0, 55, 120)
-            elif command == "TOGGLE_PQC":
-                if self.pqc_enabled:
+                elif command == "SET_PRESET_PQC" and active:
                     border = C_ACCENT_PURPLE
                     fill = (50, 20, 80) if not hovered else (75, 30, 120)
-            elif command == "TOGGLE_CHECKSUM":
-                if self.checksum_enabled:
+                elif command == "SET_PRESET_PQC_CRC32" and active:
                     border = C_ACCENT_GREEN
                     fill = (0, 50, 25) if not hovered else (0, 80, 40)
 
@@ -2783,7 +2992,7 @@ class DashboardPanel:
         width = right_edge - left_edge
         if width < 320:
             return 0
-        columns = 5 if width >= 1100 else 3 if width >= 620 else 2
+        columns = max(1, min(len(self._metric_tiles()), 2))
         return math.ceil(len(self._metric_tiles()) / columns)
 
     def _draw_demo_overlay(self, surface, t):
@@ -2838,42 +3047,178 @@ class DashboardPanel:
             name = Path(self.demo_export_path).name
             surface.blit(self._render_clipped(FONT_LABEL, f"JSON: {name}", C_ACCENT_GREEN, rect.width - 28), (rect.x + 250, rect.y + 88))
 
+    def _mission_overlay_size(self):
+        width = 380 if WIDTH >= 1600 else 340
+        width = min(width, max(280, WIDTH - 40))
+        height = min(318, max(280, HEIGHT - 120))
+        return width, height
+
+    def _mission_overlay_geometry(self, scenario=None):
+        if scenario is None:
+            scenario = self.mission_overlay_order[-1] if self.mission_overlay_order else "MISSION"
+        width, height = self._mission_overlay_size()
+        if scenario not in self.mission_overlay_positions:
+            self.mission_overlay_positions[scenario] = self._default_mission_overlay_position(scenario)
+        x, y = self.mission_overlay_positions[scenario]
+        x, y = self._clamp_mission_overlay_position(x, y, width, height)
+        self.mission_overlay_positions[scenario] = (x, y)
+        rect = pygame.Rect(x, y, width, height)
+        close_rect = pygame.Rect(rect.right - 36, rect.y + 9, 24, 24)
+        return rect, close_rect
+
+    def _default_mission_overlay_position(self, scenario):
+        width, height = self._mission_overlay_size()
+        gap = 12
+        y = 116 + max(0, self._top_metrics_rows() - 1) * 54
+        if self.demo_state != "IDLE":
+            y += 104
+        try:
+            index = MISSION_OVERLAY_SCENARIOS.index(scenario)
+        except ValueError:
+            index = max(0, len(self.mission_overlay_order) - 1)
+        total_width = len(MISSION_OVERLAY_SCENARIOS) * width + (len(MISSION_OVERLAY_SCENARIOS) - 1) * gap
+        if total_width <= WIDTH - 36:
+            x = (WIDTH - total_width) // 2 + index * (width + gap)
+        else:
+            x = 22 + index * 34
+            y += index * 34
+        return self._clamp_mission_overlay_position(x, y, width, height)
+
+    @staticmethod
+    def _clamp_mission_overlay_position(x, y, width, height):
+        min_y = 50
+        max_x = max(10, WIDTH - width - 10)
+        max_y = max(min_y, HEIGHT - height - 44)
+        return max(10, min(int(x), max_x)), max(min_y, min(int(y), max_y))
+
+    def _mission_metric_value(self, mission, key, formatter=None):
+        value = mission.get(key)
+        if formatter:
+            return formatter(value)
+        if value is None or value == "":
+            return "--"
+        return str(value)
+
+    def _draw_metric_pair(self, surface, label, value, x, y, width, color=C_TEXT_PRIMARY):
+        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, width), (x, y))
+        surface.blit(self._render_clipped(FONT_SMALL, value, color, width), (x, y + 15))
+
+    def _draw_overlay_metric_box(self, surface, label, value, x, y, width, height, color):
+        pygame.draw.rect(surface, (15, 20, 38), (x, y, width, height), border_radius=4)
+        pygame.draw.rect(surface, C_PANEL_BORDER, (x, y, width, height), width=1, border_radius=4)
+        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, width - 10), (x + 6, y + 5))
+        surface.blit(self._render_clipped(FONT_SMALL, value, color, width - 10), (x + 6, y + 21))
+
     def _draw_mission_overlay(self, surface, t):
-        if self.mission_effect_timer <= 0 or not self.last_mission:
+        if not self.mission_overlay_visible or not self.mission_overlays:
+            self.mission_overlay_close_rect = None
+            self.mission_overlay_rects.clear()
+            self.mission_overlay_close_rects.clear()
+            self.mission_overlay_drag_rects.clear()
             return
 
-        center_x = WIDTH // 2
-        y = 154 + max(0, self._top_metrics_rows() - 1) * 50
-        if self.demo_state != "IDLE":
-            y += 132
-        width = min(560, max(360, WIDTH - 760))
-        rect = pygame.Rect(center_x - width // 2, y, width, 126)
-        scenario = str(self.last_mission.get("scenario", "MISSION"))
-        result = str(self.last_mission.get("result", ""))
-        crypto = str(self.last_mission.get("crypto", "--"))
-        checksum = str(self.last_mission.get("checksum", "NONE"))
-        elapsed = _format_elapsed(self.last_mission.get("elapsed_us"))
-        bytes_total = self.last_mission.get("bytes_total", "--")
-        tag_match = self.last_mission.get("tag_match", "--")
-        color = C_ACCENT_GREEN if result == "DELIVERED" else C_ACCENT_RED
+        self.mission_overlay_rects.clear()
+        self.mission_overlay_close_rects.clear()
+        self.mission_overlay_drag_rects.clear()
+        self.mission_overlay_order = [scenario for scenario in self.mission_overlay_order if scenario in self.mission_overlays]
+        for scenario in self.mission_overlay_order:
+            self._draw_single_mission_overlay(surface, t, scenario, self.mission_overlays[scenario])
+        self._sync_mission_overlay_state()
+
+    def _draw_single_mission_overlay(self, surface, t, scenario, mission):
+        rect, close_rect = self._mission_overlay_geometry(scenario)
+        drag_rect = pygame.Rect(rect.x, rect.y, rect.width, 44)
+        self.mission_overlay_rects[scenario] = rect
+        self.mission_overlay_close_rects[scenario] = close_rect
+        self.mission_overlay_drag_rects[scenario] = drag_rect
+
+        result = str(mission.get("result", ""))
+        crypto = str(mission.get("crypto", "--"))
+        checksum = str(mission.get("checksum", "NONE"))
+        elapsed = _format_elapsed(mission.get("elapsed_us"))
+        bytes_total = self._mission_metric_value(mission, "bytes_total")
+        scenario_color = {
+            "CLASSIC": C_ACCENT_ORANGE,
+            "PQC": C_ACCENT_CYAN,
+            "PQC_CRC32": C_ACCENT_GREEN,
+        }.get(scenario, C_ACCENT_CYAN)
+        color = scenario_color if result in {"", "DELIVERED"} else C_ACCENT_RED
 
         panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-        alpha = int(180 + 35 * math.sin(t * 7))
+        alpha = int(150 + 45 * math.sin(t * 7)) if self.mission_effect_timer > 0 else 150
         pygame.draw.rect(panel, (*C_PANEL_BG, 225), (0, 0, rect.width, rect.height), border_radius=8)
         pygame.draw.rect(panel, (*color, max(120, alpha)), (0, 0, rect.width, rect.height), 1, border_radius=8)
+        pygame.draw.rect(panel, (*color, 30), (0, 0, rect.width, 44), border_radius=8)
+        pygame.draw.line(panel, (*C_PANEL_BORDER, 180), (0, 44), (rect.width, 44), 1)
         surface.blit(panel, rect.topleft)
 
-        title = f"MENSAGEM {result or 'EM CURSO'}"
-        surface.blit(self._render_clipped(FONT_BODY, title, color, rect.width - 28), (rect.x + 14, rect.y + 12))
-        lines = [
-            f"Cenário: {scenario}",
-            f"Crypto: {crypto}   Checksum: {checksum}",
-            f"Tempo: {elapsed}   Tráfego: {bytes_total}B",
-            f"Tag/recebimento: {'OK' if str(tag_match) == '1' else tag_match}",
-        ]
-        for idx, line in enumerate(lines):
-            line_color = C_TEXT_PRIMARY if idx < 3 else C_TEXT_DIM
-            surface.blit(self._render_clipped(FONT_LABEL, line, line_color, rect.width - 28), (rect.x + 14, rect.y + 42 + idx * 17))
+        result_label = "OK" if result == "DELIVERED" else (result or "EM CURSO")
+        title = f"{scenario}  |  {result_label}"
+        surface.blit(self._render_clipped(FONT_SMALL, title, color, rect.width - 62), (rect.x + 14, rect.y + 12))
+        pygame.draw.rect(surface, (58, 18, 28), close_rect, border_radius=5)
+        pygame.draw.rect(surface, C_ACCENT_RED, close_rect, width=1, border_radius=5)
+        x_text = FONT_SMALL.render("X", True, C_TEXT_PRIMARY)
+        surface.blit(x_text, (close_rect.centerx - x_text.get_width() // 2, close_rect.centery - x_text.get_height() // 2))
+
+        subtitle = f"{crypto}  |  CRC: {checksum}"
+        surface.blit(self._render_clipped(FONT_LABEL, subtitle, C_TEXT_DIM, rect.width - 28), (rect.x + 14, rect.y + 48))
+
+        metric_x = rect.x + 14
+        metric_y = rect.y + 70
+        metric_gap = 8
+        metric_w = (rect.width - 28 - metric_gap) // 2
+        metric_h = 36
+        metrics = (
+            ("TEMPO", elapsed, C_ACCENT_CYAN),
+            ("BYTES", f"{bytes_total} B" if bytes_total != "--" else "--", C_ACCENT_ORANGE),
+            ("CPU", f"{self._mission_metric_value(mission, 'cpu_mhz')} MHz", C_TEXT_PRIMARY),
+            ("HEAP", _format_bytes(mission.get("heap")), C_ACCENT_GREEN),
+        )
+        for index, (label, value, metric_color) in enumerate(metrics):
+            x = metric_x + (index % 2) * (metric_w + metric_gap)
+            y = metric_y + (index // 2) * (metric_h + 7)
+            self._draw_overlay_metric_box(surface, label, value, x, y, metric_w, metric_h, metric_color)
+
+        sep_y = metric_y + metric_h * 2 + 18
+        pygame.draw.line(surface, C_PANEL_BORDER, (rect.x + 14, sep_y), (rect.right - 14, sep_y), 1)
+
+        phase_y = sep_y + 10
+        phases = (
+            ("keygen", "keygen_us"),
+            ("encap", "encap_us"),
+            ("decap", "decap_us"),
+            ("tag", "tag_us"),
+            ("verify", "verify_us"),
+            ("crc", "crc_us"),
+        )
+        phase_w = (rect.width - 28 - 2 * 8) // 3
+        phase_h = 40
+        for index, (label, key) in enumerate(phases):
+            x = rect.x + 14 + (index % 3) * (phase_w + 8)
+            y = phase_y + (index // 3) * (phase_h + 8)
+            value = _format_elapsed(mission.get(key))
+            phase_color = C_TEXT_DIM if value in {"--", "0 us"} else (C_ACCENT_GREEN if key == "crc_us" else C_TEXT_PRIMARY)
+            pygame.draw.rect(surface, (15, 20, 38), (x, y, phase_w, phase_h), border_radius=4)
+            pygame.draw.rect(surface, C_PANEL_BORDER, (x, y, phase_w, phase_h), width=1, border_radius=4)
+            surface.blit(self._render_clipped(FONT_LABEL, label.upper(), C_TEXT_DIM, phase_w - 10), (x + 5, y + 5))
+            surface.blit(self._render_clipped(FONT_SMALL, value, phase_color, phase_w - 10), (x + 5, y + 21))
+
+        bytes_y = phase_y + phase_h * 2 + 20
+        byte_line = (
+            f"payload {self._mission_metric_value(mission, 'bytes_payload')}B   "
+            f"crypto {self._mission_metric_value(mission, 'bytes_crypto')}B   "
+            f"crc {self._mission_metric_value(mission, 'bytes_checksum')}B"
+        )
+        surface.blit(self._render_clipped(FONT_LABEL, byte_line, C_TEXT_PRIMARY, rect.width - 28), (rect.x + 14, bytes_y))
+
+        validation_y = bytes_y + 20
+        validation = (
+            f"key={self._mission_metric_value(mission, 'key_match')}   "
+            f"tag={self._mission_metric_value(mission, 'tag_match')}   "
+            f"crc={self._mission_metric_value(mission, 'crc_match')}"
+        )
+        surface.blit(self._render_clipped(FONT_LABEL, validation, C_TEXT_DIM, rect.width - 28), (rect.x + 14, validation_y))
+
 
     def _draw_top_bar(self, surface, t):
         """Barra superior com titulo e status."""
@@ -2893,7 +3238,7 @@ class DashboardPanel:
         surface.blit(subtitle, (title_x + title.get_width() + 15, 14))
 
         # Botao de Resultados no centro da barra superior
-        btn_w, btn_h = 240, 26
+        btn_w, btn_h = (240, 26) if WIDTH >= 1500 else (156, 26)
         btn_x = (WIDTH - btn_w) // 2
         btn_y = (bar_h - btn_h) // 2
         self.top_results_btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
@@ -2909,7 +3254,8 @@ class DashboardPanel:
         pygame.draw.rect(surface, fill_c, self.top_results_btn_rect, border_radius=4)
         pygame.draw.rect(surface, border_c, self.top_results_btn_rect, width=1, border_radius=4)
 
-        btn_txt = FONT_LABEL.render("RESULTADOS CONSOLIDADOS", True, C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else C_TEXT_PRIMARY)
+        btn_label = "RESULTADOS CONSOLIDADOS" if WIDTH >= 1500 else "RESULTADOS"
+        btn_txt = FONT_LABEL.render(btn_label, True, C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else C_TEXT_PRIMARY)
         surface.blit(btn_txt, (btn_x + (btn_w - btn_txt.get_width()) // 2, btn_y + (btn_h - btn_txt.get_height()) // 2))
 
         # Lado direito: clock + link
@@ -2942,9 +3288,9 @@ class DashboardPanel:
             return
 
         tiles = self._metric_tiles()
-        columns = 5 if width >= 1100 else 3 if width >= 620 else 2
+        columns = max(1, min(len(tiles), 2))
         gap = 8
-        tile_h = 42
+        tile_h = 52
         tile_w = (width - gap * (columns - 1)) // columns
         start_y = 56
 
@@ -2962,11 +3308,20 @@ class DashboardPanel:
 
             label_surf = FONT_LABEL.render(label, True, C_TEXT_DIM)
             surface.blit(label_surf, (x + 8, y + 5))
-            value_surf = self._render_clipped(FONT_SMALL, value, color, tile_w - 16)
-            surface.blit(value_surf, (x + 8, y + 20))
+            value_surf = self._render_clipped(FONT_BODY, value, color, tile_w - 16)
+            surface.blit(value_surf, (x + 8, y + 19))
             if detail:
                 detail_surf = self._render_clipped(FONT_LABEL, detail, C_TEXT_DIM, tile_w - 16)
-                surface.blit(detail_surf, (x + 74, y + 5))
+                surface.blit(detail_surf, (x + max(80, tile_w // 2), y + 6))
+
+            progress = self._metric_tile_progress(label)
+            bar_x = x + 8
+            bar_y = y + tile_h - 10
+            bar_w = tile_w - 16
+            pygame.draw.rect(surface, (25, 28, 46), (bar_x, bar_y, bar_w, 4), border_radius=2)
+            fill_w = int(bar_w * max(0.0, min(1.0, progress)))
+            if fill_w > 0:
+                pygame.draw.rect(surface, color, (bar_x, bar_y, fill_w, 4), border_radius=2)
 
     def _metric_tiles(self):
         state = dict(self.hardware_state)
@@ -3003,6 +3358,22 @@ class DashboardPanel:
             ("CPU", cpu_value, str(profile), cpu_color),
             ("RAM", ram_value, ram_detail, C_ACCENT_GREEN if heap else C_ACCENT_ORANGE),
         )
+
+    def _metric_tile_progress(self, label):
+        state = dict(self.hardware_state)
+        state.update(self.hardware_payload)
+        if label == "CPU":
+            computed_cpu_load = self._current_cpu_load_pct()
+            payload_cpu_load = _optional_float(state.get("cpu_load_pct")) or 0.0
+            cpu_load = computed_cpu_load if self.cpu_active_window else payload_cpu_load
+            return cpu_load / 100.0
+        if label == "RAM":
+            heap = _optional_int(state.get("heap"))
+            if heap is None:
+                return 0.0
+            total_ram = 327680
+            return max(0, min(total_ram, total_ram - heap)) / total_ram
+        return 0.0
 
     def _mission_tile_values(self, mission, *, fallback_value, fallback_detail, ready_color):
         if not mission:
@@ -3228,7 +3599,7 @@ class Onboarding:
         self.dust = dust
         self.shooting_stars = shooting_stars
         self.current_slide = 0
-        self.total_slides = 3
+        self.total_slides = 5
         self.completed = False
 
         # Dimensões do painel responsivas
@@ -3238,8 +3609,8 @@ class Onboarding:
         self.y = (HEIGHT - self.h) // 2
 
         # Botões responsivos
-        self.btn_w = int(self.w * 0.12)
-        self.btn_h = int(self.h * 0.06)
+        self.btn_w = max(132, min(178, int(self.w * 0.14)))
+        self.btn_h = max(36, int(self.h * 0.06))
         self.btn_back_rect = pygame.Rect(self.x + int(self.w * 0.04), self.y + self.h - int(self.h * 0.11), self.btn_w, self.btn_h)
         self.btn_next_rect = pygame.Rect(self.x + self.w - int(self.w * 0.04) - self.btn_w, self.y + self.h - int(self.h * 0.11), self.btn_w, self.btn_h)
         self.btn_skip_rect = pygame.Rect(self.x + self.w - int(self.w * 0.04) - self.btn_w, self.y + int(self.h * 0.04), self.btn_w, int(self.btn_h * 0.8))
@@ -3298,6 +3669,24 @@ class Onboarding:
             lines.append(" ".join(current_line))
         return lines
 
+    def wrap_render(self, font, text, color, max_width):
+        if font.size(text)[0] <= max_width:
+            return font.render(text, True, color)
+        clipped = text
+        suffix = "..."
+        while clipped and font.size(clipped + suffix)[0] > max_width:
+            clipped = clipped[:-1]
+        return font.render(clipped + suffix, True, color)
+
+    def draw_wrapped_onboarding(self, surface, text, x, y, max_width, color, line_spacing=21, max_lines=None):
+        lines = self.wrap_text(FONT_SMALL, text, max_width)
+        if max_lines is not None:
+            lines = lines[:max_lines]
+        for line in lines:
+            surface.blit(self.wrap_render(FONT_SMALL, line, color, max_width), (x, y))
+            y += line_spacing
+        return y
+
     def draw_paragraphs(self, surface, paragraphs, x, y, max_width, line_spacing=26, paragraph_spacing=12):
         curr_y = y
         for para in paragraphs:
@@ -3340,7 +3729,10 @@ class Onboarding:
             pygame.draw.circle(surface, color, (cx, dot_y), dot_r)
 
         # Mouse hover
-        mouse_pos = pygame.mouse.get_pos()
+        try:
+            mouse_pos = pygame.mouse.get_pos()
+        except pygame.error:
+            mouse_pos = (-1, -1)
         hover_back = self.btn_back_rect.collidepoint(mouse_pos)
         hover_next = self.btn_next_rect.collidepoint(mouse_pos)
         hover_skip = self.btn_skip_rect.collidepoint(mouse_pos)
@@ -3364,19 +3756,23 @@ class Onboarding:
             self.draw_slide_1(surface)
         elif self.current_slide == 2:
             self.draw_slide_2(surface)
+        elif self.current_slide == 3:
+            self.draw_slide_3(surface)
+        elif self.current_slide == 4:
+            self.draw_slide_4(surface)
 
     def draw_slide_0(self, surface):
-        title = FONT_TITLE.render("1. CUBESATS & RADIAÇÃO ESPACIAL", True, C_ACCENT_CYAN)
+        title = FONT_TITLE.render("1. O PROBLEMA: SEGURANÇA EM HARDWARE LIMITADO", True, C_ACCENT_CYAN)
         surface.blit(title, (self.x + int(self.w * 0.04), self.y + 25))
 
-        sub = FONT_BODY.render("O Desafio de Dispositivos Embarcados no Espaço", True, C_TEXT_DIM)
+        sub = FONT_BODY.render("Um computador pequeno precisa ser seguro, resistente e eficiente", True, C_TEXT_DIM)
         surface.blit(sub, (self.x + int(self.w * 0.04), self.y + 60))
 
         paragraphs = [
-            "Os satélites de pequeno porte (CubeSats) revolucionaram o acesso ao espaço utilizando componentes eletrônicos comerciais (COTS) como o ESP32 para reduzir custos.",
-            "No entanto, o espaço é um ambiente hostil. A radiação cósmica causa bit-flips na memória RAM (Single Event Upsets), alterando dados e comandos silenciosamente.",
-            "Sem proteção, esses erros silenciosos podem comprometer a integridade da missão ou abrir brechas de segurança para atacantes.",
-            "Nosso projeto estuda como mitigar essas falhas utilizando Criptografia Pós-Quântica (PQC) e checksums (CRC32) em hardware limitado."
+            "A apresentação simula um OBC educacional inspirado em CubeSat: pouco processamento, pouca memória, comunicação por rádio e necessidade de operar de forma confiável.",
+            "O desafio cresce porque o mundo está migrando para criptografia pós-quântica. Algoritmos modernos protegem melhor a troca de segredo, mas exigem mais tempo e tráfego.",
+            "Além disso, ambientes espaciais podem sofrer falhas transientes. Um bit-flip pequeno pode alterar mensagem, estado interno ou material criptográfico.",
+            "Nossa pergunta: quanto custa entregar a mesma mensagem com CLASSIC, PQC e PQC+CRC32, e o que ganhamos em consistência quando detectamos a corrupção?"
         ]
 
         box_w = int(self.w * 0.32)
@@ -3391,7 +3787,7 @@ class Onboarding:
         # Original RAM Box
         pygame.draw.rect(surface, C_PANEL_BG, (bx, by, box_w, box_h), border_radius=6)
         pygame.draw.rect(surface, C_PANEL_BORDER, (bx, by, box_w, box_h), width=1, border_radius=6)
-        txt_orig = FONT_HEADER.render("RAM ORIGINAL (Caractere 'H')", True, C_ACCENT_GREEN)
+        txt_orig = FONT_HEADER.render("BYTE ORIGINAL", True, C_ACCENT_GREEN)
         surface.blit(txt_orig, (bx + 20, by + 16))
 
         bits_orig = ["0", "1", "0", "0", "1", "0", "0", "0"]
@@ -3405,13 +3801,13 @@ class Onboarding:
             bit_txt = FONT_BODY.render(bit, True, C_TEXT_PRIMARY)
             surface.blit(bit_txt, (x_pos + (bit_sz - 4 - bit_txt.get_width()) // 2, y_pos + (bit_sz - 4 - bit_txt.get_height()) // 2))
 
-        val_orig = FONT_SMALL.render("Payload Hex: 0x48 | ASCII: 'H'", True, C_TEXT_DIM)
+        val_orig = FONT_SMALL.render("0x48 | dado íntegro", True, C_TEXT_DIM)
         surface.blit(val_orig, (bx + 20, by + box_h - 32))
 
         # Corrupted RAM Box
         pygame.draw.rect(surface, C_PANEL_BG, (bx, by2, box_w, box_h), border_radius=6)
         pygame.draw.rect(surface, C_PANEL_BORDER, (bx, by2, box_w, box_h), width=1, border_radius=6)
-        txt_corr = FONT_HEADER.render("RAM CORROMPIDA (Caractere 'I')", True, C_ACCENT_RED)
+        txt_corr = FONT_HEADER.render("1 BIT INVERTIDO", True, C_ACCENT_RED)
         surface.blit(txt_corr, (bx + 20, by2 + 16))
 
         bits_corr = ["0", "1", "0", "0", "1", "0", "0", "1"]
@@ -3425,33 +3821,22 @@ class Onboarding:
             bit_txt = FONT_BODY.render(bit, True, C_TEXT_PRIMARY)
             surface.blit(bit_txt, (x_pos + (bit_sz - 4 - bit_txt.get_width()) // 2, y_pos + (bit_sz - 4 - bit_txt.get_height()) // 2))
 
-        val_corr = FONT_SMALL.render("Payload Hex: 0x49 | ASCII: 'I' -> FALHA SILENCIOSA!", True, C_TEXT_DIM)
+        val_corr = FONT_SMALL.render("0x49 | pode virar falha silenciosa", True, C_TEXT_DIM)
         surface.blit(val_corr, (bx + 20, by2 + box_h - 32))
 
-        # Raio de Radiacao
-        ray_points = [
-            (bx - 30, by + int(box_h * 0.6)),
-            (bx - 10, by + box_h + 10),
-            (bx - 20, by + box_h + 20),
-            (bx + 10, by2 + int(box_h * 0.35)),
-            (bx - 5, by2 + int(box_h * 0.15)),
-            (bx - 20, by2 + int(box_h * 0.2)),
-            (bx - 30, by + int(box_h * 0.6))
-        ]
-        pygame.draw.polygon(surface, C_ACCENT_ORANGE, ray_points)
-        pygame.draw.polygon(surface, (255, 200, 100), ray_points, 1)
+
 
     def draw_slide_1(self, surface):
-        title = FONT_TITLE.render("2. A AMEAÇA QUÂNTICA E O ALGORITMO DE SHOR", True, C_ACCENT_CYAN)
+        title = FONT_TITLE.render("2. AMEAÇA QUÂNTICA E MIGRAÇÃO PARA PQC", True, C_ACCENT_CYAN)
         surface.blit(title, (self.x + int(self.w * 0.04), self.y + 25))
 
-        sub = FONT_BODY.render("Por que a criptografia clássica está condenada", True, C_TEXT_DIM)
+        sub = FONT_BODY.render("O que muda quando computadores quânticos entram no modelo", True, C_TEXT_DIM)
         surface.blit(sub, (self.x + int(self.w * 0.04), self.y + 60))
 
         paragraphs = [
-            "A criptografia clássica atual (RSA, ECDH) baseia-se em problemas matemáticos difíceis para computadores comuns, como a fatoração de primos gigantes.",
-            "O Algoritmo de Shor quebra essa barreira, permitindo que computadores quânticos decifrem chaves clássicas em poucos minutos.",
-            "A ameaça é real hoje pela estratégia 'Harvest Now, Decrypt Later' (adversários capturam dados cifrados hoje para decifrar no futuro). A migração para PQC é urgente."
+            "RSA e ECDH dependem de problemas matemáticos difíceis para computadores comuns. Um computador quântico grande o suficiente poderia usar o algoritmo de Shor contra esses esquemas de chave pública.",
+            "Isso não significa que todo mecanismo clássico morre: HMAC e criptografia simétrica continuam relevantes. O problema central do seminário é a troca/estabelecimento de segredo em hardware limitado.",
+            "O risco prático é 'harvest now, decrypt later': capturar tráfego hoje para tentar quebrar no futuro. PQC existe para antecipar essa migração."
         ]
 
         box_w = int(self.w * 0.34)
@@ -3466,23 +3851,23 @@ class Onboarding:
         pygame.draw.rect(surface, C_PANEL_BG, (bx, by, box_w, box_h), border_radius=6)
         pygame.draw.rect(surface, C_PANEL_BORDER, (bx, by, box_w, box_h), width=1, border_radius=6)
 
-        t_header = FONT_HEADER.render("TEMPO DE QUEBRA (RSA-2048)", True, C_ACCENT_ORANGE)
+        t_header = FONT_HEADER.render("MUDANÇA DE AMEAÇA", True, C_ACCENT_ORANGE)
         surface.blit(t_header, (bx + int(box_w * 0.08), by + int(box_h * 0.08)))
 
         # Classico
         c_w = box_w - int(box_w * 0.16)
         c_h = int(box_h * 0.3)
         pygame.draw.rect(surface, (25, 20, 10), (bx + int(box_w * 0.08), by + int(box_h * 0.22), c_w, c_h), border_radius=4)
-        c_title = FONT_SMALL.render("Computador Clássico (Supercomputador):", True, C_TEXT_PRIMARY)
+        c_title = FONT_SMALL.render("Computador clássico:", True, C_TEXT_PRIMARY)
         surface.blit(c_title, (bx + int(box_w * 0.11), by + int(box_h * 0.26)))
-        c_val = FONT_HEADER.render("~14 Bilhões de Anos", True, C_ACCENT_RED)
+        c_val = FONT_HEADER.render("RSA/ECDH ainda práticos", True, C_ACCENT_GREEN)
         surface.blit(c_val, (bx + int(box_w * 0.11), by + int(box_h * 0.35)))
 
         # Quantico
         pygame.draw.rect(surface, (10, 25, 20), (bx + int(box_w * 0.08), by + int(box_h * 0.58), c_w, c_h), border_radius=4)
-        q_title = FONT_SMALL.render("Computador Quântico (Shor):", True, C_TEXT_PRIMARY)
+        q_title = FONT_SMALL.render("Quântico grande + Shor:", True, C_TEXT_PRIMARY)
         surface.blit(q_title, (bx + int(box_w * 0.11), by + int(box_h * 0.62)))
-        q_val = FONT_HEADER.render("~8 Horas (Estimado)", True, C_ACCENT_GREEN)
+        q_val = FONT_HEADER.render("Chaves públicas em risco", True, C_ACCENT_ORANGE)
         surface.blit(q_val, (bx + int(box_w * 0.11), by + int(box_h * 0.71)))
 
     def draw_slide_2(self, surface):
@@ -3494,8 +3879,8 @@ class Onboarding:
 
         paragraphs = [
             "Para resistir à ameaça quântica, o NIST padronizou em 2024 o ML-KEM (FIPS 203), baseado no problema Learning With Errors (LWE) sobre reticulados de centenas de dimensões.",
-            "Um KEM (Mecanismo de Encapsulamento de Chave) estabelece um segredo compartilhado (Shared Secret) simétrico seguro entre duas pontas.",
-            "O ESP32 roda o ML-KEM-512 real, oferecendo segurança pós-quântica com chaves públicas de 800 bytes e ciphertexts de 768 bytes."
+            "Um KEM não cifra a mensagem diretamente. Ele estabelece um segredo compartilhado; depois esse segredo alimenta mecanismos simétricos como HMAC.",
+            "O ESP32 roda ML-KEM-512 real. A chave pública tem 800 bytes, o ciphertext tem 768 bytes e o segredo compartilhado tem 32 bytes."
         ]
 
         text_max_w = self.w - int(self.w * 0.08)
@@ -3542,6 +3927,146 @@ class Onboarding:
 
         ss_t = FONT_HEADER.render("Segredo Compartilhado ss (32 B) derivado", True, C_ACCENT_GREEN)
         surface.blit(ss_t, (bx + (box_w - ss_t.get_width()) // 2, by + box_h - 26))
+
+    def draw_slide_3(self, surface):
+        title = FONT_TITLE.render("4. O EXPERIMENTO: A MESMA MENSAGEM EM 3 CENÁRIOS", True, C_ACCENT_CYAN)
+        surface.blit(title, (self.x + int(self.w * 0.04), self.y + 25))
+
+        sub = FONT_BODY.render("A comparação é didática: muda a proteção, medimos o impacto", True, C_TEXT_DIM)
+        surface.blit(sub, (self.x + int(self.w * 0.04), self.y + 60))
+
+        pad_x = int(self.w * 0.04)
+        content_x = self.x + pad_x
+        content_y = self.y + 128
+        gap = int(self.w * 0.025)
+        card_w = (self.w - pad_x * 2 - gap * 2) // 3
+        card_h = int(self.h * 0.37)
+
+        cards = [
+            {
+                "title": "CLASSIC",
+                "color": C_ACCENT_BLUE,
+                "body": [
+                    "HMAC-SHA256 com chave simétrica.",
+                    "Serve como baseline: o caminho barato.",
+                    "Resultado real: 721 us, 73 bytes.",
+                ],
+            },
+            {
+                "title": "PQC",
+                "color": C_ACCENT_ORANGE,
+                "body": [
+                    "ML-KEM-512 estabelece segredo.",
+                    "Depois HMAC autentica a mensagem.",
+                    "Resultado real: 13.536 us, 841 bytes.",
+                ],
+            },
+            {
+                "title": "PQC + CRC32",
+                "color": C_ACCENT_GREEN,
+                "body": [
+                    "Mesmo fluxo PQC com checksum no payload.",
+                    "Mostra detecção de corrupção por bit-flip.",
+                    "Resultado real: 13.367 us, 845 bytes.",
+                ],
+            },
+        ]
+
+        for index, card in enumerate(cards):
+            cx = content_x + index * (card_w + gap)
+            rect = pygame.Rect(cx, content_y, card_w, card_h)
+            pygame.draw.rect(surface, C_PANEL_BG, rect, border_radius=6)
+            pygame.draw.rect(surface, card["color"], rect, width=2, border_radius=6)
+            surface.blit(self.wrap_render(FONT_HEADER, card["title"], card["color"], card_w - 32), (cx + 16, content_y + 18))
+            cy = content_y + 58
+            for item in card["body"]:
+                cy = self.draw_wrapped_onboarding(surface, item, cx + 16, cy, card_w - 32, C_TEXT_PRIMARY, max_lines=2)
+                cy += 10
+
+        metrics_y = content_y + card_h + 28
+        metrics_rect = pygame.Rect(content_x, metrics_y, self.w - pad_x * 2, int(self.h * 0.22))
+        pygame.draw.rect(surface, (14, 24, 38), metrics_rect, border_radius=6)
+        pygame.draw.rect(surface, C_PANEL_BORDER, metrics_rect, width=1, border_radius=6)
+
+        mx = metrics_rect.x + 18
+        my = metrics_rect.y + 16
+        mw = metrics_rect.width - 36
+        surface.blit(self.wrap_render(FONT_HEADER, "O QUE ESTAMOS MEDINDO", C_ACCENT_CYAN, mw), (mx, my))
+        my += 38
+        metric_lines = [
+            "Tempo total: custo de CPU para entregar a mensagem.",
+            "Bytes: custo de comunicação do protocolo.",
+            "Heap/RAM: margem de memória disponível na placa.",
+            "Segurança: DELIVERED, SILENT, DETECTED_GUARD ou PROTOCOL_REJECT.",
+        ]
+        for line in metric_lines:
+            my = self.draw_wrapped_onboarding(surface, f"- {line}", mx, my, mw, C_TEXT_PRIMARY, line_spacing=20, max_lines=1)
+
+    def draw_slide_4(self, surface):
+        title = FONT_TITLE.render("5. COMO LER A DEMONSTRAÇÃO AO VIVO", True, C_ACCENT_CYAN)
+        surface.blit(title, (self.x + int(self.w * 0.04), self.y + 25))
+
+        sub = FONT_BODY.render("O dashboard substitui os slides: ele mostra narrativa, execução e resultados", True, C_TEXT_DIM)
+        surface.blit(sub, (self.x + int(self.w * 0.04), self.y + 60))
+
+        pad_x = int(self.w * 0.04)
+        content_x = self.x + pad_x
+        content_y = self.y + 128
+        col_gap = int(self.w * 0.035)
+        col_w = (self.w - pad_x * 2 - col_gap) // 2
+        box_h = int(self.h * 0.48)
+
+        left_rect = pygame.Rect(content_x, content_y, col_w, box_h)
+        right_rect = pygame.Rect(content_x + col_w + col_gap, content_y, col_w, box_h)
+        for rect in (left_rect, right_rect):
+            pygame.draw.rect(surface, C_PANEL_BG, rect, border_radius=6)
+            pygame.draw.rect(surface, C_PANEL_BORDER, rect, width=1, border_radius=6)
+
+        lx = left_rect.x + 20
+        ly = left_rect.y + 18
+        lw = left_rect.width - 40
+        surface.blit(self.wrap_render(FONT_HEADER, "ROTEIRO MANUAL", C_ACCENT_GREEN, lw), (lx, ly))
+        ly += 38
+        steps = [
+            ("CLÁSSICA", "envia a mensagem com HMAC-SHA256."),
+            ("PQC", "troca para ML-KEM-512 + HMAC."),
+            ("PQC+CRC", "usa ML-KEM-512 e CRC32 no payload."),
+            ("ENVIAR MSG", "executa a missão e mostra tempo/bytes."),
+            ("FALHA", "injeta bit-flip para comparar SILENT vs DETECTED."),
+            ("RESULTADOS", "abre a consolidação real da bateria longa."),
+        ]
+        for label, desc in steps:
+            tag = FONT_SMALL.render(label, True, C_ACCENT_CYAN)
+            surface.blit(tag, (lx, ly))
+            self.draw_wrapped_onboarding(surface, desc, lx + 108, ly, lw - 108, C_TEXT_PRIMARY, max_lines=2)
+            ly += 34
+
+        rx = right_rect.x + 20
+        ry = right_rect.y + 18
+        rw = right_rect.width - 40
+        surface.blit(self.wrap_render(FONT_HEADER, "O QUE COMPARAR", C_ACCENT_ORANGE, rw), (rx, ry))
+        ry += 38
+        comparisons = [
+            "CPU e RAM ficam na faixa superior durante toda a animação.",
+            "Tempo e bytes aparecem no console e no overlay de mensagem entregue.",
+            "CLASSIC é o baseline barato: 721 us e 73 bytes.",
+            "PQC sobe para 13.536 us e 841 bytes porque executa ML-KEM-512.",
+            "PQC+CRC32 adiciona +4 bytes e detecta corrupção de payload.",
+            "O botão RESULTADOS mostra 83 registros, 0 falhas e conclusões.",
+        ]
+        for item in comparisons:
+            ry = self.draw_wrapped_onboarding(surface, f"- {item}", rx, ry, rw, C_TEXT_PRIMARY, max_lines=2)
+            ry += 4
+
+        footer_y = content_y + box_h + 26
+        footer_rect = pygame.Rect(content_x, footer_y, self.w - pad_x * 2, int(self.h * 0.14))
+        pygame.draw.rect(surface, (14, 24, 38), footer_rect, border_radius=6)
+        pygame.draw.rect(surface, C_PANEL_BORDER, footer_rect, width=1, border_radius=6)
+        footer = (
+            "Mensagem final: em hardware limitado, PQC funciona, mas custa mais tempo e tráfego. "
+            "Checksum ajuda a tornar falhas visíveis, mas não substitui autenticação criptográfica."
+        )
+        self.draw_wrapped_onboarding(surface, footer, footer_rect.x + 18, footer_rect.y + 18, footer_rect.width - 36, C_TEXT_PRIMARY, max_lines=3)
 
     def run(self, surface, clock):
         t = 0.0

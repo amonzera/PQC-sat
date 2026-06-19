@@ -6,8 +6,8 @@ BlackBoard Wisdom usada no projeto PQC-SAT.
 ## Fontes consultadas
 
 - Produto oficial: <https://www.robocore.net/placa-robocore/blackboard-wisdom>
-- Manual online: <https://www.robocore.net/tutoriais/blackboard-wisdom-introducao>
-- Driver USB-Serial: <https://www.robocore.net/tutoriais/instalacao-driver-da-blackboard#blackboard-uno-v2>
+- Manual online: <https://www.robocore.net/tutoriais/blackboard-wisdom-introdução>
+- Driver USB-Serial: <https://www.robocore.net/tutoriais/instalação-driver-da-blackboard#blackboard-uno-v2>
 - RoboCore IDE: <https://ide.robocore.net/ui/>
 
 ## Hardware identificado
@@ -34,10 +34,10 @@ FAULT NONE ... 0 0x01: result=SILENT
 FAULT CRC32 ... 0 0x01: result=DETECTED_GUARD
 ```
 
-A pagina oficial da RoboCore descreve a Wisdom como uma placa com processador
+A página oficial da RoboCore descreve a Wisdom como uma placa com processador
 Xtensa dual-core 32-bit LX6 (ESP32) com 520 KB SRAM, alimentacao/programacao
-via micro USB e interface USB-Serial SiliconLabs CP2102. Tambem lista sensores
-integrados, OLED, LEDs, botao, potenciometro e conectores de expansao.
+via micro USB e interface USB-Serial SiliconLabs CP2102. Também lista sensores
+integrados, OLED, LEDs, botão, potenciômetro e conectores de expansão.
 
 ## Funcionalidades e pinagem oficial aproveitadas
 
@@ -52,22 +52,22 @@ firmware do projeto:
 | Display OLED | I2C |
 | Sensor de gestos, luminosidade e proximidade | APDS-9960 em I2C |
 | Sensor de temperatura e umidade | HTU21D em I2C |
-| Acelerometro de 3 eixos | MMA8452QT em I2C, INT1 D34, INT2 D35 |
+| Acelerômetro de 3 eixos | MMA8452QT em I2C, INT1 D34, INT2 D35 |
 | Bargraph | D17, D16, D4, D13 |
 | LED RGB | R D19, G D23, B D18 |
-| Botao | D27 |
+| Botão | D27 |
 | Receptor IR | D26 |
 | Sensor de som | VP / A36 |
-| Potenciometro deslizante | VN / A39 |
+| Potenciômetro deslizante | VN / A39 |
 | Servo | D25 |
-| Rele | D33 |
+| Relé | D33 |
 | Conector BRIICK | I2C |
 
-O firmware atual nao usa Wi-Fi/Bluetooth porque o experimento de comunicacao e
-UART e o perfil OBC didatico pede radio desligado. Isso preserva a funcao para
-etapas futuras sem misturar variaveis de comunicacao agora.
+O firmware atual não usa Wi-Fi/Bluetooth porque o experimento de comunicação e
+UART e o perfil OBC didático pede radio desligado. Isso preserva a função para
+etapas futuras sem misturar variaveis de comunicação agora.
 
-## Testes nao destrutivos executados
+## Testes não destrutivos executados
 
 ### Enumeracao USB
 
@@ -89,7 +89,7 @@ python3 -m esptool --port /dev/ttyUSB0 flash-id
 ```
 
 Ambos funcionaram. Isso prova que o computador consegue falar com o bootloader
-ROM do ESP32 e que a placa nao esta inacessivel.
+ROM do ESP32 e que a placa não está inacessível.
 
 ### Serial do firmware original
 
@@ -103,8 +103,8 @@ Foram testados bauds comuns:
 921600
 ```
 
-Tambem foram enviados probes simples como newline, `Ctrl+C`, `help` e `PING`.
-Resultado: nenhum byte retornado. Portanto, o firmware atual da placa nao
+Também foram enviados probes simples como newline, `Ctrl+C`, `help` e `PING`.
+Resultado: nenhum byte retornado. Portanto, o firmware atual da placa não
 expoe um protocolo serial textual utilizavel pelo bridge `V1`.
 
 ### Bridge do projeto
@@ -120,7 +120,7 @@ Resultado:
 error: timeout waiting for request_id=1
 ```
 
-Conclusao: para usar o bridge do projeto, a placa precisa executar firmware
+Conclusão: para usar o bridge do projeto, a placa precisa executar firmware
 que implemente o protocolo `V1|request_id|COMMAND|...`.
 
 ## Backup do firmware original
@@ -153,30 +153,30 @@ python3 -m esptool --port /dev/ttyUSB0 write-flash \
   0x0 backups/wisdom_flash_original.bin
 ```
 
-Nao execute restauracao sem necessidade; ela tambem grava a flash inteira.
+Não execute restauracao sem necessidade; ela também grava a flash inteira.
 
-## Caminhos possiveis
+## Caminhos possíveis
 
 ### 1. RoboCore IDE / MicroPython
 
-A pagina oficial indica que a placa acompanha chave de acesso para tutoriais
+A página oficial indica que a placa acompanha chave de acesso para tutoriais
 exclusivos e que a Wisdom foi pensada para programacao em blocos e MicroPython.
-As paginas especificas de "Software e Drivers" e "Introducao ao MicroPython"
+As páginas específicas de "Software e Drivers" e "Introdução ao MicroPython"
 exigiram login durante a consulta.
 
-Esse caminho pode ser util para explorar os sensores integrados, mas nao foi
+Esse caminho pode ser útil para explorar os sensores integrados, mas não foi
 possivel conectar nosso bridge ao firmware atual por REPL ou comando serial.
 
 ### 2. Arduino IDE
 
-A propria pagina de comentarios da RoboCore indica que o foco inicial da Wisdom
-e RoboCore IDE, blocos e MicroPython, nao um tutorial tecnico completo de
-Arduino IDE. Ainda assim, o hardware identificado e um ESP32 classico com
-CP2102, entao Arduino/ESP32 e tecnicamente viavel.
+A própria página de comentários da RoboCore indica que o foco inicial da Wisdom
+e RoboCore IDE, blocos e MicroPython, não um tutorial técnico completo de
+Arduino IDE. Ainda assim, o hardware identificado é um ESP32 clássico com
+CP2102, então Arduino/ESP32 é tecnicamente viável.
 
 ### 3. PlatformIO
 
-Configuracao local adicionada:
+Configuração local adicionada:
 
 ```text
 platformio.ini
@@ -186,7 +186,7 @@ framework: arduino
 upload_port: /dev/ttyUSB0
 ```
 
-Compilacao testada sem gravar:
+Compilação testada sem gravar:
 
 ```bash
 python3 -m platformio run -e robocore_wisdom_esp32
@@ -200,7 +200,7 @@ RAM:   14.7% (48164 bytes de 327680)
 Flash: 68.1% (893061 bytes de 1310720)
 ```
 
-Para gravar o firmware do bridge, com autorizacao explicita:
+Para gravar o firmware do bridge, com autorizacao explícita:
 
 ```bash
 python3 -m platformio run -e robocore_wisdom_esp32 -t upload
@@ -215,7 +215,7 @@ python3 dashboard.py
 python3 dashboard.py --port /dev/ttyUSB0
 ```
 
-Sequencia curta de verificacao para a demonstracao:
+Sequência curta de verificação para a demonstração:
 
 ```text
 PING
@@ -236,18 +236,18 @@ LED WHITE
 LED OFF
 ```
 
-Os comandos completos de bancada, inventario, debug e expansao ficam em
+Os comandos completos de bancada, inventário, debug e expansão ficam em
 `hardware_command_reference.md`.
 
 O console interativo do terminal e o console visual do dashboard aceitam
-`HELP` para listar os comandos de demonstracao. No dashboard, os blocos
+`HELP` para listar os comandos de demonstração. No dashboard, os blocos
 principais acionam `MISSION CLASSIC`, `MISSION PQC` e `MISSION PQC_CRC32`.
 Comandos de apoio como `PING`, `TELEMETRY`, `RGB 0 255 0`, `BARGRAPH 75` e
 `SENSOR_READ ACCEL` ficam no terminal textual/HELP e são encaminhados para a
 ESP32 quando digitados. O dashboard
-tenta detectar a placa automaticamente; se o firmware `PQC-SAT-WISDOM` nao
-responder ao handshake `HELLO`, a arte do satelite fica travada e nao e
-desenhada na orbita.
+tenta detectar a placa automaticamente; se o firmware `PQC-SAT-WISDOM` não
+responder ao handshake `HELLO`, a arte do satélite fica travada e não é
+desenhada na órbita.
 
 ## Decisao recomendada
 
@@ -255,9 +255,9 @@ Para o projeto PQC-SAT, o caminho mais direto e cientificamente controlado e:
 
 1. preservar o backup atual;
 2. gravar o firmware serial do projeto;
-3. validar bridge, inventario, I2C, entradas, sensores e atuadores;
+3. validar bridge, inventário, I2C, entradas, sensores e atuadores;
 4. usar `MISSION CLASSIC|PQC|PQC_CRC32` como fluxo principal de apresentação;
-5. manter `FAULT NONE|CRC32` como base de radiacao simulada de payload;
+5. manter `FAULT NONE|CRC32` como base de radiação simulada de payload;
 6. manter ML-KEM-512 validado e medido antes de qualquer afirmação de PQC no
    dashboard.
 

@@ -189,16 +189,18 @@ cada), demo A/B headless OK, duracao 1.817,23 s.
 | CRC32 custo adicional sobre PQC (BASELINE) | ~10 us | +4 bytes |
 | CRC32 custo adicional sobre PQC (OBC-1U-LIMITED) | ~30 us | +4 bytes |
 
-Leitura didatica:
+Leitura didática:
 
-- A 240 MHz, PQC custa quase 19 vezes mais tempo que o baseline classico.
-- A 80 MHz, a mesma operacao PQC custa 30 vezes mais, porque o ML-KEM sofre
+- A 240 MHz, PQC custa quase 19 vezes mais tempo que o baseline clássico.
+- A 80 MHz, a mesma operação PQC custa 30 vezes mais, porque o ML-KEM sofre
   mais com CPU reduzida do que o HMAC puro.
 - O CRC32 adiciona custo negligivel (~10 us a 240 MHz, ~30 us a 80 MHz),
-  mostrando que verificacao de integridade no payload e barata.
-- O trafego PQC e 11,5x maior que o classico porque inclui chave publica
-  (800 bytes) e ciphertext (768 bytes).
-- A heap permaneceu constante em todos os cenarios: a criptografia PQC nao
+  mostrando que verificação de integridade no payload é barata.
+- O trafego PQC da missao e 11,5x maior que o clássico porque o pacote de
+  entrega contabiliza payload + ciphertext ML-KEM (768 bytes) + tag HMAC
+  (32 bytes). A chave publica ML-KEM tem 800 bytes, mas não está sendo somada
+  nesse `bytes_total` da mensagem consolidada.
+- A heap permaneceu constante em todos os cenários: a criptografia PQC não
   causou fragmentacao perceptivel nos testes.
 
 ### PQC_BENCH (100 rounds)
@@ -210,7 +212,7 @@ Leitura didatica:
 
 Fator de desaceleracao 80/240 MHz: keygen ~3,0x, encap ~3,1x, decap ~3,0x.
 
-### Testes de seguranca
+### Testes de segurança
 
 | Teste | Resultado |
 |---|---|
@@ -221,10 +223,43 @@ Fator de desaceleracao 80/240 MHz: keygen ~3,0x, encap ~3,1x, decap ~3,0x.
 
 ### Demo A/B
 
-| Cenario | Resultado |
+| Cenário | Resultado |
 |---|---|
 | A, sem CRC32 | 5/5 falhas silenciosas |
 | B, com CRC32 | 5/5 falhas detectadas |
+
+### Conclusões para o seminário
+
+1. O objetivo principal foi atingido: a Wisdom/ESP32 executou ML-KEM-512 real,
+   entregou mensagens nos três cenários e exportou métricas de tempo, bytes e
+   heap.
+2. O custo temporal de PQC e o resultado mais forte: `PQC` foi 18,8x mais
+   lento que `CLASSIC` a 240 MHz e 30,1x mais lento no perfil limitado de
+   80 MHz.
+3. O custo de trafego também é didático: `PQC` saiu de 73 bytes para 841
+   bytes por entrega consolidada.
+4. CRC32 adicionou custo pequeno no payload (+4 bytes e ~10 us a 240 MHz), mas
+   tornou visível a diferença entre falha silenciosa e erro detectado.
+5. A RAM livre permaneceu estável, então a evidencia principal desta versão e
+   tempo/trafego, não exaustao de heap.
+
+### Próximos passos reais
+
+Para o seminário atual:
+
+- usar o botão `RESULTADOS` do dashboard como resumo final da bateria;
+- não rodar bateria longa durante a apresentação;
+- demonstrar manualmente `CLÁSSICA`, `PQC`, `PQC+CRC`, `ENVIAR MSG` e
+  `FALHA`;
+- citar `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json` como fonte
+  dos dados consolidados.
+
+Para evolucao cientifica futura:
+
+- medir energia real com instrumento externo, porque `MHz * us` não é watts;
+- comparar com uma pilha clássica assimetrica mais completa, como ECDH + HMAC;
+- repetir a coleta em outros perfis de clock e com payloads maiores;
+- testar bursts de bit-flips e corrupções fora da regiao coberta pelo CRC32.
 
 ## 5. Coleta curta para ensaio
 
@@ -262,10 +297,15 @@ Resultado esperado:
 - `elapsed_us` de `PQC_CRC32` deve ser maior ou próximo de `PQC`, com
   `crc_us` visível.
 
-## 6. Coleta longa antes da apresentação
+## 6. Bateria longa já realizada e como repetir
 
-Baterias longas não devem ser iniciadas pelo agente. O operador roda no
-terminal e depois chama o agente para analisar o JSON.
+A bateria longa usada na apresentação já foi realizada e consolidada em
+`logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`. Não rode outra
+bateria durante o seminário.
+
+Baterias longas não devem ser iniciadas pelo agente. Se a montagem física
+mudar e for necessário repetir a coleta, o operador roda no terminal e depois
+chama o agente para analisar o JSON.
 
 Comando:
 

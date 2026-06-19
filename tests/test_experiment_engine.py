@@ -345,10 +345,11 @@ class DashboardCommandTests(unittest.TestCase):
         commands = [command for _label, command in dashboard.COMMAND_BUTTONS]
 
         self.assertIn("SEND_MESSAGE", commands)
-        self.assertIn("TOGGLE_CLASSIC", commands)
-        self.assertIn("TOGGLE_PQC", commands)
-        self.assertIn("TOGGLE_CHECKSUM", commands)
+        self.assertIn("SET_PRESET_CLASSIC", commands)
+        self.assertIn("SET_PRESET_PQC", commands)
+        self.assertIn("SET_PRESET_PQC_CRC32", commands)
         self.assertIn("INJECT_FAULT", commands)
+        self.assertNotIn("TOGGLE_CHECKSUM", commands)
         self.assertNotIn("DEMO", commands)
         self.assertNotIn("DEMO_PAUSE", commands)
         self.assertNotIn("EXPORT_JSON", commands)
@@ -385,28 +386,157 @@ class DashboardCommandTests(unittest.TestCase):
         panel = dashboard.DashboardPanel(serial_client=fake)
         panel.serial_connected = True
 
-        # Case 1: PQC active, checksum disabled -> MISSION PQC
-        panel.pqc_enabled = True
-        panel.classic_enabled = False
-        panel.checksum_enabled = False
+        # Case 1: PQC preset -> MISSION PQC
+        panel._execute_command("SET_PRESET_PQC")
         panel._execute_command("SEND_MESSAGE")
         self.assertIn("MISSION PQC", fake.sent)
 
-        # Case 2: PQC active, checksum enabled -> MISSION PQC_CRC32
+        # Case 2: PQC+CRC preset -> MISSION PQC_CRC32
         fake.sent.clear()
-        panel.pqc_enabled = True
-        panel.classic_enabled = False
-        panel.checksum_enabled = True
+        panel._execute_command("SET_PRESET_PQC_CRC32")
         panel._execute_command("SEND_MESSAGE")
         self.assertIn("MISSION PQC_CRC32", fake.sent)
 
-        # Case 3: Classic active, checksum enabled -> MISSION CLASSIC (checksum ignored)
+        # Case 3: Classic preset -> MISSION CLASSIC
         fake.sent.clear()
-        panel.pqc_enabled = False
-        panel.classic_enabled = True
-        panel.checksum_enabled = True
+        panel._execute_command("SET_PRESET_CLASSIC")
         panel._execute_command("SEND_MESSAGE")
         self.assertIn("MISSION CLASSIC", fake.sent)
+
+    def test_mission_popup_persists_until_user_closes_it(self):
+        panel = dashboard.DashboardPanel()
+        panel._apply_hardware_response(
+            "MISSION PQC_CRC32",
+            {
+                "scenario": "PQC_CRC32",
+                "result": "DELIVERED",
+                "crypto": "ML-KEM-512",
+                "checksum": "CRC32",
+                "profile": "BASELINE",
+                "cpu_mhz": "240",
+                "heap": "201412",
+                "elapsed_us": "13367",
+                "bytes_payload": "41",
+                "bytes_crypto": "800",
+                "bytes_checksum": "4",
+                "bytes_total": "845",
+                "keygen_us": "3679",
+                "encap_us": "3988",
+                "decap_us": "5087",
+                "tag_us": "435",
+                "verify_us": "163",
+                "crc_us": "10",
+                "key_match": "1",
+                "tag_match": "1",
+                "crc_match": "1",
+            },
+        )
+
+        self.assertTrue(panel.mission_overlay_visible)
+        panel.update(60.0)
+        self.assertTrue(panel.mission_overlay_visible)
+
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            dashboard.WIDTH, dashboard.HEIGHT = 1366, 768
+            surface = pygame.Surface((1366, 768), pygame.SRCALPHA)
+            earth = dashboard.Earth()
+            satellite = dashboard.Satellite(earth)
+            panel.draw(surface, 0.5, satellite)
+            self.assertIsNotNone(panel.mission_overlay_close_rect)
+
+            close_event = pygame.event.Event(
+                pygame.MOUSEBUTTONDOWN,
+                {"button": 1, "pos": panel.mission_overlay_close_rect.center},
+            )
+            panel.handle_event(close_event)
+            self.assertFalse(panel.mission_overlay_visible)
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
+    def test_mission_popups_can_be_compared_and_dragged_independently(self):
+        panel = dashboard.DashboardPanel()
+
+        def mission_payload(scenario, elapsed_us, bytes_crypto, bytes_checksum, crc_us):
+            return {
+                "scenario": scenario,
+                "result": "DELIVERED",
+                "crypto": "HMAC-SHA256" if scenario == "CLASSIC" else "ML-KEM-512",
+                "checksum": "CRC32" if scenario == "PQC_CRC32" else "NONE",
+                "profile": "BASELINE",
+                "cpu_mhz": "240",
+                "heap": "201412",
+                "elapsed_us": str(elapsed_us),
+                "bytes_payload": "41",
+                "bytes_crypto": str(bytes_crypto),
+                "bytes_checksum": str(bytes_checksum),
+                "bytes_total": str(41 + bytes_crypto + bytes_checksum),
+                "keygen_us": "0" if scenario == "CLASSIC" else "3679",
+                "encap_us": "0" if scenario == "CLASSIC" else "3988",
+                "decap_us": "0" if scenario == "CLASSIC" else "5087",
+                "tag_us": "435",
+                "verify_us": "163",
+                "crc_us": str(crc_us),
+                "key_match": "1",
+                "tag_match": "1",
+                "crc_match": "1" if scenario == "PQC_CRC32" else "NA",
+            }
+
+        panel._apply_hardware_response("MISSION CLASSIC", mission_payload("CLASSIC", 721, 32, 0, 0))
+        panel._apply_hardware_response("MISSION PQC", mission_payload("PQC", 13536, 800, 0, 0))
+        panel._apply_hardware_response("MISSION PQC_CRC32", mission_payload("PQC_CRC32", 13367, 800, 4, 10))
+
+        self.assertEqual(set(panel.mission_overlays), {"CLASSIC", "PQC", "PQC_CRC32"})
+        self.assertTrue(panel.mission_overlay_visible)
+
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            dashboard.WIDTH, dashboard.HEIGHT = 1366, 768
+            surface = pygame.Surface((1366, 768), pygame.SRCALPHA)
+            earth = dashboard.Earth()
+            satellite = dashboard.Satellite(earth)
+            panel.draw(surface, 0.5, satellite)
+            self.assertEqual(set(panel.mission_overlay_rects), {"CLASSIC", "PQC", "PQC_CRC32"})
+
+            original_pqc_position = panel.mission_overlay_rects["PQC"].topleft
+            drag_start = panel.mission_overlay_drag_rects["PQC"].center
+            drag_end = (drag_start[0] + 120, drag_start[1] + 70)
+            panel.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": drag_start}))
+            panel.handle_event(
+                pygame.event.Event(
+                    pygame.MOUSEMOTION,
+                    {"pos": drag_end, "rel": (120, 70), "buttons": (1, 0, 0)},
+                )
+            )
+            panel.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, {"button": 1, "pos": drag_end}))
+            self.assertNotEqual(panel.mission_overlay_positions["PQC"], original_pqc_position)
+
+            panel.draw(surface, 0.6, satellite)
+            panel.handle_event(
+                pygame.event.Event(
+                    pygame.MOUSEBUTTONDOWN,
+                    {"button": 1, "pos": panel.mission_overlay_close_rects["PQC"].center},
+                )
+            )
+
+            self.assertNotIn("PQC", panel.mission_overlays)
+            self.assertIn("CLASSIC", panel.mission_overlays)
+            self.assertIn("PQC_CRC32", panel.mission_overlays)
+            self.assertTrue(panel.mission_overlay_visible)
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
+    def test_send_message_without_live_satellite_does_not_replay_metrics(self):
+        panel = dashboard.DashboardPanel()
+
+        panel._execute_command("SET_PRESET_PQC_CRC32")
+        panel._execute_command("SEND_MESSAGE")
+
+        self.assertEqual(panel.command_history[-1]["status"], "SAT OFF")
+        self.assertEqual(panel.last_mission, {})
+        self.assertFalse(panel.mission_overlay_visible)
+        self.assertEqual(panel.hardware_samples, [])
+        self.assertEqual(panel.session_status, "AGUARDANDO SAT")
 
     def test_dashboard_does_not_poll_telemetry_automatically(self):
         fake = FakeSerialClient()
@@ -431,6 +561,8 @@ class DashboardCommandTests(unittest.TestCase):
                 panel._execute_command("INJECT_FAULT")
 
                 panel.draw(surface, 0.5, satellite)
+                panel.results_overlay_visible = True
+                panel.draw(surface, 0.6, satellite)
                 panel.draw_satellite_lock(surface, 0.5)
                 nebula = dashboard.Nebula()
                 nebula.draw(surface, 0.5)
@@ -438,6 +570,33 @@ class DashboardCommandTests(unittest.TestCase):
                 nebula.draw(surface, 0.7)
 
                 self.assertIs(nebula.surface_cache, first_cache)
+                self.assertEqual(surface.get_size(), (width, height))
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
+    def test_onboarding_draws_all_slides_in_projector_target_resolutions(self):
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            for width, height in ((1920, 1080), (1366, 768)):
+                dashboard.WIDTH, dashboard.HEIGHT = width, height
+                surface = pygame.Surface((width, height), pygame.SRCALPHA)
+                stars = dashboard.StarField(12)
+                earth = dashboard.Earth()
+                satellite = dashboard.Satellite(earth)
+                onboarding = dashboard.Onboarding(
+                    stars,
+                    earth,
+                    satellite,
+                    dashboard.Nebula(),
+                    dashboard.CosmicDust(4),
+                    dashboard.ShootingStars(),
+                )
+
+                self.assertEqual(onboarding.total_slides, 5)
+                for slide in range(onboarding.total_slides):
+                    onboarding.current_slide = slide
+                    onboarding.draw(surface, 0.5 + slide)
+
                 self.assertEqual(surface.get_size(), (width, height))
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size

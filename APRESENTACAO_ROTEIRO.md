@@ -1,6 +1,6 @@
-# Roteiro de apresentacao - PQC-SAT
+# Roteiro de apresentação - PQC-SAT
 
-Objetivo do seminario: mostrar, em 20 minutos, que a transição para
+Objetivo do seminário: mostrar, em 20 minutos, que a transição para
 criptografia pós-quântica aumenta a demanda de hardware em sistemas
 embarcados, e que a demanda cresce ainda mais quando adicionamos mecanismos de
 integridade como checksum.
@@ -20,7 +20,7 @@ detectada. Quando o bit-flip atinge ciphertext ML-KEM, a decapsulação não
 "detecta" sozinha a falha: o harness observa `KEY_MISMATCH`, e a confirmação
 HMAC-SHA256 transforma divergência de chave em `PROTOCOL_REJECT`.
 
-## Cinco slides
+## Cinco blocos narrativos no dashboard
 
 1. **Problema**: CubeSats usam COTS; falhas transitórias podem inverter bits.
 2. **Experimento**: Wisdom + notebook, mensagem de missão, ML-KEM-512,
@@ -32,13 +32,16 @@ HMAC-SHA256 transforma divergência de chave em `PROTOCOL_REJECT`.
 5. **Conclusão e limites**: PQC aumenta custo, checksum soma integridade, e
    energia real exigiria medidor externo.
 
+Esses blocos aparecem no onboarding e no botão `RESULTADOS`; não há dependência
+de slides externos para conduzir a apresentação.
+
 ## Resultados para apresentar
 
 Fonte principal: `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`.
 
 | Medida | Resultado |
 |---|---|
-| Aceitacao final | 1.817,23 s, 83 registros, 0 falhas |
+| Aceitação final | 1.817,23 s, 83 registros, 0 falhas |
 | MISSION runs | 27 (9 CLASSIC, 9 PQC, 9 PQC_CRC32) |
 | Demo A/B | 5/5 falhas silenciosas em A; 5/5 detectadas em B |
 | CRC32 payload | 8/8 `DETECTED_GUARD` no aceite final |
@@ -51,44 +54,141 @@ Fonte principal: `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`.
 | `BASELINE` 240 MHz | 3.298 | 3.861 | 4.985 |
 | `OBC-1U-LIMITED` 80 MHz | 10.056 | 11.780 | 15.204 |
 
-Leitura didatica: limitar o ESP32 para 80 MHz aumenta o custo temporal do
-ML-KEM-512, mas a operacao continua funcional. O custo de checksum no payload
-é baixo e suficiente para demonstrar a diferenca entre falha silenciosa e erro
+Leitura didática: limitar o ESP32 para 80 MHz aumenta o custo temporal do
+ML-KEM-512, mas a operação continua funcional. O custo de checksum no payload
+é baixo e suficiente para demonstrar a diferença entre falha silenciosa e erro
 detectado.
 
 Comparacao MISSION BASELINE (240 MHz, media de 8 amostras):
 
-| Cenario | Tempo total (us) | Bytes | Heap livre | Resultado |
+| Cenário | Tempo total (us) | Bytes | Heap livre | Resultado |
 |---|---:|---:|---:|---|
 | `CLASSIC` | 721 | 73 | 201.412 | DELIVERED |
 | `PQC` | 13.536 | 841 | 201.412 | DELIVERED |
 | `PQC_CRC32` | 13.367 | 845 | 201.412 | DELIVERED |
 
-Razoes: PQC e 18,8x mais lento e 11,5x maior que CLASSIC.
+Razoes: PQC é 18,8x mais lento e 11,5x maior que CLASSIC.
 CRC32 adiciona ~10 us e +4 bytes sobre PQC.
 
-## Sequencia da demo
+Conclusões:
 
-1. Abrir:
+- ML-KEM-512 real funciona na Wisdom, mas consome muito mais tempo que o
+  baseline simetrico.
+- O custo de trafego também cresce: 73 bytes em `CLASSIC` contra 841 bytes em
+  `PQC`.
+- CRC32 tem baixo custo no payload e é excelente para explicar falha silenciosa
+  versus erro detectado.
+- A heap ficou estável, então a apresentação deve enfatizar tempo, trafego e
+  comportamento de integridade.
+
+Próximos passos:
+
+- medir energia real com instrumento externo;
+- comparar contra uma pilha clássica assimetrica completa, como ECDH + HMAC;
+- repetir a coleta com payloads maiores e perfis de clock adicionais;
+- testar bursts de bit-flips, não apenas single-bit controlado.
+
+## Sequência da demo
+
+Regra da apresentação: **não usar replay para envio de mensagens**. O botão
+`ENVIAR MSG` deve produzir métricas apenas quando a Wisdom estiver conectada e
+respondendo pela serial. Sem `SAT CONECTADO`, o painel deve recusar o envio.
+
+1. Abrir em modo hardware:
    `python3 dashboard.py --port /dev/ttyUSB0`
-2. Enviar mensagem em modo clássico:
+2. Esperar o canto superior indicar `SAT CONECTADO`. Se aparecer `AGUARDANDO
+   SAT`, não prosseguir com a demo de mensagens.
+3. Enviar mensagem em modo clássico:
    - Clique em `CLÁSSICA` (o botão fica azul) e em seguida clique em `ENVIAR MSG`.
-3. Enviar mensagem em modo pós-quântico (PQC) sem integridade:
+   - Mantenha o popup aberto e destaque tempo total, bytes, tag e heap.
+   - Feche no `X`.
+4. Enviar mensagem em modo pós-quântico (PQC) sem integridade:
    - Clique em `PQC` (o botão fica roxo).
-   - Clique em `CHECKSUM` para desativar a integridade (o botão fica com estilo padrão/apagado).
    - Clique em `ENVIAR MSG`.
-4. Enviar mensagem em modo pós-quântico (PQC) com integridade:
-   - Clique em `PQC` (o botão fica roxo).
-   - Clique em `CHECKSUM` para ativar a integridade (o botão fica verde).
+   - Mantenha o popup aberto e destaque `keygen`, `encap`, `decap`, bytes e heap.
+   - Feche no `X`.
+5. Enviar mensagem em modo pós-quântico (PQC) com integridade:
+   - Clique em `PQC+CRC` (o botão fica verde).
    - Clique em `ENVIAR MSG`.
-5. Apoio visual de falhas transitórias (Bit-Flips) de forma manual:
-   - **Caso A (Corrupção Silenciosa):** Certifique-se de que o `CHECKSUM` está desativado (botão apagado), clique em `FALHA` -> Observar erro silencioso (`SILENT` na timeline).
-   - **Caso B (Erro Detectado):** Certifique-se de que o `CHECKSUM` está ativado (botão verde), clique em `FALHA` -> Observar detecção do erro pelo guardião (`DETECTED_GUARD` na timeline).
+   - Mantenha o popup aberto e destaque o campo `crc`, +4 bytes e validações.
+   - Feche no `X`.
+6. Apoio visual de falhas transitórias (Bit-Flips) de forma manual:
+   - **Caso A (Corrupção Silenciosa):** Clique em `PQC`, depois em `FALHA` -> Observar erro silencioso (`SILENT` na timeline).
+   - **Caso B (Erro Detectado):** Clique em `PQC+CRC`, depois em `FALHA` -> Observar detecção do erro pelo guardião (`DETECTED_GUARD` na timeline).
+7. Fechar com resultados consolidados:
+   - Clique em `RESULTADOS`.
+   - Mostre a bateria real: 83 registros, 0 falhas, 27 `MISSION runs`.
+   - Compare `CLASSIC`, `PQC` e `PQC_CRC32` com os números finais.
 
 > [!NOTE]
 > Todos os logs oficiais e dados numéricos consolidados foram gravados através de baterias automatizadas de longa duração via terminal (como o script `tools/stage8_acceptance.py`), garantindo rigor científico sem poluir o dashboard visual.
 
-O painel de botões do dashboard agora é puramente manual e focado no roteiro interativo acima. Comandos técnicos adicionais ficam no HELP/terminal ou no console serial.
+O painel de botões do dashboard agora é puramente manual é focado no roteiro interativo acima. Comandos técnicos adicionais ficam no HELP/terminal ou no console serial.
+Cada cenário de mensagem abre seu próprio popup de métricas. Durante a comparação,
+mantenha `CLASSIC`, `PQC` e `PQC+CRC` abertos, arraste os cartões pelo topo e
+posicione-os lado a lado; feche cada um apenas pelo `X` depois de comparar tempo,
+bytes, heap e etapas ML-KEM/HMAC/CRC.
+
+## Sequência impactante para alunos de Ciência da Computação
+
+### 1. Introdução curta (2-4 min)
+
+Pergunta de abertura:
+
+> O que acontece quando um sistema embarcado pequeno precisa migrar para
+> criptografia pós-quântica e ainda detectar corrupção de dados?
+
+Conduza a turma por três ideias:
+
+- **restrição de hardware**: CPU, RAM, tráfego e energia são recursos críticos
+  em sistemas inspirados em CubeSat;
+- **mudança criptográfica**: HMAC simétrico é barato, mas acordo de segredo
+  pós-quântico exige operações mais pesadas;
+- **integridade operacional**: bit-flip sem guardião pode virar falha
+  silenciosa; com CRC32, a corrupção do payload fica visível.
+
+### 2. Demonstração ao vivo (8-10 min)
+
+Use apenas a placa conectada. Não use `--simulated` para a apresentação final.
+
+1. Mostre `SAT CONECTADO`, CPU/RAM no topo e explique que o dashboard está
+   conversando com a Wisdom.
+2. Clique `CLÁSSICA` -> `ENVIAR MSG`.
+   Fala: “Este é o baseline: autenticação simétrica com HMAC-SHA256.”
+3. Clique `PQC` -> `ENVIAR MSG`.
+   Fala: “Agora o mesmo envio inclui ML-KEM-512. Observem `keygen`, `encap` e
+   `decap`: o custo não está na animação, está no hardware.”
+4. Clique `PQC+CRC` -> `ENVIAR MSG`.
+   Fala: “Agora somamos um guardião simples de integridade no payload. O custo
+   em bytes e tempo aparece junto com a validação.”
+5. Clique `PQC` -> `FALHA`.
+   Fala: “Sem guardião no payload, uma mutação pode passar silenciosamente.”
+6. Clique `PQC+CRC` -> `FALHA`.
+   Fala: “Com CRC32, o mesmo tipo de corrupção vira evento detectado.”
+
+Opcional para público mais técnico, se houver tempo:
+
+```text
+PQC_FAULT 0 0x01 CONFIRM
+```
+
+Use esse comando apenas no terminal textual para mostrar que, quando o
+ciphertext ML-KEM é corrompido, a detecção operacional vem da confirmação de
+chave (`PROTOCOL_REJECT`), não de uma “mágica” automática da decapsulação.
+
+### 3. Resultados finais comparados (4-6 min)
+
+Clique `RESULTADOS` e feche a narrativa:
+
+- `CLASSIC`: 721 us, 73 bytes;
+- `PQC`: 13.536 us, 841 bytes;
+- `PQC_CRC32`: 13.367 us, 845 bytes;
+- PQC ficou 18,8x mais lento e 11,5x maior em bytes que o baseline;
+- a bateria teve 83 registros, 0 falhas, 27 envios de missão e 2 benchmarks
+  PQC;
+- CRC32 não é criptografia, mas é excelente para demonstrar detecção de
+  corrupção no payload;
+- energia real ainda exigiria medição elétrica externa.
 
 ## Roteiro de fala
 
@@ -96,21 +196,21 @@ O painel de botões do dashboard agora é puramente manual e focado no roteiro i
 |---|---|
 | 0-5 min | Contexto: COTS, CubeSat, falhas transitórias e PQC |
 | 5-8 min | Modelo: mensagem, HMAC, ML-KEM, CRC32 e bit-flip |
-| 8-11 min | Enviar as mensagens dinâmicas (`CLÁSSICA`, `PQC`, `PQC + CHECKSUM`) e observar o tempo relativo de cada uma |
+| 8-11 min | Enviar as mensagens dinâmicas (`CLÁSSICA`, `PQC`, `PQC+CRC`) e observar o tempo relativo de cada uma |
 | 11-14 min | Interpretar CPU e RAM (consumo / total) na faixa superior do dashboard |
-| 14-17 min | Demonstrar manualmente falha silenciosa vs. detecção (botões `CHECKSUM` e `FALHA`) |
+| 14-17 min | Demonstrar manualmente falha silenciosa vs. detecção (presets `PQC`, `PQC+CRC` e botão `FALHA`) |
 | 17-19 min | Explicar ML-KEM real, `KEY_MISMATCH` e `PROTOCOL_REJECT` |
-| 19-20 min | Limites, conclusao e perguntas |
+| 19-20 min | Limites, conclusão e perguntas |
 
 ## Limites que devem ser ditos
 
-- A Wisdom nao é um CubeSat real; ela representa um OBC COTS didatico.
-- `OBC-1U-LIMITED` é uma politica experimental, nao uma especificacao
+- A Wisdom não é um CubeSat real; ela representa um OBC COTS didático.
+- `OBC-1U-LIMITED` é uma política experimental, não uma especificação
   universal de CubeSat.
 - CRC32 detecta single-bit dentro da regiao coberta; comparar checksums exigiria
-  falhas multiplas, bursts ou corrupcao fora da cobertura.
-- ML-KEM nao rejeita automaticamente todo ciphertext corrompido. A deteccao
-  operacional vem da confirmacao da chave derivada.
+  falhas multiplas, bursts ou corrupção fora da cobertura.
+- ML-KEM não rejeita automaticamente todo ciphertext corrompido. A detecção
+  operacional vem da confirmação da chave derivada.
 - O JSON usa proxy de energia por tempo de CPU. Watts/joules exigem medidor
   externo.
 

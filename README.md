@@ -22,9 +22,9 @@ O repositório contém hoje:
 - modo `DEMO` A/B cronometrado, com pausa, retomada, parada, overlay calculado
   e exportação JSON;
 - splash inicial opcional, autosave no encerramento, métricas superiores
-  essenciais de CPU/RAM/CLÁSSICA/PQC/PQC+CRC e testes headless para 1920x1080
-  e 1366x768;
-- roteiro de apresentação com cinco slides, sequência de demo e limites
+  essenciais de CPU/RAM, onboarding, botão `RESULTADOS` e testes headless para
+  1920x1080 e 1366x768;
+- roteiro de apresentação orientado ao dashboard, sequência de demo e limites
   científicos;
 - guia didático completo para conduzir a apresentação com público leigo em
   criptografia;
@@ -116,6 +116,10 @@ Para desenvolvimento sem placa, use explicitamente:
 python3 dashboard.py --simulated
 ```
 
+Esse modo é apenas para ensaio visual e testes de layout. Ele não deve gerar
+métricas de envio de mensagem: `ENVIAR MSG` só é válido com a Wisdom conectada
+e respondendo pela serial.
+
 Para testes automatizados ou captura direta sem a tela inicial curta:
 
 ```bash
@@ -142,7 +146,7 @@ python3 tools/serial_console.py --port /dev/ttyUSB0
 python3 tools/serial_console.py --port /dev/ttyUSB0 --interactive
 ```
 
-Troque `/dev/ttyUSB0` pela porta real da placa. Se houver uma unica porta
+Troque `/dev/ttyUSB0` pela porta real da placa. Se houver uma única porta
 serial conectada, `--port` pode ser omitido.
 
 Em Linux, se `/dev/ttyUSB0` aparecer mas abrir com `Permission denied`, use a
@@ -194,6 +198,10 @@ bancada.
 | `CHECKSUM ON\|OFF\|TOGGLE\|STATUS` | Liga/desliga o guardião CRC32 do fluxo manual. |
 | `GUARD NONE\|CRC32` | Define explicitamente o guardião ativo. |
 | `PQC_STATUS` | Consulta `PQC_INFO` quando a placa está online; sem placa, informa pendência local. |
+| `SET_PRESET_CLASSIC` | Seleciona o preset clássico antes de `SEND_MESSAGE`. |
+| `SET_PRESET_PQC` | Seleciona o preset pós-quântico antes de `SEND_MESSAGE`. |
+| `SET_PRESET_PQC_CRC32` | Seleciona o preset pós-quântico com CRC32 antes de `SEND_MESSAGE`. |
+| `SEND_MESSAGE` | Envia mensagem usando o preset selecionado. |
 | `MISSION CLASSIC\|PQC\|PQC_CRC32` | Envia mensagem de missão na placa e mede tempo, bytes, heap e resultado por cenário. |
 | `CRC_CHECK` | Atalho que aplica uma tentativa forçada com CRC32; divergência vira `DETECTED_GUARD`. |
 | `RUN_BATTERY n` | Executa bateria A/B com `n` tentativas por cenário, reaplica os mesmos fault specs e exporta JSON. |
@@ -215,10 +223,10 @@ comandos avançados, inclusive comandos fora do escopo visual da demo:
 
 | Bloco/comando | Uso na demonstração |
 |---|---|
-| `ENVIAR MSG` / `SEND_MESSAGE` | Envia a mensagem de missão respeitando as opções ativas nos seletores. |
-| `CLÁSSICA` / `TOGGLE_CLASSIC` | Seletor exclusivo para ativar o modo de criptografia clássica (HMAC-SHA256). |
-| `PQC` / `TOGGLE_PQC` | Seletor exclusivo para ativar o modo de criptografia pós-quântica (ML-KEM-512). |
-| `CHECKSUM` / `TOGGLE_CHECKSUM` | Seletor liga/desliga para o guardião de integridade CRC32 do payload. |
+| `ENVIAR MSG` / `SEND_MESSAGE` | Envia a mensagem de missão usando o preset selecionado. |
+| `CLÁSSICA` / `SET_PRESET_CLASSIC` | Preset de criptografia clássica: HMAC-SHA256. |
+| `PQC` / `SET_PRESET_PQC` | Preset pós-quântico: ML-KEM-512 + HMAC-SHA256. |
+| `PQC+CRC` / `SET_PRESET_PQC_CRC32` | Preset pós-quântico com CRC32 no payload. |
 | `FALHA` / `INJECT_FAULT` | Injeta falha determinística (bit-flip) respeitando o guardião ativo. |
 | `BIT_FLIP [i m]` | Inverte um bit escolhido manualmente. |
 | `RESET_SESSION` | Zera a sessão da demonstração. |
@@ -237,6 +245,10 @@ disponível. Não há polling automático de `TELEMETRY`; `STATUS`, `MISSION ...
 avançados são acionados manualmente pelo botão ou pelo terminal textual. Os custos
 individuais de tempo/tráfego de cada cenário (`CLÁSSICA`, `PQC`, `PQC+CRC`) são exibidos
 diretamente no log do console do painel lateral assim que a mensagem é enviada/recebida.
+Cada envio também abre um popup persistente de métricas detalhadas. Há um popup
+independente por cenário (`CLASSIC`, `PQC`, `PQC+CRC`): o apresentador pode
+arrastar os cartões pelo topo, compará-los lado a lado e fechar cada um apenas
+pelo `X`.
 Respostas `MISSION` e `PQC_*` entram no JSON como métricas estruturadas,
 incluindo tempos, bytes, KAT, `key_match`, `key_confirmed`, `tag_match`,
 tamanhos e CRCs curtos, sem exportar segredos completos.
@@ -286,7 +298,7 @@ compartilhado completo ou material suficiente para reconstruir a sessão.
 | `hardware_command_reference.md` | Referência única de comandos completos de hardware/bancada. |
 | `METRICAS_CONSOLIDADAS.md` | Metodologia de comparação CLASSIC, PQC e PQC+CRC32 para o seminário. |
 | `GUIA_DIDATICO_APRESENTACAO.md` | Explicação passo a passo, leiga e completa, do projeto e da demonstração. |
-| `APRESENTACAO_ROTEIRO.md` | Roteiro de 20 minutos, slides, sequência da demo e limites. |
+| `APRESENTACAO_ROTEIRO.md` | Roteiro de 20 minutos, blocos do dashboard, sequência da demo e limites. |
 | `projeto_final_pqc_esp32_cubesat.docx` | Proposta acadêmica formal. |
 | `ROADMAP.md` | Plano consolidado, critérios e ordem recomendada. |
 | `agents.md` | Regras e contexto para agentes de IA. |

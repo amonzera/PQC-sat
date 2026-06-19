@@ -1,6 +1,6 @@
 # Roadmap consolidado - PQC-SAT
 
-Versão revisada em 2026-06-18.
+Versão revisada em 2026-06-19.
 
 ## 1. Visão geral
 
@@ -53,7 +53,8 @@ projeto sem reconstruir decisões antigas:
   apresentação; comandos de bancada ficaram no terminal textual e em
   `hardware_command_reference.md`.
 - 2026-06-18: métricas superiores do dashboard foram enxugadas para a
-  apresentação e hoje expõem apenas CPU, RAM, PQC e checksum perto da animação.
+  apresentação e hoje expõem CPU e RAM perto da animação; tempos e bytes dos
+  cenários ficam no console, no overlay de mensagem e no painel `RESULTADOS`.
 - 2026-06-18: a métrica de CPU passou a mostrar também `% ativo` em janela
   móvel de 5s, calculado por tempo de comando observado; a exportação JSON
   passou para `pqc-sat-run-v2` e inclui métricas agregadas de CPU, PQC e
@@ -75,12 +76,12 @@ projeto sem reconstruir decisões antigas:
   snapshots A/B e exportação JSON cronometrada.
 - 2026-06-18: Etapa 08 implementada no software com splash opcional,
   `--no-splash`, autosave no fechamento, cleanup com traceback preservado,
-  cache de superfícies grandes, faixa superior reduzida a CPU, RAM, PQC e
-  checksum, exportação de métricas do processo e teste headless para
+  cache de superfícies grandes, faixa superior reduzida a CPU/RAM, exportação
+  de métricas do processo e teste headless para
   1920x1080 e 1366x768.
-- 2026-06-18: criado `APRESENTACAO_ROTEIRO.md` com cinco slides, roteiro de
-  20 minutos, sequência de comandos da demo, limites científicos e checklist
-  pré-apresentação.
+- 2026-06-18: criado `APRESENTACAO_ROTEIRO.md` com blocos narrativos do
+  dashboard, roteiro de 20 minutos, sequência de comandos da demo, limites
+  científicos e checklist pré-apresentação.
 - 2026-06-18: verificação final detectou a Wisdom em `/dev/ttyUSB0` como
   CP2102N/Silicon Labs. Após liberação da porta, a aceitação de hardware da
   etapa 8 passou e foi consolidada com `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`:
@@ -97,19 +98,27 @@ projeto sem reconstruir decisões antigas:
 - 2026-06-18: objetivo final do seminário consolidado como comparação de custo
   e segurança entre `CLASSIC`, `PQC` e `PQC_CRC32`; firmware ganhou
   `MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]`, dashboard ganhou botões
-  correspondentes, overlay de mensagem entregue, métricas superiores
-  `CLÁSSICA`/`PQC`/`PQC+CRC`, exportação JSON em `metrics.mission` e efeitos
-  lúdicos de LED/bargraph por cenário.
+  correspondentes, overlay de mensagem entregue, exportação JSON em
+  `metrics.mission` e efeitos lúdicos de LED/bargraph por cenário.
 - 2026-06-18: criado `METRICAS_CONSOLIDADAS.md` com metodologia de coleta,
   campos do JSON, comandos curtos/longos e limites científicos para a
   comparação final.
+- 2026-06-19: consolidação final do seminário ajustou o dashboard para usar
+  onboarding completo de cinco telas e botão `RESULTADOS` com a bateria real
+  `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`; a documentação
+  passou a registrar conclusões, próximos passos e a explicação correta de
+  `bytes_total` como payload + ciphertext ML-KEM + tag HMAC + checksum.
+- 2026-06-19: fluxo de apresentação de mensagens passou a exigir resposta
+  serial real da Wisdom. `ENVIAR MSG` não gera métricas por replay local quando
+  a placa está ausente; o modo `--simulated` fica restrito a ensaio visual e
+  testes de layout.
 
 O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar
 `RUN_BATTERY` A/B, executar `DEMO` com overlay calculado e exportar sessões em
-JSON. A coleta técnica antiga, a campanha prolongada e a validação de
-projetor/legibilidade já foram concluídas; a coleta final com `MISSION` deve
-ser rodada manualmente antes da apresentação e analisada por JSON.
+JSON. A coleta técnica antiga, a campanha prolongada com `MISSION` e a
+validação de projetor/legibilidade já foram concluídas; novas baterias longas
+devem ser rodadas manualmente apenas se a montagem física mudar.
 
 ## 3. Gate 0 - protocolo experimental
 
@@ -262,7 +271,8 @@ linear rígida.
 1. Manter payload/CRC32 e ciphertext ML-KEM com confirmação de chave como
    base de coleta. A antiga Etapa 06 foi consolidada neste roadmap.
 2. Manter `MISSION` como fluxo visual central da apresentação: `CLASSIC`,
-   `PQC` e `PQC_CRC32`, com métricas superiores e overlay de mensagem.
+   `PQC` e `PQC_CRC32`, com console/overlay de mensagem e painel
+   `RESULTADOS` para a consolidação.
 3. Manter `DEMO` como campanha visual automatizada de apoio. A antiga Etapa 07 foi
    consolidada neste roadmap.
 4. Etapa 08 consolidada neste roadmap: robustez de software, aceitação serial,
@@ -553,8 +563,8 @@ Entregas:
   `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`;
 - projetor validado por confirmação do usuário em 2026-06-18, após ajuste
   visual para reduzir botões e métricas;
-- roteiro de 20 minutos e base de até cinco slides em
-  `APRESENTACAO_ROTEIRO.md`;
+- roteiro de 20 minutos, onboarding do dashboard e painel de resultados
+  descritos em `APRESENTACAO_ROTEIRO.md`;
 - limitações científicas registradas no README, roadmap e roteiro.
 
 Não use a expressão "nenhum crash possível". O critério correto é "nenhuma
@@ -564,7 +574,7 @@ falha conhecida nos cenários testados".
 
 ### Próximos cortes
 
-1. Levar para o relatório/slides a distinção: checksum protege transporte,
+1. Levar para a fala e para o botão de resultados a distinção: checksum protege transporte,
    confirmação de chave protege aceitação de sessão, e consumo de energia só
    será afirmado se houver medição externa.
 
@@ -587,12 +597,13 @@ falha conhecida nos cenários testados".
 
 - dashboard funcional sem hardware e com hardware conectado;
 - entrega de mensagem demonstrável em `CLASSIC`, `PQC` e `PQC_CRC32`;
+- popup independente e arrastável por cenário para comparação visual lado a lado;
 - campanha reproduzível;
 - comparação A/B baseada em bytes;
 - JSON;
 - demo automatizada;
 - documentação das limitações;
-- slides e roteiro.
+- onboarding, botão de resultados e roteiro.
 
 ### Hardware já entregue para o MVP
 
