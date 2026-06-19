@@ -978,6 +978,7 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 | `APRESENTACAO_ROTEIRO.md` | Roteiro resumido de 20 minutos |
 | `GUIA_DIDATICO_APRESENTACAO.md` | Este guia completo |
 | `METRICAS_CONSOLIDADAS.md` | Como medir e apresentar CLASSIC, PQC e PQC+CRC |
+| `PERGUNTAS_E_RESPOSTAS_SEMINARIO.md` | Banco de perguntas prováveis e respostas para treino |
 | `ROADMAP.md` | Histórico técnico consolidado |
 | `hardware_command_reference.md` | Comandos completos de bancada |
 | `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json` | Evidencia principal do aceite |

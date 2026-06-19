@@ -299,6 +299,7 @@ compartilhado completo ou material suficiente para reconstruir a sessão.
 | `METRICAS_CONSOLIDADAS.md` | Metodologia de comparação CLASSIC, PQC e PQC+CRC32 para o seminário. |
 | `GUIA_DIDATICO_APRESENTACAO.md` | Explicação passo a passo, leiga e completa, do projeto e da demonstração. |
 | `APRESENTACAO_ROTEIRO.md` | Roteiro de 20 minutos, blocos do dashboard, sequência da demo e limites. |
+| `PERGUNTAS_E_RESPOSTAS_SEMINARIO.md` | Perguntas prováveis da banca/turma com respostas alinhadas ao projeto real. |
 | `projeto_final_pqc_esp32_cubesat.docx` | Proposta acadêmica formal. |
 | `ROADMAP.md` | Plano consolidado, critérios e ordem recomendada. |
 | `agents.md` | Regras e contexto para agentes de IA. |

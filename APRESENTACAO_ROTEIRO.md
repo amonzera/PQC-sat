@@ -123,7 +123,7 @@ respondendo pela serial. Sem `SAT CONECTADO`, o painel deve recusar o envio.
 > [!NOTE]
 > Todos os logs oficiais e dados numéricos consolidados foram gravados através de baterias automatizadas de longa duração via terminal (como o script `tools/stage8_acceptance.py`), garantindo rigor científico sem poluir o dashboard visual.
 
-O painel de botões do dashboard agora é puramente manual é focado no roteiro interativo acima. Comandos técnicos adicionais ficam no HELP/terminal ou no console serial.
+O painel de botões do dashboard agora é puramente manual e focado no roteiro interativo acima. Comandos técnicos adicionais ficam no HELP/terminal ou no console serial.
 Cada cenário de mensagem abre seu próprio popup de métricas. Durante a comparação,
 mantenha `CLASSIC`, `PQC` e `PQC+CRC` abertos, arraste os cartões pelo topo e
 posicione-os lado a lado; feche cada um apenas pelo `X` depois de comparar tempo,

@@ -103,6 +103,10 @@ projeto sem reconstruir decisões antigas:
 - 2026-06-18: criado `METRICAS_CONSOLIDADAS.md` com metodologia de coleta,
   campos do JSON, comandos curtos/longos e limites científicos para a
   comparação final.
+- 2026-06-19: criado `PERGUNTAS_E_RESPOSTAS_SEMINARIO.md` com banco de
+  perguntas prováveis, respostas curtas e respostas técnicas para defender
+  objetivo, métricas, limitações, ML-KEM, HMAC, CRC32, bit-flips e próximos
+  passos.
 - 2026-06-19: consolidação final do seminário ajustou o dashboard para usar
   onboarding completo de cinco telas e botão `RESULTADOS` com a bateria real
   `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`; a documentação
@@ -604,6 +608,7 @@ falha conhecida nos cenários testados".
 - demo automatizada;
 - documentação das limitações;
 - onboarding, botão de resultados e roteiro.
+- banco de perguntas e respostas para treino da defesa.
 
 ### Hardware já entregue para o MVP
 
