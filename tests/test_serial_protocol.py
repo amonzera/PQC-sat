@@ -1,5 +1,11 @@
+import contextlib
+import io
 import unittest
+from unittest import mock
 
+from tools import serial_console
+from tools import stage8_acceptance
+from tools.serial_bridge import SerialBridgeError
 from tools.serial_protocol import (
     MAX_FRAME_CHARS,
     ProtocolError,
@@ -81,6 +87,40 @@ class SerialProtocolTests(unittest.TestCase):
         self.assertIn("PQC_FAULT", full_rendered)
         self.assertNotIn("PQC_INFO", demo_rendered)
         self.assertNotIn("PQC_FAULT", demo_rendered)
+
+    def test_interactive_console_help_is_local_only(self):
+        class FakeBridge:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, command, args):
+                self.sent.append((command, args))
+                raise AssertionError("HELP local não deve ser enviado à placa")
+
+        bridge = FakeBridge()
+        entries = iter(["HELP", "EXIT"])
+        with mock.patch("builtins.input", lambda _prompt="": next(entries)):
+            with contextlib.redirect_stdout(io.StringIO()):
+                serial_console.interactive_loop(bridge)
+
+        self.assertEqual(bridge.sent, [])
+
+    def test_list_ports_without_devices_is_not_a_cli_failure(self):
+        with mock.patch("tools.serial_console.list_serial_ports", return_value=[]):
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                status = serial_console.print_ports()
+
+        self.assertEqual(status, 0)
+        self.assertIn("No serial ports found.", stdout.getvalue())
+
+    def test_stage8_acceptance_reports_missing_port_without_traceback(self):
+        with mock.patch("sys.argv", ["stage8_acceptance.py", "--skip-long-run"]):
+            with mock.patch("tools.stage8_acceptance.choose_port", side_effect=SerialBridgeError("missing port")):
+                with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                    status = stage8_acceptance.main()
+
+        self.assertEqual(status, 1)
+        self.assertIn("error: missing port", stderr.getvalue())
 
 
 if __name__ == "__main__":

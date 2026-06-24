@@ -39,7 +39,7 @@ def print_ports() -> int:
     ports = list_serial_ports()
     if not ports:
         print("No serial ports found.")
-        return 1
+        return 0
 
     for port in ports:
         details = " - ".join(part for part in [port.description, port.manufacturer] if part)
@@ -117,6 +117,7 @@ def interactive_loop(bridge: SerialBridge) -> None:
             return
         if line.upper() == "HELP":
             print_command_help()
+            continue
 
         try:
             send_command(bridge, line)

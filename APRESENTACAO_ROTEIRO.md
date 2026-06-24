@@ -153,6 +153,8 @@ Use apenas a placa conectada. Não use `--simulated` para a apresentação final
 
 1. Mostre `SAT CONECTADO`, CPU/RAM no topo e explique que o dashboard está
    conversando com a Wisdom.
+   Antes de enviar qualquer mensagem, pergunte: "O que vocês acham que vai
+   crescer mais: tempo de CPU, bytes transmitidos ou RAM?"
 2. Clique `CLÁSSICA` -> `ENVIAR MSG`.
    Fala: “Este é o baseline: autenticação simétrica com HMAC-SHA256.”
 3. Clique `PQC` -> `ENVIAR MSG`.
@@ -161,6 +163,8 @@ Use apenas a placa conectada. Não use `--simulated` para a apresentação final
 4. Clique `PQC+CRC` -> `ENVIAR MSG`.
    Fala: “Agora somamos um guardião simples de integridade no payload. O custo
    em bytes e tempo aparece junto com a validação.”
+   Arraste os três popups lado a lado e use o comparador ao vivo para destacar
+   payload, HMAC, ciphertext ML-KEM e CRC32.
 5. Clique `PQC` -> `FALHA`.
    Fala: “Sem guardião no payload, uma mutação pode passar silenciosamente.”
 6. Clique `PQC+CRC` -> `FALHA`.
@@ -194,13 +198,22 @@ Clique `RESULTADOS` e feche a narrativa:
 
 | Tempo | Foco |
 |---|---|
-| 0-5 min | Contexto: COTS, CubeSat, falhas transitórias e PQC |
-| 5-8 min | Modelo: mensagem, HMAC, ML-KEM, CRC32 e bit-flip |
-| 8-11 min | Enviar as mensagens dinâmicas (`CLÁSSICA`, `PQC`, `PQC+CRC`) e observar o tempo relativo de cada uma |
-| 11-14 min | Interpretar CPU e RAM (consumo / total) na faixa superior do dashboard |
-| 14-17 min | Demonstrar manualmente falha silenciosa vs. detecção (presets `PQC`, `PQC+CRC` e botão `FALHA`) |
-| 17-19 min | Explicar ML-KEM real, `KEY_MISMATCH` e `PROTOCOL_REJECT` |
-| 19-20 min | Limites, conclusão e perguntas |
+| 0-2 min | Provocação: "segurança pós-quântica cabe em hardware pequeno sem custo?" |
+| 2-5 min | Contexto: COTS, CubeSat, falhas transitórias e ameaça quântica |
+| 5-7 min | Modelo mental: HMAC autentica, ML-KEM estabelece segredo, CRC32 detecta corrupção |
+| 7-8 min | Pergunta para a turma: prever se cresce mais CPU, bytes ou RAM |
+| 8-12 min | Enviar `CLÁSSICA`, `PQC`, `PQC+CRC`; arrastar popups e usar o comparador ao vivo |
+| 12-15 min | Demonstrar falha silenciosa vs. detecção (`PQC -> FALHA`, `PQC+CRC -> FALHA`) |
+| 15-18 min | Abrir `RESULTADOS`: custo, segurança e limites com a bateria real |
+| 18-20 min | Demo técnica opcional `PQC_FAULT 0 0x01 CONFIRM`, próximos passos e perguntas |
+
+## Perguntas para criar descoberta
+
+- Antes dos envios: "O que vai pesar mais: CPU, bytes ou RAM?"
+- Depois de `PQC`: "Por que a mensagem pequena virou um pacote muito maior?"
+- Antes de `PQC+CRC`: "CRC32 é criptografia ou detecção de erro?"
+- Antes de `FALHA`: "Se um bit mudar e ninguém conferir, o sistema percebe?"
+- Antes de `RESULTADOS`: "O que vocês esperam que tenha ficado estável?"
 
 ## Limites que devem ser ditos
 

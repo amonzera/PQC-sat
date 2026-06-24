@@ -244,11 +244,11 @@ def summarize(records: list[dict[str, object]], dashboard_demo: dict[str, object
 def main() -> int:
     args = parse_args()
     started = time.monotonic()
-    port = choose_port(args.port)
     records: list[dict[str, object]] = []
     dashboard_demo = None
 
     try:
+        port = choose_port(args.port)
         with SerialBridge(port, baudrate=args.baud, timeout=args.timeout) as bridge:
             records.extend(run_smoke(bridge))
             if not args.skip_long_run:

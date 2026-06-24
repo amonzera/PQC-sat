@@ -776,7 +776,8 @@ O que acontece:
 3. `PQC_CRC32` repete o fluxo PQC e adiciona CRC32 no payload;
 4. o console e o overlay de mensagem entregue mostram tempo e bytes;
 5. cada cenário abre um popup próprio; arraste os cartões pelo topo e mantenha `CLASSIC`, `PQC` e `PQC+CRC` lado a lado até clicar no `X`, permitindo comparar tempo, bytes, heap, keygen, encap, decap, HMAC e CRC;
-6. LEDs/bargraph reforcam visualmente o aumento de custo.
+6. quando dois ou mais popups ficam abertos, o comparador ao vivo aparece no centro inferior e separa payload, HMAC, ciphertext ML-KEM e CRC32;
+7. LEDs/bargraph reforçam visualmente o aumento de custo.
 
 Como explicar:
 
@@ -784,6 +785,25 @@ Como explicar:
 > clássico por PQC, o custo cresce. Quando adicionamos checksum ao fluxo PQC,
 > ganhamos mais integridade observavel e também somamos mais trabalho ao
 > hardware.
+
+### Momento de descoberta: previsão da turma
+
+Antes de clicar em `ENVIAR MSG`, pergunte:
+
+> O que vocês acham que vai crescer mais quando trocarmos HMAC puro por
+> ML-KEM-512: CPU, bytes transmitidos ou RAM?
+
+Depois dos três envios, use os popups e o comparador:
+
+> A RAM ficou estável, então o gargalo visível não foi memória. O impacto forte
+> apareceu em tempo e tráfego: a mesma mensagem passou de 73 bytes para 841
+> bytes e de menos de 1 ms para cerca de 13 ms.
+
+Falas curtas para cada cartão:
+
+- `CLASSIC`: "Este é o baseline barato: payload pequeno + tag HMAC."
+- `PQC`: "Aqui entra o ciphertext ML-KEM; é por isso que os bytes saltam."
+- `PQC+CRC`: "CRC32 soma só 4 bytes, mas dá uma forma visual de detectar corrupção acidental."
 
 ### Passo 3: demonstrar falha transitória (Bit-Flip) manualmente
 
@@ -803,6 +823,15 @@ Como explicar:
 
 > A comparacao é justa porque a falha atinge o mesmo ponto no pacote. A única diferença e a presenca ou ausencia do guardiao de integridade. Sem ele, a alteração de bits gera corrupção silenciosa; com ele, garantimos que dados invalidos não afetem a operação do CubeSat.
 
+Pergunte antes de revelar:
+
+> Se um bit mudar no payload e ninguém conferir, o sistema tem como saber?
+
+Depois da segunda falha:
+
+> Esse é o papel didático do CRC32 aqui. Ele não substitui HMAC e não protege
+> contra atacante, mas transforma corrupção acidental em evento observável.
+
 > [!NOTE]
 > Os logs oficiais e dados numericos consolidados de longo prazo do projeto foram gerados anteriormente usando ferramentas automatizadas via terminal (como o script `tools/stage8_acceptance.py`). O dashboard visual é reservado unicamente para demonstração e manipulacao didática ao vivo de forma interativa e manual.
 
@@ -818,7 +847,7 @@ Esses comandos existem e sao úteis, mas devem ficar no terminal/HELP ou no
 | `RUN_BATTERY` | E coleta local, não narrativa principal |
 | `PQC_KAT` | Importante para bancada, mas técnico demais para o fluxo visual |
 | `PQC_BENCH` | Gera dados, mas não é a demo principal |
-| `PQC_FAULT` | Essencial para explicar resultado, mas melhor mostrar como tabela |
+| `PQC_FAULT` | Comando técnico opcional no terminal se a serial estiver estável; não deve virar botão |
 | `LED`, `RGB`, `BARGRAPH` | Efeito visual de hardware; no dashboard eles sao acionados indiretamente por `MISSION` |
 | sensores | Extras da placa, fora do argumento principal |
 

@@ -115,12 +115,59 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(panel.silent_failures, 1)
         self.assertEqual(panel.detected_errors, 0)
         self.assertEqual(panel.last_fault_event.result, "SILENT")
+        self.assertTrue(panel.fault_overlay_visible)
+        self.assertEqual(panel.fault_overlay["result"], "SILENT")
 
         panel._execute_command("CRC_CHECK")
         self.assertEqual(panel.fault_injections, 2)
         self.assertEqual(panel.silent_failures, 1)
         self.assertEqual(panel.detected_errors, 1)
         self.assertEqual(panel.last_fault_event.result, "DETECTED_GUARD")
+        self.assertEqual(panel.fault_overlay["guard"], "CRC32")
+        self.assertEqual(panel.fault_overlay["result"], "DETECTED_GUARD")
+
+    def test_fault_visualization_animates_and_can_pause(self):
+        panel = dashboard.DashboardPanel()
+        panel._execute_command("BIT_FLIP 0 0x01")
+
+        self.assertTrue(panel.fault_overlay_visible)
+        self.assertIsNotNone(panel.fault_flow_animation)
+        self.assertGreaterEqual(panel.fault_flow_animation["duration"], 9.5)
+        self.assertEqual(
+            [step["label"] for step in panel.fault_flow_animation["steps"]],
+            ["PAYLOAD", "BIT-FLIP", "GUARD", "VERIFICA", "RESULTADO"],
+        )
+        self.assertEqual(panel.fault_overlay["before_byte"], "0x50")
+        self.assertEqual(panel.fault_overlay["after_byte"], "0x51")
+
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            dashboard.WIDTH, dashboard.HEIGHT = 1366, 768
+            surface = pygame.Surface((1366, 768), pygame.SRCALPHA)
+            earth = dashboard.Earth()
+            satellite = dashboard.Satellite(earth)
+            panel.draw(surface, 0.5, satellite)
+            self.assertIsNotNone(panel.fault_overlay_rect)
+            self.assertIsNotNone(panel.fault_flow_control_rect)
+
+            control_rect = panel.fault_flow_control_rect
+            click = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": control_rect.center})
+            self.assertTrue(panel._handle_fault_overlay_event(click))
+            self.assertTrue(panel.fault_flow_animation["paused"])
+            paused_age = panel.fault_flow_animation["age"]
+            panel.update(2.0)
+            self.assertEqual(panel.fault_flow_animation["age"], paused_age)
+
+            self.assertTrue(panel._handle_fault_overlay_event(click))
+            self.assertFalse(panel.fault_flow_animation["paused"])
+            panel.update(0.5)
+            self.assertGreater(panel.fault_flow_animation["age"], paused_age)
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
+        panel.update(dashboard.FAULT_FLOW_ANIMATION_SECONDS + 0.1)
+        self.assertIsNone(panel.fault_flow_animation)
+        self.assertTrue(panel.fault_overlay_visible)
 
     def test_manual_bit_flip_uses_given_position_and_mask(self):
         panel = dashboard.DashboardPanel()
@@ -157,6 +204,25 @@ class DashboardCommandTests(unittest.TestCase):
 
         self.assertEqual(panel.command_history[-1]["status"], "CRC32 ON")
         self.assertEqual(data["config"]["checksum"], "CRC32")
+
+    def test_documented_dashboard_local_commands_are_routed(self):
+        panel = dashboard.DashboardPanel()
+        panel.export_session = lambda log_dir=dashboard.DEFAULT_LOG_DIR: Path("session.json")
+
+        panel._execute_command("EXPORT_JSON")
+        self.assertEqual(panel.command_history[-1]["status"], "JSON SALVO")
+        self.assertEqual(panel.last_export_path, Path("session.json"))
+
+        panel._execute_command("SAVE_SESSION")
+        self.assertEqual(panel.command_history[-1]["status"], "JSON SALVO")
+
+        panel._execute_command("DEMO 2")
+        self.assertEqual(panel.command_history[-1]["status"], "DEMO START")
+        self.assertEqual(panel.demo_state, "RUNNING_A")
+
+        panel._execute_command("DEMO_PAUSE")
+        self.assertEqual(panel.command_history[-1]["status"], "DEMO PAUSED")
+        self.assertEqual(panel.demo_state, "PAUSED")
 
     def test_invalid_manual_bit_flip_does_not_create_event(self):
         panel = dashboard.DashboardPanel()
@@ -497,6 +563,9 @@ class DashboardCommandTests(unittest.TestCase):
             satellite = dashboard.Satellite(earth)
             panel.draw(surface, 0.5, satellite)
             self.assertEqual(set(panel.mission_overlay_rects), {"CLASSIC", "PQC", "PQC_CRC32"})
+            self.assertIsNotNone(panel.mission_comparison_rect)
+            self.assertGreater(panel.mission_comparison_rect.width, 300)
+            self.assertGreater(panel.mission_comparison_rect.height, 120)
 
             original_pqc_position = panel.mission_overlay_rects["PQC"].topleft
             drag_start = panel.mission_overlay_drag_rects["PQC"].center
@@ -535,6 +604,7 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(panel.command_history[-1]["status"], "SAT OFF")
         self.assertEqual(panel.last_mission, {})
         self.assertFalse(panel.mission_overlay_visible)
+        self.assertIsNone(panel.mission_flow_animation)
         self.assertEqual(panel.hardware_samples, [])
         self.assertEqual(panel.session_status, "AGUARDANDO SAT")
 
@@ -704,6 +774,13 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(sample["pqc"]["ct_crc_after"], "0x22222222")
         self.assertEqual(sample["pqc"]["confirm_us"], 130)
         self.assertNotIn("pqc_ss", json.dumps(sample))
+        self.assertTrue(panel.fault_overlay_visible)
+        self.assertEqual(panel.fault_overlay["target"], "CIPHERTEXT")
+        self.assertEqual(panel.fault_overlay["result"], "PROTOCOL_REJECT")
+        self.assertEqual(
+            [step["label"] for step in panel.fault_flow_animation["steps"]],
+            ["CIPHERTEXT", "BIT-FLIP", "DECAP", "CONFIRMA", "RESULTADO"],
+        )
 
     def test_mission_command_requires_online_satellite(self):
         panel = dashboard.DashboardPanel()
@@ -769,6 +846,89 @@ class DashboardCommandTests(unittest.TestCase):
         data = panel._build_export_document()
         scenario = data["metrics"]["mission"]["scenarios"]["PQC_CRC32"]
         self.assertEqual(scenario["elapsed_us"], 37180)
+
+    def test_mission_response_starts_step_by_step_satellite_animation(self):
+        panel = dashboard.DashboardPanel()
+        panel.serial_connected = True
+        payload = {
+            "scenario": "PQC_CRC32",
+            "op": "mission_message",
+            "message": "HELLO_UFF",
+            "result": "DELIVERED",
+            "crypto": "ML-KEM-512",
+            "checksum": "CRC32",
+            "confirmation": "HMAC-SHA256",
+            "key_match": "1",
+            "tag_ready": "1",
+            "tag_match": "1",
+            "crc_match": "1",
+            "payload_len": "41",
+            "bytes_payload": "41",
+            "bytes_crypto": "800",
+            "bytes_checksum": "4",
+            "bytes_total": "845",
+            "keygen_us": "3679",
+            "encap_us": "3988",
+            "decap_us": "5087",
+            "tag_us": "435",
+            "verify_us": "163",
+            "crc_us": "10",
+            "elapsed_us": "13367",
+            "heap": "201412",
+            "min_heap": "197624",
+            "profile": "BASELINE",
+            "cpu_mhz": "240",
+        }
+
+        panel._apply_hardware_response("MISSION PQC_CRC32", payload)
+
+        self.assertIsNotNone(panel.mission_flow_animation)
+        self.assertGreaterEqual(panel.mission_flow_animation["duration"], 12.0)
+        self.assertFalse(panel.mission_flow_animation["paused"])
+        steps = panel.mission_flow_animation["steps"]
+        self.assertEqual(
+            [step["label"] for step in steps],
+            ["PAYLOAD", "KEYGEN", "ENCAP", "DECAP", "HMAC", "CRC32", "VERIFICA", "RESULTADO"],
+        )
+        self.assertEqual(steps[-1]["packet_bytes"], 845)
+        self.assertEqual(steps[2]["added_bytes"], 768)
+        self.assertEqual(steps[4]["added_bytes"], 32)
+        self.assertEqual(steps[5]["added_bytes"], 4)
+        self.assertIn("ciphertext ML-KEM", steps[2]["explain"])
+        self.assertTrue(panel._mission_overlay_is_animating("PQC_CRC32"))
+
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            for width, height in ((1366, 768), (1920, 1080)):
+                dashboard.WIDTH, dashboard.HEIGHT = width, height
+                surface = pygame.Surface((width, height), pygame.SRCALPHA)
+                earth = dashboard.Earth()
+                satellite = dashboard.Satellite(earth)
+                panel.draw(surface, 0.5, satellite)
+                self.assertTrue(panel.mission_overlay_visible)
+                self.assertIsNotNone(panel.mission_flow_animation)
+                self.assertIn("PQC_CRC32", panel.mission_overlay_rects)
+                self.assertIn("PQC_CRC32", panel.mission_flow_control_rects)
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
+        control_rect = panel.mission_flow_control_rects["PQC_CRC32"]
+        click = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": control_rect.center})
+        self.assertTrue(panel._handle_mission_overlay_event(click))
+        self.assertTrue(panel.mission_flow_animation["paused"])
+        paused_age = panel.mission_flow_animation["age"]
+        panel.update(2.0)
+        self.assertEqual(panel.mission_flow_animation["age"], paused_age)
+
+        self.assertTrue(panel._handle_mission_overlay_event(click))
+        self.assertFalse(panel.mission_flow_animation["paused"])
+        panel.update(0.5)
+        self.assertGreater(panel.mission_flow_animation["age"], paused_age)
+
+        panel.update(dashboard.MISSION_FLOW_ANIMATION_SECONDS + 0.1)
+        self.assertIsNone(panel.mission_flow_animation)
+        self.assertFalse(panel._mission_overlay_is_animating("PQC_CRC32"))
+        self.assertTrue(panel.mission_overlay_visible)
 
     def test_run_battery_pairs_none_and_crc32_with_same_fault_ids(self):
         panel = dashboard.DashboardPanel()

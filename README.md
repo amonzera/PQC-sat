@@ -215,6 +215,13 @@ bancada. Os comandos técnicos `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`,
 apresentação, mas podem ser digitados no terminal textual do painel quando a
 placa está conectada.
 
+`INJECT_FAULT`, `BIT_FLIP`, `CRC_CHECK`, respostas `FAULT` e respostas
+`PQC_FAULT` também abrem um popup persistente de falha. A janela mostra o fluxo
+`payload/ciphertext -> bit-flip -> guardião -> verificação -> resultado`, com
+byte antes/depois, bit alterado, CRC antes/depois, tempo e explicação curta. O
+controle `PAUSAR`/`PLAY` permite congelar o momento em que o erro fica
+silencioso ou é detectado.
+
 ## Comandos da demonstração ao vivo
 
 O painel direito tem blocos clicáveis para os comandos centrais da
@@ -245,10 +252,18 @@ disponível. Não há polling automático de `TELEMETRY`; `STATUS`, `MISSION ...
 avançados são acionados manualmente pelo botão ou pelo terminal textual. Os custos
 individuais de tempo/tráfego de cada cenário (`CLÁSSICA`, `PQC`, `PQC+CRC`) são exibidos
 diretamente no log do console do painel lateral assim que a mensagem é enviada/recebida.
-Cada envio também abre um popup persistente de métricas detalhadas. Há um popup
-independente por cenário (`CLASSIC`, `PQC`, `PQC+CRC`): o apresentador pode
-arrastar os cartões pelo topo, compará-los lado a lado e fechar cada um apenas
-pelo `X`.
+Cada resposta `MISSION` abre um popup persistente. Primeiro, a própria janela do
+popup anima o fluxo real do firmware: `payload`, `KEYGEN`, `ENCAP`, `DECAP`,
+`HMAC`, `CRC32`, verificação e resultado, mostrando microexplicações e o tamanho
+acumulado do pacote com os bytes reais da Wisdom. A animação é deliberadamente
+mais lenta e possui um botão discreto `PAUSAR`/`PLAY` para o apresentador parar
+em `KEYGEN`, `ENCAP`, `DECAP`, `HMAC` ou `CRC32` e explicar o custo técnico. Ao
+final da animação, a mesma janela passa a exibir as métricas detalhadas. Há um
+popup independente por cenário (`CLASSIC`, `PQC`, `PQC+CRC`): o apresentador
+pode arrastar os cartões pelo topo, compará-los lado a lado e fechar cada um
+apenas pelo `X`. Quando dois ou mais cenários estão abertos, o dashboard mostra
+um comparador automático com tempo, bytes e composição do pacote (`payload`,
+`HMAC`, ciphertext `ML-KEM` e `CRC32`).
 Respostas `MISSION` e `PQC_*` entram no JSON como métricas estruturadas,
 incluindo tempos, bytes, KAT, `key_match`, `key_confirmed`, `tag_match`,
 tamanhos e CRCs curtos, sem exportar segredos completos.

@@ -120,6 +120,31 @@ projeto sem reconstruir decisões antigas:
   serial real da Wisdom. `ENVIAR MSG` não gera métricas por replay local quando
   a placa está ausente; o modo `--simulated` fica restrito a ensaio visual e
   testes de layout.
+- 2026-06-21: apresentação de 20 minutos reforçada com momentos de impacto:
+  comparador visual automático para popups `MISSION`, roteiro com perguntas de
+  previsão para a turma, painel `RESULTADOS` reorganizado em custo, segurança e
+  limites, e documentação orientada a conduzir descoberta em vez de apenas
+  relatar números.
+- 2026-06-22: dashboard ganhou animação lúdica passo a passo acionada por
+  resposta real `MISSION` dentro do próprio popup de mensagem. A janela mostra
+  `payload`, `KEYGEN`, `ENCAP`, `DECAP`, `HMAC`, `CRC32`, verificação, resultado,
+  microexplicações e crescimento do pacote com os bytes medidos pela Wisdom. A
+  animação não gera replay local quando a placa está ausente; ao final, o popup
+  troca automaticamente para as métricas detalhadas.
+- 2026-06-22: auditoria de interfaces sem hardware corrigiu bugs de produção:
+  `HELP` do console serial agora é local e não é enviado à placa, `--list-ports`
+  não falha quando não há porta conectada, `stage8_acceptance.py` trata porta
+  ausente sem traceback, comandos locais documentados (`EXPORT_JSON`,
+  `SAVE_SESSION` e `DEMO*`) foram roteados no dashboard, e popups/comparador de
+  mensagens foram ajustados para caber em 1366x768 e 1920x1080.
+- 2026-06-22: animação interna de mensagem foi desacelerada e ganhou controle
+  discreto `PAUSAR`/`PLAY` dentro do popup. O apresentador pode congelar o fluxo
+  em `KEYGEN`, `ENCAP`, `DECAP`, `HMAC` ou `CRC32`, explicar o crescimento do
+  pacote e retomar sem perder a resposta real da placa.
+- 2026-06-22: falhas também ganharam popup didático persistente e pausável. O
+  fluxo mostra `payload/ciphertext`, bit-flip, guardião, verificação e
+  resultado, incluindo byte antes/depois, CRC antes/depois e diferença entre
+  `SILENT`, `DETECTED_GUARD`, `KEY_MISMATCH` e `PROTOCOL_REJECT`.
 
 O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar

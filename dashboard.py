@@ -55,6 +55,8 @@ DEMO_DEFAULT_ATTEMPTS = 5
 DEMO_FAULT_INTERVAL_SECONDS = 0.55
 DEMO_SNAPSHOT_SECONDS = 1.5
 DEMO_RESULTS_SECONDS = 8.0
+MISSION_FLOW_ANIMATION_SECONDS = 12.0
+FAULT_FLOW_ANIMATION_SECONDS = 9.5
 HELP_HINT_LINES = (
     "Botões: comandos visuais da demo.",
     "Terminal: HELP mostra comandos avançados.",
@@ -1112,6 +1114,16 @@ class DashboardPanel:
         self.battery_runs = 0
         self.telemetry_poll_timer = 0.0
         self.last_fault_event = None
+        self.fault_overlay_visible = False
+        self.fault_overlay = {}
+        self.fault_overlay_position = None
+        self.fault_overlay_rect = None
+        self.fault_overlay_close_rect = None
+        self.fault_overlay_drag_rect = None
+        self.fault_flow_control_rect = None
+        self.dragging_fault_overlay = False
+        self.fault_drag_offset = (0, 0)
+        self.fault_flow_animation = None
         self.checksum_enabled = False
         self.pqc_enabled = True
         self.classic_enabled = False
@@ -1141,8 +1153,11 @@ class DashboardPanel:
         self.mission_overlay_rects = {}
         self.mission_overlay_close_rects = {}
         self.mission_overlay_drag_rects = {}
+        self.mission_flow_control_rects = {}
+        self.mission_comparison_rect = None
         self.dragging_mission_overlay = None
         self.mission_drag_offset = (0, 0)
+        self.mission_flow_animation = None
         self.effect_timer = 0.0
         self.effect_result = ""
         self.effect_label = ""
@@ -1200,6 +1215,9 @@ class DashboardPanel:
                 return
             return
 
+        if self._handle_fault_overlay_event(event):
+            return True
+
         if self._handle_mission_overlay_event(event):
             return True
 
@@ -1245,6 +1263,13 @@ class DashboardPanel:
                     return True
 
             for scenario in reversed(self.mission_overlay_order):
+                control_rect = self.mission_flow_control_rects.get(scenario)
+                if control_rect is not None and control_rect.collidepoint(event.pos):
+                    self._toggle_mission_flow_pause(scenario)
+                    self._bring_mission_overlay_to_front(scenario)
+                    return True
+
+            for scenario in reversed(self.mission_overlay_order):
                 rect = self.mission_overlay_rects.get(scenario)
                 drag_rect = self.mission_overlay_drag_rects.get(scenario)
                 if drag_rect is not None and drag_rect.collidepoint(event.pos):
@@ -1270,6 +1295,60 @@ class DashboardPanel:
             return True
 
         return False
+
+    def _handle_fault_overlay_event(self, event):
+        if not getattr(self, "fault_overlay_visible", False):
+            return False
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.fault_overlay_close_rect is not None and self.fault_overlay_close_rect.collidepoint(event.pos):
+                self._close_fault_overlay()
+                return True
+            if self.fault_flow_control_rect is not None and self.fault_flow_control_rect.collidepoint(event.pos):
+                self._toggle_fault_flow_pause()
+                return True
+            if self.fault_overlay_drag_rect is not None and self.fault_overlay_drag_rect.collidepoint(event.pos):
+                rect = self.fault_overlay_rect or self.fault_overlay_drag_rect
+                self.dragging_fault_overlay = True
+                self.fault_drag_offset = (event.pos[0] - rect.x, event.pos[1] - rect.y)
+                return True
+            if self.fault_overlay_rect is not None and self.fault_overlay_rect.collidepoint(event.pos):
+                return True
+
+        if event.type == pygame.MOUSEMOTION and self.dragging_fault_overlay:
+            width, height = self._fault_overlay_size()
+            x = event.pos[0] - self.fault_drag_offset[0]
+            y = event.pos[1] - self.fault_drag_offset[1]
+            self.fault_overlay_position = self._clamp_overlay_position(x, y, width, height)
+            return True
+
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging_fault_overlay:
+            self.dragging_fault_overlay = False
+            return True
+
+        return False
+
+    def _toggle_fault_flow_pause(self):
+        if self.fault_flow_animation is None:
+            return
+        paused = not bool(self.fault_flow_animation.get("paused"))
+        self.fault_flow_animation["paused"] = paused
+
+    def _close_fault_overlay(self):
+        self.fault_overlay_visible = False
+        self.fault_overlay = {}
+        self.fault_overlay_rect = None
+        self.fault_overlay_close_rect = None
+        self.fault_overlay_drag_rect = None
+        self.fault_flow_control_rect = None
+        self.dragging_fault_overlay = False
+        self.fault_flow_animation = None
+
+    def _toggle_mission_flow_pause(self, scenario):
+        if not self._mission_overlay_is_animating(scenario):
+            return
+        paused = not bool(self.mission_flow_animation.get("paused"))
+        self.mission_flow_animation["paused"] = paused
 
     def _execute_command(self, cmd):
         """Processa um comando digitado."""
@@ -1330,8 +1409,12 @@ class DashboardPanel:
             status = "SHOW_RESULTS" if self.results_overlay_visible else "HIDE_RESULTS"
         elif cmd_upper == "CRC_CHECK":
             status = self._run_experiment_command("CRC32")
+        elif cmd_upper in {"EXPORT_JSON", "SAVE_SESSION"}:
+            status = self._export_session_status()
         elif command_name == "RUN_BATTERY":
             status = self._run_battery_command(parts[1:])
+        elif command_name.startswith("DEMO"):
+            status = self._execute_demo_command(command_name, parts[1:])
         elif command_name == "PING" and self.serial_client is None:
             status = "LOOP LOCAL OK"
         elif command_name == "TELEMETRY" and self.serial_client is None:
@@ -1485,6 +1568,7 @@ class DashboardPanel:
         self.session_dirty = True
         self._refresh_experiment_metrics()
         self._trigger_fault_effect(event)
+        self._open_fault_overlay_from_event(event)
 
         if self.serial_connected:
             self._queue_serial_command(event.to_firmware_command(), visible=True)
@@ -1508,6 +1592,16 @@ class DashboardPanel:
         self.hardware_samples.clear()
         self.battery_runs = 0
         self.last_fault_event = None
+        self.fault_overlay_visible = False
+        self.fault_overlay.clear()
+        self.fault_overlay_position = None
+        self.fault_overlay_rect = None
+        self.fault_overlay_close_rect = None
+        self.fault_overlay_drag_rect = None
+        self.fault_flow_control_rect = None
+        self.dragging_fault_overlay = False
+        self.fault_drag_offset = (0, 0)
+        self.fault_flow_animation = None
         self.demo_state = "IDLE"
         self.demo_previous_state = "IDLE"
         self.demo_specs = []
@@ -1527,8 +1621,11 @@ class DashboardPanel:
         self.mission_overlay_rects.clear()
         self.mission_overlay_close_rects.clear()
         self.mission_overlay_drag_rects.clear()
+        self.mission_flow_control_rects.clear()
+        self.mission_comparison_rect = None
         self.dragging_mission_overlay = None
         self.mission_drag_offset = (0, 0)
+        self.mission_flow_animation = None
         self.message_preset = "PQC"
         self.classic_enabled = False
         self.pqc_enabled = True
@@ -1897,6 +1994,234 @@ class DashboardPanel:
             self.effect_color = C_ACCENT_GREEN
             self.effect_label = event.result
 
+    def _open_fault_overlay_from_event(self, event):
+        before_byte = self._byte_from_hex_at(event.before_hex, event.byte_index)
+        after_byte = self._byte_from_hex_at(event.after_hex, event.byte_index)
+        fault = {
+            "source": event.mode,
+            "target": event.target,
+            "guard": event.guard,
+            "result": event.result,
+            "byte_index": event.byte_index,
+            "bit_mask": f"0x{event.bit_mask_hex}",
+            "before_byte": self._format_hex_byte(before_byte),
+            "after_byte": self._format_hex_byte(after_byte),
+            "before_hex": event.before_hex,
+            "after_hex": event.after_hex,
+            "crc_before": event.crc_before,
+            "crc_after": event.crc_after,
+            "guard_prepare_us": event.guard_prepare_us,
+            "guard_verify_us": event.guard_verify_us,
+            "guard_overhead_us": event.guard_overhead_us,
+            "elapsed_us": event.elapsed_us,
+            "mode": event.mode,
+        }
+        self._open_fault_overlay(fault)
+
+    def _open_fault_overlay_from_payload(self, command, payload):
+        command_name = command.split()[0].upper()
+        is_pqc_fault = command_name == "PQC_FAULT"
+        target = str(payload.get("target", "CIPHERTEXT" if is_pqc_fault else "PAYLOAD")).upper()
+        guard = payload.get("guard")
+        if not guard:
+            confirmation = str(payload.get("confirmation", "NONE")).upper()
+            guard = "KEY_CONFIRM" if is_pqc_fault and confirmation != "NONE" else "NONE"
+        crc_before = payload.get("crc_before") or payload.get("ct_crc_before", "")
+        crc_after = payload.get("crc_after") or payload.get("ct_crc_after", "")
+        fault = {
+            "source": "HARDWARE",
+            "target": target,
+            "guard": str(guard).upper(),
+            "result": str(payload.get("result", "")),
+            "byte_index": _optional_int(payload.get("byte_index")),
+            "bit_mask": self._format_mask(payload.get("bit_mask")),
+            "before_byte": self._format_hex_byte(payload.get("before_byte") or payload.get("before")),
+            "after_byte": self._format_hex_byte(payload.get("after_byte") or payload.get("after")),
+            "before_hex": payload.get("before_hex", ""),
+            "after_hex": payload.get("after_hex", ""),
+            "crc_before": str(crc_before),
+            "crc_after": str(crc_after),
+            "guard_prepare_us": _optional_int(payload.get("guard_prepare_us")),
+            "guard_verify_us": _optional_int(payload.get("guard_verify_us")),
+            "guard_overhead_us": _optional_int(payload.get("guard_overhead_us")),
+            "key_match": payload.get("key_match"),
+            "key_confirmed": payload.get("key_confirmed"),
+            "tag_match": payload.get("tag_match"),
+            "confirmation": payload.get("confirmation", ""),
+            "decap_us": _optional_int(payload.get("decap_us")),
+            "confirm_us": _optional_int(payload.get("confirm_us")),
+            "elapsed_us": _optional_int(payload.get("elapsed_us")),
+            "mode": "HARDWARE",
+        }
+        self._open_fault_overlay(fault)
+
+    def _open_fault_overlay(self, fault):
+        self.fault_overlay = dict(fault)
+        self.fault_overlay_visible = True
+        if self.fault_overlay_position is None:
+            self.fault_overlay_position = self._default_fault_overlay_position()
+        self.fault_flow_animation = {
+            "steps": self._fault_flow_steps(fault),
+            "age": 0.0,
+            "duration": FAULT_FLOW_ANIMATION_SECONDS,
+            "paused": False,
+        }
+
+    @staticmethod
+    def _parse_int_auto(value):
+        if value is None or value == "":
+            return None
+        if isinstance(value, int):
+            return value
+        text = str(value).strip()
+        try:
+            return int(text, 0)
+        except ValueError:
+            try:
+                return int(text, 16)
+            except ValueError:
+                return None
+
+    @classmethod
+    def _format_hex_byte(cls, value):
+        parsed = cls._parse_int_auto(value)
+        if parsed is None:
+            return "--"
+        return f"0x{parsed & 0xFF:02X}"
+
+    @classmethod
+    def _format_mask(cls, value):
+        parsed = cls._parse_int_auto(value)
+        if parsed is None:
+            return str(value or "--")
+        return f"0x{parsed & 0xFF:02X}"
+
+    @classmethod
+    def _byte_from_hex_at(cls, hex_value, byte_index):
+        if byte_index is None:
+            return None
+        text = str(hex_value or "").strip().replace("0x", "").replace("0X", "")
+        start = int(byte_index) * 2
+        if start < 0 or start + 2 > len(text):
+            return None
+        try:
+            return int(text[start:start + 2], 16)
+        except ValueError:
+            return None
+
+    def _fault_flow_steps(self, fault):
+        result = str(fault.get("result", ""))
+        guard = str(fault.get("guard", "NONE")).upper()
+        target = str(fault.get("target", "PAYLOAD")).upper()
+        crc_changed = bool(fault.get("crc_before") and fault.get("crc_after") and fault.get("crc_before") != fault.get("crc_after"))
+        is_pqc = target == "CIPHERTEXT" or guard == "KEY_CONFIRM"
+
+        if is_pqc:
+            return (
+                {
+                    "label": "CIPHERTEXT",
+                    "detail": "pacote ML-KEM antes da falha",
+                    "explain": "A falha é aplicada no ciphertext ML-KEM. A mensagem ainda depende da decapsulação correta.",
+                    "color": C_ACCENT_PURPLE,
+                },
+                {
+                    "label": "BIT-FLIP",
+                    "detail": f"byte {fault.get('byte_index', '--')} mask {fault.get('bit_mask', '--')}",
+                    "explain": "Um único bit é invertido. Em PQC isso pode mudar o segredo derivado pelo receptor.",
+                    "color": C_ACCENT_RED,
+                },
+                {
+                    "label": "DECAP",
+                    "detail": "tenta recuperar segredo",
+                    "explain": "A Wisdom decapsula o ciphertext corrompido e compara o segredo esperado.",
+                    "color": C_ACCENT_PURPLE,
+                    "time_us": fault.get("decap_us"),
+                },
+                {
+                    "label": "CONFIRMA",
+                    "detail": str(fault.get("confirmation") or guard),
+                    "explain": "A confirmação HMAC testa se as duas pontas chegaram ao mesmo segredo sem revelar a chave.",
+                    "color": C_ACCENT_ORANGE,
+                    "time_us": fault.get("confirm_us"),
+                },
+                {
+                    "label": "RESULTADO",
+                    "detail": self._fault_result_label(result),
+                    "explain": self._fault_result_explanation(fault),
+                    "color": self._fault_result_color(result),
+                    "time_us": fault.get("elapsed_us"),
+                },
+            )
+
+        return (
+            {
+                "label": "PAYLOAD",
+                "detail": "mensagem antes da radiação simulada",
+                "explain": "Começamos com o payload íntegro. É o mesmo tipo de dado que o satélite enviaria na missão.",
+                "color": C_ACCENT_BLUE,
+            },
+            {
+                "label": "BIT-FLIP",
+                "detail": f"byte {fault.get('byte_index', '--')} mask {fault.get('bit_mask', '--')}",
+                "explain": "A radiação simulada inverte um único bit. O byte muda, mas o sistema ainda precisa perceber.",
+                "color": C_ACCENT_RED,
+            },
+            {
+                "label": "GUARD",
+                "detail": "CRC32 ativo" if guard == "CRC32" else "sem checksum",
+                "explain": "Com CRC32, guardamos uma assinatura curta do payload. Sem ele, não há comparação de integridade.",
+                "color": C_ACCENT_GREEN if guard == "CRC32" else C_TEXT_DIM,
+            },
+            {
+                "label": "VERIFICA",
+                "detail": "CRC divergiu" if crc_changed else "nada compara",
+                "explain": "Depois do bit-flip, recalculamos o CRC. Se mudou, a corrupção fica visível antes da entrega.",
+                "color": C_ACCENT_ORANGE if guard == "CRC32" else C_TEXT_DIM,
+                "time_us": fault.get("guard_verify_us"),
+            },
+            {
+                "label": "RESULTADO",
+                "detail": self._fault_result_label(result),
+                "explain": self._fault_result_explanation(fault),
+                "color": self._fault_result_color(result),
+                "time_us": fault.get("elapsed_us"),
+            },
+        )
+
+    @staticmethod
+    def _fault_result_color(result):
+        if result == "SILENT":
+            return C_ACCENT_RED
+        if result in {"DETECTED_GUARD", "PROTOCOL_REJECT", "KEY_MISMATCH"}:
+            return C_ACCENT_GREEN
+        return C_ACCENT_CYAN
+
+    @staticmethod
+    def _fault_result_label(result):
+        labels = {
+            "SILENT": "FALHA SILENCIOSA",
+            "DETECTED_GUARD": "DETECTADA",
+            "PROTOCOL_REJECT": "REJEIÇÃO DO PROTOCOLO",
+            "KEY_MISMATCH": "CHAVE DIVERGENTE",
+            "OK": "SEM IMPACTO",
+        }
+        return labels.get(str(result), str(result or "--"))
+
+    def _fault_result_explanation(self, fault):
+        result = str(fault.get("result", ""))
+        target = str(fault.get("target", "PAYLOAD")).upper()
+        if result == "SILENT":
+            return "Sem guardião, o payload mudou e seguiria como se estivesse correto. É a falha didática perigosa."
+        if result == "DETECTED_GUARD":
+            return "O CRC32 antes/depois divergiu. A corrupção foi detectada antes de aceitar o payload."
+        if result == "PROTOCOL_REJECT":
+            return "A confirmação autenticada falhou. O protocolo rejeita o ciphertext corrompido."
+        if result == "KEY_MISMATCH":
+            return "A decapsulação produziu segredo diferente. Sem confirmação, isso vira divergência de chave."
+        if target == "CIPHERTEXT":
+            return "A falha atingiu o material PQC; compare segredo, tag e resultado final."
+        return "A tentativa terminou sem divergência observada."
+
     def _queue_serial_command(self, command_line, visible=True):
         if self.serial_client is None:
             self._append_history(command_line, "SERIAL OFF")
@@ -1912,6 +2237,18 @@ class DashboardPanel:
             self.effect_timer = max(0.0, self.effect_timer - dt)
         if self.mission_effect_timer > 0:
             self.mission_effect_timer = max(0.0, self.mission_effect_timer - dt)
+        if self.mission_flow_animation is not None and not self.mission_flow_animation.get("paused"):
+            self.mission_flow_animation["age"] += dt
+            if self.mission_flow_animation["age"] >= self.mission_flow_animation["duration"]:
+                scenario = self.mission_flow_animation.get("scenario")
+                if scenario:
+                    self.mission_flow_control_rects.pop(scenario, None)
+                self.mission_flow_animation = None
+        if self.fault_flow_animation is not None and not self.fault_flow_animation.get("paused"):
+            self.fault_flow_animation["age"] += dt
+            if self.fault_flow_animation["age"] >= self.fault_flow_animation["duration"]:
+                self.fault_flow_control_rect = None
+                self.fault_flow_animation = None
         self._advance_demo(dt)
         self._poll_telemetry(dt)
         self._drain_serial_events()
@@ -1969,6 +2306,7 @@ class DashboardPanel:
             if payload.get("result"):
                 self.session_status = f"HW {payload['result']}"
             self.hardware_payload = payload
+            self._open_fault_overlay_from_payload(command, payload)
         elif command.startswith("TELEMETRY"):
             self.hardware_payload = payload
         elif command.startswith("STATUS"):
@@ -1977,6 +2315,8 @@ class DashboardPanel:
         elif command.startswith("PQC_"):
             self.hardware_payload = payload
             self._update_pqc_label(payload)
+            if command.startswith("PQC_FAULT"):
+                self._open_fault_overlay_from_payload(command, payload)
         elif command.startswith("MISSION"):
             self.hardware_payload = payload
             self._open_mission_overlay(payload)
@@ -2004,6 +2344,138 @@ class DashboardPanel:
         self.last_mission = dict(mission)
         self.mission_effect_timer = 1.2
         self.mission_overlay_visible = True
+        self._start_mission_flow_animation(mission)
+
+    def _start_mission_flow_animation(self, mission):
+        steps = self._mission_flow_steps(mission)
+        if not steps:
+            self.mission_flow_animation = None
+            return
+        self.mission_flow_animation = {
+            "scenario": self._normalize_mission_scenario(mission.get("scenario", "MISSION")),
+            "mission": dict(mission),
+            "steps": steps,
+            "age": 0.0,
+            "duration": MISSION_FLOW_ANIMATION_SECONDS,
+            "paused": False,
+        }
+
+    def _mission_flow_steps(self, mission):
+        scenario = self._normalize_mission_scenario(mission.get("scenario", "MISSION"))
+        parts = {label: value for label, value, _color in self._mission_package_parts(mission)}
+        payload = parts.get("payload", 0)
+        hmac = parts.get("HMAC", 0)
+        mlkem = parts.get("ML-KEM", 0)
+        checksum = parts.get("CRC", 0)
+        total = self._mission_int(mission, "bytes_total", payload + hmac + mlkem + checksum)
+
+        if total <= 0:
+            return []
+
+        steps = [
+            {
+                "label": "PAYLOAD",
+                "detail": "mensagem base",
+                "explain": "A placa recebe o payload bruto. Ainda não há bytes de autenticação, KEM ou checksum anexados.",
+                "kind": "payload",
+                "packet_bytes": payload,
+                "added_bytes": payload,
+                "time_us": None,
+                "color": C_ACCENT_BLUE,
+            }
+        ]
+
+        if scenario in {"PQC", "PQC_CRC32"}:
+            steps.extend(
+                (
+                    {
+                        "label": "KEYGEN",
+                        "detail": "gera chaves ML-KEM",
+                        "explain": "A Wisdom cria o par ML-KEM-512. É custo local de CPU/RAM; o pacote ainda não cresce.",
+                        "kind": "keygen",
+                        "packet_bytes": payload,
+                        "added_bytes": 0,
+                        "time_us": self._mission_int(mission, "keygen_us"),
+                        "color": C_ACCENT_PURPLE,
+                    },
+                    {
+                        "label": "ENCAP",
+                        "detail": "encapsula segredo",
+                        "explain": "O emissor usa a chave pública para encapsular um segredo. O ciphertext ML-KEM entra no pacote.",
+                        "kind": "mlkem",
+                        "packet_bytes": payload + mlkem,
+                        "added_bytes": mlkem,
+                        "time_us": self._mission_int(mission, "encap_us"),
+                        "color": C_ACCENT_PURPLE,
+                    },
+                    {
+                        "label": "DECAP",
+                        "detail": "recupera segredo",
+                        "explain": "O receptor decapsula o ciphertext e deriva o mesmo segredo. Bit-flip crítico pode ser rejeitado.",
+                        "kind": "decap",
+                        "packet_bytes": payload + mlkem,
+                        "added_bytes": 0,
+                        "time_us": self._mission_int(mission, "decap_us"),
+                        "color": C_ACCENT_PURPLE,
+                    },
+                )
+            )
+
+        steps.append(
+            {
+                "label": "HMAC",
+                "detail": "autenticação",
+                "explain": "A placa calcula HMAC-SHA256 com o segredo. A tag autentica mensagem e chave.",
+                "kind": "hmac",
+                "packet_bytes": payload + mlkem + hmac,
+                "added_bytes": hmac,
+                "time_us": self._mission_int(mission, "tag_us"),
+                "color": C_ACCENT_ORANGE,
+            }
+        )
+
+        if checksum > 0 or scenario == "PQC_CRC32":
+            steps.append(
+                {
+                    "label": "CRC32",
+                    "detail": "checksum do payload",
+                    "explain": "O CRC32 adiciona 4 bytes baratos. Não é criptografia; revela bit-flip acidental no payload.",
+                    "kind": "crc",
+                    "packet_bytes": payload + mlkem + hmac + checksum,
+                    "added_bytes": checksum,
+                    "time_us": self._mission_int(mission, "crc_us"),
+                    "color": C_ACCENT_GREEN,
+                }
+            )
+
+        verify_detail = "verifica CRC e tag" if checksum > 0 else "verifica tag"
+        verify_time = self._mission_int(mission, "verify_us") + (self._mission_int(mission, "crc_us") if checksum > 0 else 0)
+        steps.append(
+            {
+            "label": "VERIFICA",
+            "detail": verify_detail,
+            "explain": "No recebimento, a Wisdom recalcula tag e CRC. A comparação decide entrega, silêncio ou rejeição.",
+                "kind": "verify",
+                "packet_bytes": payload + mlkem + hmac + checksum,
+                "added_bytes": 0,
+                "time_us": verify_time,
+                "color": C_ACCENT_GREEN if checksum > 0 else C_TEXT_PRIMARY,
+            }
+        )
+
+        steps.append(
+            {
+            "label": "RESULTADO",
+            "detail": str(mission.get("result", "DELIVERED")),
+            "explain": "Fluxo concluído. Compare tempo, bytes, heap e flags para medir o custo prático.",
+                "kind": "send",
+                "packet_bytes": total,
+                "added_bytes": 0,
+                "time_us": self._mission_int(mission, "elapsed_us"),
+                "color": self._scenario_color(scenario),
+            }
+        )
+        return steps
 
     def _bring_mission_overlay_to_front(self, scenario):
         if scenario not in self.mission_overlay_order:
@@ -2018,9 +2490,12 @@ class DashboardPanel:
         self.mission_overlay_rects.pop(scenario, None)
         self.mission_overlay_close_rects.pop(scenario, None)
         self.mission_overlay_drag_rects.pop(scenario, None)
+        self.mission_flow_control_rects.pop(scenario, None)
         self.mission_overlay_order = [item for item in self.mission_overlay_order if item != scenario]
         if self.dragging_mission_overlay == scenario:
             self.dragging_mission_overlay = None
+        if self.mission_flow_animation and self.mission_flow_animation.get("scenario") == scenario:
+            self.mission_flow_animation = None
         self._sync_mission_overlay_state()
 
     def _sync_mission_overlay_state(self):
@@ -2290,6 +2765,7 @@ class DashboardPanel:
         self._draw_top_metrics(surface, t)
         self._draw_demo_overlay(surface, t)
         self._draw_mission_overlay(surface, t)
+        self._draw_fault_overlay(surface, t)
         self._draw_bottom_bar(surface, t)
         if getattr(self, "results_overlay_visible", False):
             self._draw_results_overlay(surface, t)
@@ -2458,16 +2934,23 @@ class DashboardPanel:
         ry += 6
         pygame.draw.line(surface, C_PANEL_BORDER, (rx, ry), (rx + rw, ry), 1)
         ry += 14
-        surface.blit(self._render_clipped(FONT_LABEL, "CONCLUSÕES PARA O SEMINÁRIO", C_ACCENT_GREEN, rw), (rx, ry))
+        surface.blit(self._render_clipped(FONT_LABEL, "TRÊS MENSAGENS PARA FECHAR", C_ACCENT_GREEN, rw), (rx, ry))
         ry += 24
-        conclusions = (
-            "ML-KEM-512 real funcionou na Wisdom, mas custou muito mais tempo que o baseline simétrico.",
-            "CRC32 é barato e didático para mostrar detecção de corrupção, mas não substitui HMAC.",
-            "Próximo passo científico: medir energia elétrica real com instrumento externo.",
+        block_gap = 8
+        block_w = max(120, (rw - block_gap * 2) // 3)
+        block_h = min(74, max(58, right.bottom - ry - 8))
+        narrative_blocks = (
+            ("CUSTO", "PQC: 18,8x tempo e 11,5x bytes.", C_ACCENT_ORANGE),
+            ("SEGURANÇA", "CRC detecta; HMAC autentica.", C_ACCENT_GREEN),
+            ("LIMITES", "Energia real fica como próximo passo.", C_ACCENT_CYAN),
         )
-        for note in conclusions:
-            ry = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, rx, ry, rw, line_spacing=18, max_lines=2)
-            ry += 3
+        for index, (label, body, color) in enumerate(narrative_blocks):
+            bx = rx + index * (block_w + block_gap)
+            bw = block_w if index < 2 else rw - (block_w + block_gap) * 2
+            pygame.draw.rect(surface, (15, 20, 38), (bx, ry, bw, block_h), border_radius=5)
+            pygame.draw.rect(surface, color, (bx, ry, bw, block_h), width=1, border_radius=5)
+            surface.blit(self._render_clipped(FONT_LABEL, label, color, bw - 12), (bx + 7, ry + 7))
+            self._draw_wrapped_text(surface, FONT_LABEL, body, C_TEXT_PRIMARY, bx + 7, ry + 27, bw - 14, line_spacing=15, max_lines=2)
 
     def _draw_fault_effect(self, surface, t, satellite):
         if self.effect_timer <= 0:
@@ -2489,6 +2972,262 @@ class DashboardPanel:
         if self._fault_overlay_surface is None or self._fault_overlay_surface.get_size() != size:
             self._fault_overlay_surface = pygame.Surface(size, pygame.SRCALPHA)
         return self._fault_overlay_surface
+
+    def _fault_overlay_size(self):
+        width = 386 if WIDTH >= 1600 else 350
+        width = min(width, max(300, WIDTH - 40))
+        height = min(360, max(332, HEIGHT - 120))
+        return width, height
+
+    def _default_fault_overlay_position(self):
+        width, height = self._fault_overlay_size()
+        left = 340
+        right = WIDTH - 420
+        y = 116 + max(0, self._top_metrics_rows() - 1) * 54
+        if right - left >= width:
+            x = right - width
+        else:
+            x = (WIDTH - width) // 2
+            y += 28
+        return self._clamp_overlay_position(x, y, width, height)
+
+    @staticmethod
+    def _clamp_overlay_position(x, y, width, height):
+        min_y = 50
+        max_x = max(10, WIDTH - width - 10)
+        max_y = max(min_y, HEIGHT - height - 44)
+        return max(10, min(int(x), max_x)), max(min_y, min(int(y), max_y))
+
+    def _fault_overlay_geometry(self):
+        width, height = self._fault_overlay_size()
+        if self.fault_overlay_position is None:
+            self.fault_overlay_position = self._default_fault_overlay_position()
+        x, y = self._clamp_overlay_position(*self.fault_overlay_position, width, height)
+        self.fault_overlay_position = (x, y)
+        rect = pygame.Rect(x, y, width, height)
+        close_rect = pygame.Rect(rect.right - 36, rect.y + 9, 24, 24)
+        return rect, close_rect
+
+    def _draw_fault_overlay(self, surface, t):
+        if not self.fault_overlay_visible or not self.fault_overlay:
+            self.fault_overlay_rect = None
+            self.fault_overlay_close_rect = None
+            self.fault_overlay_drag_rect = None
+            self.fault_flow_control_rect = None
+            return
+
+        rect, close_rect = self._fault_overlay_geometry()
+        drag_rect = pygame.Rect(rect.x, rect.y, rect.width, 44)
+        self.fault_overlay_rect = rect
+        self.fault_overlay_close_rect = close_rect
+        self.fault_overlay_drag_rect = drag_rect
+
+        result = str(self.fault_overlay.get("result", ""))
+        color = self._fault_result_color(result)
+        panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        pulse = int(150 + 45 * math.sin(t * 8)) if self.effect_timer > 0 else 150
+        pygame.draw.rect(panel, (*C_PANEL_BG, 232), (0, 0, rect.width, rect.height), border_radius=8)
+        pygame.draw.rect(panel, (*color, max(120, pulse)), (0, 0, rect.width, rect.height), width=1, border_radius=8)
+        pygame.draw.rect(panel, (*color, 34), (0, 0, rect.width, 44), border_radius=8)
+        pygame.draw.line(panel, (*C_PANEL_BORDER, 180), (0, 44), (rect.width, 44), 1)
+        surface.blit(panel, rect.topleft)
+
+        title = f"FALHA {self.fault_overlay.get('target', 'PAYLOAD')} | {self._fault_result_label(result)}"
+        surface.blit(self._render_clipped(FONT_SMALL, title, C_TEXT_PRIMARY, rect.width - 62), (rect.x + 14, rect.y + 12))
+        pygame.draw.rect(surface, (58, 18, 28), close_rect, border_radius=5)
+        pygame.draw.rect(surface, C_ACCENT_RED, close_rect, width=1, border_radius=5)
+        x_text = FONT_SMALL.render("X", True, C_TEXT_PRIMARY)
+        surface.blit(x_text, (close_rect.centerx - x_text.get_width() // 2, close_rect.centery - x_text.get_height() // 2))
+
+        subtitle = (
+            f"{self.fault_overlay.get('guard', '--')}  "
+            f"byte={self.fault_overlay.get('byte_index', '--')}  "
+            f"mask={self.fault_overlay.get('bit_mask', '--')}"
+        )
+        surface.blit(self._render_clipped(FONT_LABEL, subtitle, C_TEXT_DIM, rect.width - 28), (rect.x + 14, rect.y + 48))
+
+        if self.fault_flow_animation is not None:
+            self._draw_fault_overlay_flow(surface, rect, self.fault_overlay, t)
+            return
+
+        self._draw_fault_overlay_details(surface, rect, self.fault_overlay)
+
+    def _draw_fault_overlay_flow(self, surface, rect, fault, t):
+        animation = self.fault_flow_animation
+        if animation is None:
+            return
+        steps = animation.get("steps", ())
+        if not steps:
+            return
+
+        active_index, local_progress = self._mission_flow_active_state(animation)
+        active_step = steps[active_index]
+        color = active_step["color"]
+        paused = bool(animation.get("paused"))
+
+        x = rect.x + 14
+        y = rect.y + 72
+        width = rect.width - 28
+
+        header = f"FALHA PASSO {active_index + 1}/{len(steps)}"
+        control_rect = pygame.Rect(rect.right - 82, y - 2, 64, 22)
+        self.fault_flow_control_rect = control_rect
+        surface.blit(self._render_clipped(FONT_LABEL, header, C_ACCENT_CYAN, width - 76), (x, y))
+        button_label = "PLAY" if paused else "PAUSAR"
+        pygame.draw.rect(surface, (16, 22, 42), control_rect, border_radius=4)
+        pygame.draw.rect(surface, C_ACCENT_ORANGE if paused else C_PANEL_BORDER, control_rect, width=1, border_radius=4)
+        button_text = FONT_LABEL.render(button_label, True, C_ACCENT_ORANGE if paused else C_TEXT_DIM)
+        surface.blit(
+            button_text,
+            (
+                control_rect.centerx - button_text.get_width() // 2,
+                control_rect.centery - button_text.get_height() // 2,
+            ),
+        )
+        y += 18
+
+        step_rect = pygame.Rect(x, y, width, 96)
+        pygame.draw.rect(surface, (14, 20, 38), step_rect, border_radius=5)
+        pygame.draw.rect(surface, color, step_rect, width=1, border_radius=5)
+        step_title = f"{active_step['label']} - {active_step['detail']}"
+        surface.blit(self._render_clipped(FONT_SMALL, step_title, color, width - 14), (step_rect.x + 7, step_rect.y + 7))
+        time_us = active_step.get("time_us")
+        metric = _format_elapsed(time_us) if time_us not in {None, ""} else self._fault_step_metric(fault, active_step["label"])
+        surface.blit(self._render_clipped(FONT_LABEL, metric, C_TEXT_DIM, width - 14), (step_rect.x + 7, step_rect.y + 27))
+        self._draw_wrapped_text(
+            surface,
+            FONT_LABEL,
+            active_step.get("explain", ""),
+            C_TEXT_PRIMARY,
+            step_rect.x + 7,
+            step_rect.y + 46,
+            width - 14,
+            line_spacing=14,
+            max_lines=3,
+        )
+
+        bits_y = step_rect.bottom + 12
+        self._draw_fault_byte_rows(surface, x, bits_y, width, fault)
+
+        timeline_y = bits_y + 74
+        timeline_x = x + 10
+        timeline_w = width - 20
+        node_positions = [timeline_x + int(round(index * timeline_w / max(1, len(steps) - 1))) for index in range(len(steps))]
+        pygame.draw.line(surface, C_PANEL_BORDER, (node_positions[0], timeline_y), (node_positions[-1], timeline_y), 2)
+        progress_ratio = min(
+            1.0,
+            max(0.0, animation.get("age", 0.0) / max(0.001, animation.get("duration", FAULT_FLOW_ANIMATION_SECONDS))),
+        )
+        marker_x = node_positions[0] + int((node_positions[-1] - node_positions[0]) * progress_ratio)
+        pygame.draw.line(surface, color, (node_positions[0], timeline_y), (marker_x, timeline_y), 3)
+        short_labels = {
+            "PAYLOAD": "PAY",
+            "CIPHERTEXT": "CT",
+            "BIT-FLIP": "BIT",
+            "GUARD": "CRC",
+            "VERIFICA": "VER",
+            "DECAP": "DEC",
+            "CONFIRMA": "MAC",
+            "RESULTADO": "OK" if str(fault.get("result")) != "SILENT" else "SIL",
+        }
+        for index, step in enumerate(steps):
+            node_x = node_positions[index]
+            completed = index < active_index
+            active = index == active_index
+            node_color = step["color"] if active or completed else C_TEXT_DIM
+            radius = 7 if active else 4
+            pygame.draw.circle(surface, node_color, (node_x, timeline_y), radius)
+            if active:
+                pygame.draw.circle(surface, node_color, (node_x, timeline_y), radius + 6, 1)
+            label = self._render_clipped(FONT_LABEL, short_labels.get(step["label"], step["label"][:3]), node_color, 34)
+            surface.blit(label, (node_x - label.get_width() // 2, timeline_y + 10))
+
+        hint = "Final: resultado da falha e detecção."
+        surface.blit(self._render_clipped(FONT_LABEL, hint, C_TEXT_DIM, width), (x, rect.bottom - 20))
+
+    def _draw_fault_overlay_details(self, surface, rect, fault):
+        x = rect.x + 14
+        y = rect.y + 72
+        width = rect.width - 28
+        result = str(fault.get("result", ""))
+        color = self._fault_result_color(result)
+
+        summary_rect = pygame.Rect(x, y, width, 82)
+        pygame.draw.rect(surface, (14, 20, 38), summary_rect, border_radius=5)
+        pygame.draw.rect(surface, color, summary_rect, width=1, border_radius=5)
+        surface.blit(self._render_clipped(FONT_SMALL, self._fault_result_label(result), color, width - 14), (x + 7, y + 7))
+        self._draw_wrapped_text(
+            surface,
+            FONT_LABEL,
+            self._fault_result_explanation(fault),
+            C_TEXT_PRIMARY,
+            x + 7,
+            y + 28,
+            width - 14,
+            line_spacing=14,
+            max_lines=3,
+        )
+
+        self._draw_fault_byte_rows(surface, x, y + 96, width, fault)
+
+        metric_y = y + 176
+        metric_gap = 8
+        metric_w = (width - metric_gap) // 2
+        metrics = (
+            ("CRC ANTES", str(fault.get("crc_before") or "--"), C_TEXT_PRIMARY),
+            ("CRC DEPOIS", str(fault.get("crc_after") or "--"), color),
+            ("TEMPO", _format_elapsed(fault.get("elapsed_us")), C_ACCENT_CYAN),
+            ("GUARD", str(fault.get("guard") or "--"), C_ACCENT_GREEN if fault.get("guard") == "CRC32" else C_TEXT_DIM),
+        )
+        for index, (label, value, metric_color) in enumerate(metrics):
+            bx = x + (index % 2) * (metric_w + metric_gap)
+            by = metric_y + (index // 2) * 42
+            self._draw_overlay_metric_box(surface, label, value, bx, by, metric_w, 36, metric_color)
+
+    def _fault_step_metric(self, fault, label):
+        if label == "BIT-FLIP":
+            return f"{fault.get('before_byte', '--')} -> {fault.get('after_byte', '--')}"
+        if label in {"GUARD", "VERIFICA"}:
+            before = str(fault.get("crc_before") or "--")
+            after = str(fault.get("crc_after") or "--")
+            return f"crc {before[-8:]} -> {after[-8:]}"
+        if label == "RESULTADO":
+            return _format_elapsed(fault.get("elapsed_us"))
+        return str(fault.get("source") or "SIMULADO")
+
+    def _draw_fault_byte_rows(self, surface, x, y, width, fault):
+        before = self._parse_int_auto(fault.get("before_byte"))
+        after = self._parse_int_auto(fault.get("after_byte"))
+        mask = self._parse_int_auto(fault.get("bit_mask"))
+        if before is None or after is None:
+            lines = (
+                f"byte antes: {fault.get('before_byte', '--')}",
+                f"byte depois: {fault.get('after_byte', '--')}",
+            )
+            for line in lines:
+                surface.blit(self._render_clipped(FONT_LABEL, line, C_TEXT_DIM, width), (x, y))
+                y += 18
+            return
+
+        label_w = 54
+        bit_gap = 3
+        bit_size = min(22, max(15, (width - label_w - bit_gap * 7) // 8))
+        start_x = x + label_w
+        rows = (("ANTES", before, C_TEXT_DIM), ("DEPOIS", after, self._fault_result_color(str(fault.get("result", "")))))
+        for row_index, (label, value, row_color) in enumerate(rows):
+            row_y = y + row_index * 30
+            surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, label_w - 4), (x, row_y + 5))
+            for bit_index in range(8):
+                bit_value = (value >> (7 - bit_index)) & 1
+                bit_mask = 1 << (7 - bit_index)
+                changed = bool(mask and (mask & bit_mask))
+                bx = start_x + bit_index * (bit_size + bit_gap)
+                bg = (58, 18, 28) if changed and row_index == 1 else (15, 20, 38)
+                border = C_ACCENT_RED if changed else C_PANEL_BORDER
+                pygame.draw.rect(surface, bg, (bx, row_y, bit_size, bit_size), border_radius=3)
+                pygame.draw.rect(surface, border, (bx, row_y, bit_size, bit_size), width=1, border_radius=3)
+                txt = FONT_LABEL.render(str(bit_value), True, row_color if not changed else C_ACCENT_RED)
+                surface.blit(txt, (bx + (bit_size - txt.get_width()) // 2, row_y + (bit_size - txt.get_height()) // 2))
 
     def draw_satellite_lock(self, surface, t):
         center_x = WIDTH // 2
@@ -2986,6 +3725,76 @@ class DashboardPanel:
         lines.extend(command_help_lines(include_dashboard=True, demo_only=False))
         return lines
 
+    def _mission_flow_active_state(self, animation):
+        steps = animation.get("steps", [])
+        if not steps:
+            return 0, 1.0
+        duration = max(0.001, animation.get("duration", MISSION_FLOW_ANIMATION_SECONDS))
+        age = max(0.0, animation.get("age", 0.0))
+        progress = max(0.0, min(1.0, age / duration))
+        scaled = progress * len(steps)
+        active_index = min(len(steps) - 1, int(scaled))
+        local_progress = scaled - active_index
+        if active_index == len(steps) - 1 and progress >= 1.0:
+            local_progress = 1.0
+        return active_index, max(0.0, min(1.0, local_progress))
+
+    def _mission_flow_current_bytes(self, steps, active_index, local_progress):
+        if not steps:
+            return 0
+        current = steps[active_index]
+        target = current["packet_bytes"]
+        previous = steps[active_index - 1]["packet_bytes"] if active_index > 0 else 0
+        if target == previous:
+            return target
+        return int(previous + (target - previous) * local_progress)
+
+    def _draw_mission_flow_packet_bar(self, surface, rect, mission, current_bytes, total_bytes):
+        parts_by_label = {label: (label, value, color) for label, value, color in self._mission_package_parts(mission)}
+        scenario = self._normalize_mission_scenario(mission.get("scenario", "MISSION"))
+        ordered_labels = ("payload", "ML-KEM", "HMAC", "CRC") if scenario in {"PQC", "PQC_CRC32"} else ("payload", "HMAC", "CRC")
+        parts = tuple(parts_by_label[label] for label in ordered_labels if label in parts_by_label)
+        bar_x = rect.x + 18
+        bar_y = rect.bottom - 34
+        bar_w = rect.width - 36
+        bar_h = 13
+        pygame.draw.rect(surface, (8, 12, 24), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
+
+        cursor_x = bar_x
+        consumed = 0
+        denominator = max(1, total_bytes)
+        for _label, value, color in parts:
+            if value <= 0:
+                continue
+            visible = max(0, min(value, current_bytes - consumed))
+            if visible > 0:
+                width = max(2, int(bar_w * visible / denominator))
+                if cursor_x + width > bar_x + bar_w:
+                    width = bar_x + bar_w - cursor_x
+                pygame.draw.rect(surface, color, (cursor_x, bar_y, width, bar_h), border_radius=4)
+                cursor_x += width
+            consumed += value
+
+        pygame.draw.rect(surface, C_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), width=1, border_radius=4)
+        legend_y = bar_y + 18
+        legend_x = bar_x
+        short_part_labels = {
+            "payload": "pay",
+            "ML-KEM": "kem",
+            "HMAC": "mac",
+            "CRC": "crc",
+        }
+        for label, value, color in parts:
+            if value <= 0:
+                continue
+            pygame.draw.rect(surface, color, (legend_x, legend_y + 4, 8, 8), border_radius=2)
+            text = f"{short_part_labels.get(label, label)}{value}B"
+            text_surf = self._render_clipped(FONT_LABEL, text, C_TEXT_DIM, max(54, bar_w // 5))
+            surface.blit(text_surf, (legend_x + 12, legend_y))
+            legend_x += max(66, text_surf.get_width() + 20)
+            if legend_x > bar_x + bar_w - 52:
+                break
+
     def _top_metrics_rows(self):
         left_edge = 340
         right_edge = WIDTH - 420
@@ -3050,7 +3859,7 @@ class DashboardPanel:
     def _mission_overlay_size(self):
         width = 380 if WIDTH >= 1600 else 340
         width = min(width, max(280, WIDTH - 40))
-        height = min(318, max(280, HEIGHT - 120))
+        height = min(354, max(326, HEIGHT - 120))
         return width, height
 
     def _mission_overlay_geometry(self, scenario=None):
@@ -3068,7 +3877,7 @@ class DashboardPanel:
 
     def _default_mission_overlay_position(self, scenario):
         width, height = self._mission_overlay_size()
-        gap = 12
+        gap = 10
         y = 116 + max(0, self._top_metrics_rows() - 1) * 54
         if self.demo_state != "IDLE":
             y += 104
@@ -3077,10 +3886,13 @@ class DashboardPanel:
         except ValueError:
             index = max(0, len(self.mission_overlay_order) - 1)
         total_width = len(MISSION_OVERLAY_SCENARIOS) * width + (len(MISSION_OVERLAY_SCENARIOS) - 1) * gap
-        if total_width <= WIDTH - 36:
-            x = (WIDTH - total_width) // 2 + index * (width + gap)
+        central_left = 340
+        central_right = WIDTH - 420
+        if total_width <= central_right - central_left:
+            x = central_left + index * (width + gap)
         else:
-            x = 22 + index * 34
+            central_width = max(width, central_right - central_left)
+            x = central_left + min(index * 34, max(0, central_width - width))
             y += index * 34
         return self._clamp_mission_overlay_position(x, y, width, height)
 
@@ -3112,18 +3924,142 @@ class DashboardPanel:
     def _draw_mission_overlay(self, surface, t):
         if not self.mission_overlay_visible or not self.mission_overlays:
             self.mission_overlay_close_rect = None
+            self.mission_comparison_rect = None
             self.mission_overlay_rects.clear()
             self.mission_overlay_close_rects.clear()
             self.mission_overlay_drag_rects.clear()
+            self.mission_flow_control_rects.clear()
             return
 
         self.mission_overlay_rects.clear()
         self.mission_overlay_close_rects.clear()
         self.mission_overlay_drag_rects.clear()
+        self.mission_flow_control_rects.clear()
         self.mission_overlay_order = [scenario for scenario in self.mission_overlay_order if scenario in self.mission_overlays]
+        if len(self.mission_overlays) >= 2:
+            self._draw_mission_comparison(surface, t)
+        else:
+            self.mission_comparison_rect = None
         for scenario in self.mission_overlay_order:
             self._draw_single_mission_overlay(surface, t, scenario, self.mission_overlays[scenario])
         self._sync_mission_overlay_state()
+
+    def _mission_comparison_geometry(self):
+        left = 340
+        right = WIDTH - 420
+        if right - left < 320:
+            left = 20
+            right = WIDTH - 20
+        width = max(280, min(right - left, WIDTH - 40))
+        x = max(20, min(left, WIDTH - width - 20))
+        height = 166 if HEIGHT >= 760 else 146
+        y = max(96, HEIGHT - height - 58)
+        return pygame.Rect(x, y, width, height)
+
+    @staticmethod
+    def _mission_int(mission, key, default=0):
+        parsed = _optional_int(mission.get(key))
+        return default if parsed is None else parsed
+
+    def _mission_package_parts(self, mission):
+        scenario = self._normalize_mission_scenario(mission.get("scenario", "MISSION"))
+        payload = self._mission_int(mission, "bytes_payload")
+        crypto = self._mission_int(mission, "bytes_crypto")
+        checksum = self._mission_int(mission, "bytes_checksum")
+        hmac = min(32, crypto) if crypto else 0
+        mlkem = max(0, crypto - hmac) if scenario in {"PQC", "PQC_CRC32"} else 0
+        if scenario == "CLASSIC":
+            hmac = crypto
+            mlkem = 0
+        return (
+            ("payload", payload, C_ACCENT_BLUE),
+            ("HMAC", hmac, C_ACCENT_ORANGE),
+            ("ML-KEM", mlkem, C_ACCENT_PURPLE),
+            ("CRC", checksum, C_ACCENT_GREEN),
+        )
+
+    def _mission_ratio_line(self, scenarios):
+        classic = self.mission_overlays.get("CLASSIC")
+        pqc = self.mission_overlays.get("PQC")
+        pqc_crc = self.mission_overlays.get("PQC_CRC32")
+        lines = []
+        if classic and pqc:
+            classic_us = self._mission_int(classic, "elapsed_us")
+            pqc_us = self._mission_int(pqc, "elapsed_us")
+            classic_b = self._mission_int(classic, "bytes_total")
+            pqc_b = self._mission_int(pqc, "bytes_total")
+            if classic_us and pqc_us:
+                lines.append(f"PQC: {pqc_us / classic_us:.1f}x tempo")
+            if classic_b and pqc_b:
+                lines.append(f"{pqc_b / classic_b:.1f}x bytes vs CLASSIC")
+        if pqc and pqc_crc:
+            crc_b = self._mission_int(pqc_crc, "bytes_checksum")
+            crc_us = self._mission_int(pqc_crc, "crc_us")
+            if crc_b or crc_us:
+                lines.append(f"CRC32: +{crc_b} B, {_format_elapsed(crc_us)}")
+        if not lines and scenarios:
+            lines.append("Compare tempo, bytes e composição do pacote.")
+        return "  |  ".join(lines)
+
+    def _draw_mission_comparison(self, surface, t):
+        scenarios = [scenario for scenario in MISSION_OVERLAY_SCENARIOS if scenario in self.mission_overlays]
+        if len(scenarios) < 2:
+            self.mission_comparison_rect = None
+            return
+
+        rect = self._mission_comparison_geometry()
+        self.mission_comparison_rect = rect
+        panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (*C_PANEL_BG, 228), (0, 0, rect.width, rect.height), border_radius=8)
+        pygame.draw.rect(panel, (*C_ACCENT_CYAN, 150), (0, 0, rect.width, rect.height), 1, border_radius=8)
+        pygame.draw.rect(panel, (*C_PANEL_HEADER, 190), (0, 0, rect.width, 34), border_top_left_radius=8, border_top_right_radius=8)
+        surface.blit(panel, rect.topleft)
+
+        title = "COMPARADOR AO VIVO: o que ficou mais caro?"
+        surface.blit(self._render_clipped(FONT_SMALL, title, C_ACCENT_CYAN, rect.width - 28), (rect.x + 14, rect.y + 9))
+        ratio_line = self._mission_ratio_line(scenarios)
+        surface.blit(self._render_clipped(FONT_LABEL, ratio_line, C_ACCENT_ORANGE, rect.width - 28), (rect.x + 14, rect.y + 36))
+
+        gap = 10
+        content_x = rect.x + 14
+        content_y = rect.y + 58
+        content_w = rect.width - 28
+        col_w = (content_w - gap * (len(scenarios) - 1)) // len(scenarios)
+        bar_h = 12
+        for index, scenario in enumerate(scenarios):
+            mission = self.mission_overlays[scenario]
+            x = content_x + index * (col_w + gap)
+            y = content_y
+            color = self._scenario_color(scenario)
+            pygame.draw.rect(surface, (15, 20, 38), (x, y, col_w, rect.bottom - y - 14), border_radius=5)
+            pygame.draw.rect(surface, color, (x, y, col_w, rect.bottom - y - 14), width=1, border_radius=5)
+            surface.blit(self._render_clipped(FONT_LABEL, scenario, color, col_w - 12), (x + 7, y + 6))
+            time_text = _format_elapsed(mission.get("elapsed_us"))
+            bytes_text = f"{self._mission_metric_value(mission, 'bytes_total')} B"
+            surface.blit(self._render_clipped(FONT_SMALL, f"{time_text}  |  {bytes_text}", C_TEXT_PRIMARY, col_w - 12), (x + 7, y + 22))
+
+            parts = self._mission_package_parts(mission)
+            total = max(1, sum(value for _label, value, _part_color in parts))
+            bar_x = x + 7
+            bar_y = y + 48
+            bar_w = col_w - 14
+            pygame.draw.rect(surface, (8, 12, 24), (bar_x, bar_y, bar_w, bar_h), border_radius=3)
+            cursor = bar_x
+            for label, value, part_color in parts:
+                if value <= 0:
+                    continue
+                part_w = max(2, int(bar_w * value / total))
+                if cursor + part_w > bar_x + bar_w:
+                    part_w = bar_x + bar_w - cursor
+                pygame.draw.rect(surface, part_color, (cursor, bar_y, part_w, bar_h), border_radius=3)
+                cursor += part_w
+            pygame.draw.rect(surface, C_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), width=1, border_radius=3)
+
+            part_values = {label: value for label, value, _part_color in parts}
+            line1 = f"pay {part_values.get('payload', 0)}B  hmac {part_values.get('HMAC', 0)}B"
+            line2 = f"kem {part_values.get('ML-KEM', 0)}B  crc {part_values.get('CRC', 0)}B"
+            surface.blit(self._render_clipped(FONT_LABEL, line1, C_TEXT_DIM, col_w - 12), (x + 7, y + 67))
+            surface.blit(self._render_clipped(FONT_LABEL, line2, C_TEXT_DIM, col_w - 12), (x + 7, y + 81))
 
     def _draw_single_mission_overlay(self, surface, t, scenario, mission):
         rect, close_rect = self._mission_overlay_geometry(scenario)
@@ -3163,6 +4099,138 @@ class DashboardPanel:
         subtitle = f"{crypto}  |  CRC: {checksum}"
         surface.blit(self._render_clipped(FONT_LABEL, subtitle, C_TEXT_DIM, rect.width - 28), (rect.x + 14, rect.y + 48))
 
+        if self._mission_overlay_is_animating(scenario):
+            self._draw_mission_overlay_flow(surface, rect, scenario, mission, t)
+            return
+
+        self._draw_mission_overlay_metrics(surface, rect, mission, elapsed, bytes_total)
+
+    def _mission_overlay_is_animating(self, scenario):
+        return (
+            self.mission_flow_animation is not None
+            and self.mission_flow_animation.get("scenario") == scenario
+        )
+
+    def _draw_mission_overlay_flow(self, surface, rect, scenario, mission, t):
+        animation = self.mission_flow_animation
+        if animation is None:
+            return
+        steps = animation.get("steps", [])
+        if not steps:
+            return
+
+        active_index, local_progress = self._mission_flow_active_state(animation)
+        active_step = steps[active_index]
+        total_bytes = self._mission_int(mission, "bytes_total", steps[-1]["packet_bytes"])
+        current_bytes = self._mission_flow_current_bytes(steps, active_index, local_progress)
+        color = active_step["color"]
+
+        x = rect.x + 14
+        y = rect.y + 72
+        width = rect.width - 28
+
+        paused = bool(animation.get("paused"))
+        header = f"FLUXO REAL {active_index + 1}/{len(steps)}"
+        control_rect = pygame.Rect(rect.right - 82, y - 2, 64, 22)
+        self.mission_flow_control_rects[scenario] = control_rect
+        surface.blit(self._render_clipped(FONT_LABEL, header, C_ACCENT_CYAN, width - 76), (x, y))
+        button_label = "PLAY" if paused else "PAUSAR"
+        button_border = C_ACCENT_ORANGE if paused else C_PANEL_BORDER
+        pygame.draw.rect(surface, (16, 22, 42), control_rect, border_radius=4)
+        pygame.draw.rect(surface, button_border, control_rect, width=1, border_radius=4)
+        button_text = FONT_LABEL.render(button_label, True, C_ACCENT_ORANGE if paused else C_TEXT_DIM)
+        surface.blit(
+            button_text,
+            (
+                control_rect.centerx - button_text.get_width() // 2,
+                control_rect.centery - button_text.get_height() // 2,
+            ),
+        )
+        y += 18
+
+        step_rect = pygame.Rect(x, y, width, 102)
+        pygame.draw.rect(surface, (14, 20, 38), step_rect, border_radius=5)
+        pygame.draw.rect(surface, color, step_rect, width=1, border_radius=5)
+
+        packet_text = f"pacote {current_bytes}/{total_bytes} B"
+        added = active_step.get("added_bytes", 0)
+        if added:
+            packet_text += f"  +{added} B"
+        time_us = active_step.get("time_us")
+        if time_us is not None:
+            packet_text += f"  {_format_elapsed(time_us)}"
+
+        title = f"{active_step['label']} - {active_step['detail']}"
+        surface.blit(self._render_clipped(FONT_SMALL, title, color, width - 14), (step_rect.x + 7, step_rect.y + 7))
+        surface.blit(self._render_clipped(FONT_LABEL, packet_text, C_TEXT_DIM, width - 14), (step_rect.x + 7, step_rect.y + 26))
+        self._draw_wrapped_text(
+            surface,
+            FONT_LABEL,
+            active_step.get("explain", ""),
+            C_TEXT_PRIMARY,
+            step_rect.x + 7,
+            step_rect.y + 45,
+            width - 14,
+            line_spacing=14,
+            max_lines=3,
+        )
+
+        timeline_y = step_rect.bottom + 24
+        timeline_x = x + 10
+        timeline_w = width - 20
+        if len(steps) == 1:
+            node_positions = [timeline_x + timeline_w // 2]
+        else:
+            node_positions = [
+                timeline_x + int(round(index * timeline_w / (len(steps) - 1)))
+                for index in range(len(steps))
+            ]
+
+        pygame.draw.line(surface, C_PANEL_BORDER, (node_positions[0], timeline_y), (node_positions[-1], timeline_y), 2)
+        progress_ratio = min(
+            1.0,
+            max(0.0, animation.get("age", 0.0) / max(0.001, animation.get("duration", MISSION_FLOW_ANIMATION_SECONDS))),
+        )
+        packet_x = node_positions[0] + int((node_positions[-1] - node_positions[0]) * progress_ratio)
+        pygame.draw.line(surface, self._scenario_color(scenario), (node_positions[0], timeline_y), (packet_x, timeline_y), 3)
+
+        for index, step in enumerate(steps):
+            node_x = node_positions[index]
+            completed = index < active_index
+            active = index == active_index
+            node_color = step["color"] if active or completed else C_TEXT_DIM
+            radius = 7 if active else 4
+            pygame.draw.circle(surface, node_color, (node_x, timeline_y), radius)
+            if active:
+                pygame.draw.circle(surface, node_color, (node_x, timeline_y), radius + 6, 1)
+            short_labels = {
+                "PAYLOAD": "PAY",
+                "KEYGEN": "KEY",
+                "ENCAP": "ENC",
+                "DECAP": "DEC",
+                "HMAC": "MAC",
+                "CRC32": "CRC",
+                "VERIFICA": "VER",
+                "RESULTADO": "OK",
+            }
+            label = self._render_clipped(
+                FONT_LABEL,
+                short_labels.get(step["label"], step["label"][:3]),
+                node_color,
+                max(28, timeline_w // len(steps)),
+            )
+            surface.blit(label, (node_x - label.get_width() // 2, timeline_y + 10))
+
+        packet_rect = pygame.Rect(packet_x - 8, timeline_y - 8, 16, 16)
+        pygame.draw.rect(surface, color, packet_rect, border_radius=4)
+        pygame.draw.rect(surface, C_TEXT_PRIMARY, packet_rect, width=1, border_radius=4)
+
+        bar_rect = pygame.Rect(rect.x, timeline_y + 34, rect.width, 68)
+        self._draw_mission_flow_packet_bar(surface, bar_rect, mission, current_bytes, total_bytes)
+        hint = "Final: métricas detalhadas."
+        surface.blit(self._render_clipped(FONT_LABEL, hint, C_TEXT_DIM, width), (x, rect.bottom - 20))
+
+    def _draw_mission_overlay_metrics(self, surface, rect, mission, elapsed, bytes_total):
         metric_x = rect.x + 14
         metric_y = rect.y + 70
         metric_gap = 8
@@ -3879,8 +4947,9 @@ class Onboarding:
 
         paragraphs = [
             "Para resistir à ameaça quântica, o NIST padronizou em 2024 o ML-KEM (FIPS 203), baseado no problema Learning With Errors (LWE) sobre reticulados de centenas de dimensões.",
-            "Um KEM não cifra a mensagem diretamente. Ele estabelece um segredo compartilhado; depois esse segredo alimenta mecanismos simétricos como HMAC.",
-            "O ESP32 roda ML-KEM-512 real. A chave pública tem 800 bytes, o ciphertext tem 768 bytes e o segredo compartilhado tem 32 bytes."
+            "Um KEM não cifra a mensagem diretamente. Ele executa KEYGEN, ENCAP e DECAP para estabelecer um segredo compartilhado; depois esse segredo alimenta mecanismos simétricos como HMAC.",
+            "O ESP32 roda ML-KEM-512 real. A chave pública tem 800 bytes, o ciphertext tem 768 bytes e o segredo compartilhado tem 32 bytes. É por isso que o custo aparece em CPU, RAM e bytes transmitidos.",
+            "Na demonstração, o popup de envio mostra esse caminho passo a passo e pode ser pausado para explicar onde o pacote cresce."
         ]
 
         text_max_w = self.w - int(self.w * 0.08)
@@ -3997,6 +5066,7 @@ class Onboarding:
             "Tempo total: custo de CPU para entregar a mensagem.",
             "Bytes: custo de comunicação do protocolo.",
             "Heap/RAM: margem de memória disponível na placa.",
+            "Pacote: payload + HMAC + ciphertext ML-KEM + CRC32.",
             "Segurança: DELIVERED, SILENT, DETECTED_GUARD ou PROTOCOL_REJECT.",
         ]
         for line in metric_lines:
@@ -4031,15 +5101,16 @@ class Onboarding:
             ("CLÁSSICA", "envia a mensagem com HMAC-SHA256."),
             ("PQC", "troca para ML-KEM-512 + HMAC."),
             ("PQC+CRC", "usa ML-KEM-512 e CRC32 no payload."),
-            ("ENVIAR MSG", "executa a missão e mostra tempo/bytes."),
+            ("ENVIAR MSG", "abre popup pausável para explicar KEYGEN, ENCAP, DECAP, HMAC e CRC."),
             ("FALHA", "injeta bit-flip para comparar SILENT vs DETECTED."),
             ("RESULTADOS", "abre a consolidação real da bateria longa."),
         ]
         for label, desc in steps:
+            row_y = ly
             tag = FONT_SMALL.render(label, True, C_ACCENT_CYAN)
-            surface.blit(tag, (lx, ly))
-            self.draw_wrapped_onboarding(surface, desc, lx + 108, ly, lw - 108, C_TEXT_PRIMARY, max_lines=2)
-            ly += 34
+            surface.blit(tag, (lx, row_y))
+            desc_y = self.draw_wrapped_onboarding(surface, desc, lx + 108, row_y, lw - 108, C_TEXT_PRIMARY, max_lines=2)
+            ly = max(row_y + 34, desc_y + 6)
 
         rx = right_rect.x + 20
         ry = right_rect.y + 18
@@ -4048,10 +5119,10 @@ class Onboarding:
         ry += 38
         comparisons = [
             "CPU e RAM ficam na faixa superior durante toda a animação.",
-            "Tempo e bytes aparecem no console e no overlay de mensagem entregue.",
+            "O popup mostra o pacote crescendo antes de revelar as métricas finais.",
             "CLASSIC é o baseline barato: 721 us e 73 bytes.",
             "PQC sobe para 13.536 us e 841 bytes porque executa ML-KEM-512.",
-            "PQC+CRC32 adiciona +4 bytes e detecta corrupção de payload.",
+            "PQC+CRC32 adiciona +4 bytes e detecta corrupção acidental no payload.",
             "O botão RESULTADOS mostra 83 registros, 0 falhas e conclusões.",
         ]
         for item in comparisons:

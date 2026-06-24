@@ -847,17 +847,28 @@ entre falha silenciosa e falha detectada.
 
 ## 15. Perguntas que você pode fazer para a turma
 
-Estas perguntas ajudam a tornar o seminário interativo.
+Estas perguntas ajudam a tornar o seminário interativo. Use-as antes de
+revelar o resultado no dashboard.
+
+| Momento | Pergunta | Resposta que você quer conduzir |
+|---|---|---|
+| Antes do primeiro envio | O que vai crescer mais quando sairmos de `CLASSIC` para `PQC`: CPU, bytes ou RAM? | Tempo e bytes cresceram muito; heap ficou estável na coleta. |
+| Depois de `PQC` | Por que uma mensagem pequena virou um pacote muito maior? | O pacote passou a carregar ciphertext ML-KEM de 768 bytes mais tag HMAC. |
+| Antes de `PQC+CRC` | CRC32 é criptografia ou detecção de erro? | Detecção de erro acidental; não autenticação contra atacante. |
+| Ao mostrar o comparador | Qual pedaço domina os bytes em `PQC`: payload, HMAC, ML-KEM ou CRC? | ML-KEM domina por causa do ciphertext. |
+| Antes de `FALHA` | Se um bit mudar e ninguém conferir, o sistema percebe? | Não necessariamente; pode virar falha silenciosa. |
+| Depois de `PQC+CRC -> FALHA` | O que mudou entre falha silenciosa e falha detectada? | O guardião CRC32 tornou a corrupção observável. |
+| Antes de `RESULTADOS` | O que vocês esperam que tenha ficado estável na bateria longa? | A RAM/heap ficou estável; tempo e bytes foram o impacto forte. |
+| Fechamento | PQC foi inviável ou apenas caro? | Foi viável na Wisdom, mas caro em tempo e tráfego. |
+
+Perguntas extras se houver tempo:
 
 1. Se uma mensagem clássica leva menos de 1 ms e a versão PQC leva cerca de
    13 ms, em que tipo de missão isso importa?
-2. Se o CRC32 não é criptografia, por que ainda pode ser útil?
-3. O que é mais crítico em um CubeSat pequeno: tempo, bytes, RAM ou energia?
-4. Se a heap ficou estável, isso significa que não há problema de hardware?
-5. Que baseline seria mais justo que HMAC puro para comparar com ML-KEM?
-6. O que deveria acontecer quando `key_match=0`: aceitar, tentar de novo ou
+2. Que baseline seria mais justo que HMAC puro para comparar com ML-KEM?
+3. O que deveria acontecer quando `key_match=0`: aceitar, tentar de novo ou
    rejeitar a sessão?
-7. Vale mais a pena gastar bytes com PQC agora ou correr o risco de dados
+4. Vale mais a pena gastar bytes com PQC agora ou correr o risco de dados
    capturados hoje serem quebrados no futuro?
 
 ## 16. Fechamento recomendado
