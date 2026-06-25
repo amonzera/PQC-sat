@@ -1,6 +1,6 @@
 # Roadmap consolidado - PQC-SAT
 
-Versão revisada em 2026-06-24.
+Versão revisada em 2026-06-25.
 
 ## 1. Visão geral
 
@@ -12,12 +12,15 @@ o custo em hardware limitado.
 A interface visual já existe e agora possui dois experimentos complementares.
 O fluxo principal de apresentação envia uma mensagem curta pela Wisdom nos
 cenários `CLASSIC`, `PQC` e `PQC_CRC32`, registrando tempo, bytes, heap,
-confirmação e checksum. O fluxo de apoio muta um payload determinístico,
-registra eventos e compara `NONE` e `CRC32` para explicar falha silenciosa
-versus erro detectado. O backend PQC real já está instalado na Wisdom com
-ML-KEM-512 e medição nos perfis `BASELINE` e `OBC-1U-LIMITED`. O firmware
-também executa bit-flip manual em ciphertext ML-KEM e classifica o efeito com
-comparação de segredos ou confirmação HMAC-SHA256 da chave derivada.
+confirmação e checksum. Esse fluxo pode usar payload vivo: o dashboard coleta
+sensores reais da Wisdom, monta `payload_hex` e envia o dado para `MISSION`.
+O fluxo de apoio muta um payload, registra eventos e compara `NONE` e `CRC32`
+para explicar falha silenciosa versus erro detectado; quando a placa está
+online, o potenciômetro pode selecionar fisicamente o bit-flip. O backend PQC
+real já está instalado na Wisdom com ML-KEM-512 e medição nos perfis
+`BASELINE` e `OBC-1U-LIMITED`. O firmware também executa bit-flip manual em
+ciphertext ML-KEM e classifica o efeito com comparação de segredos ou
+confirmação HMAC-SHA256 da chave derivada.
 
 ## 2. Baseline auditado
 
@@ -36,6 +39,8 @@ comparação de segredos ou confirmação HMAC-SHA256 da chave derivada.
 | Falha em ciphertext ML-KEM | `PQC_FAULT index mask [CONFIRM|NONE]` validado na placa e exportado no JSON |
 | CRC/checksum real | CRC32 funcional no dashboard e no firmware |
 | ESP32/serial | Funcional com `HELLO`, `STATUS`, sensores, OLED e `FAULT` |
+| Payload vivo | Dashboard coleta `SENSOR_READ`, `ANALOG POT` e `DIGITAL BUTTON`, monta `MISSION ... payload_hex` e exibe os sensores no popup |
+| Falha física didática | Potenciômetro da Wisdom seleciona byte/máscara do bit-flip quando o satélite está online |
 | JSON/timeline/demo | Timeline, JSON, bateria A/B e `DEMO` visual automatizado funcionais |
 
 ## 2.1 Histórico de implementação
@@ -158,6 +163,21 @@ projeto sem reconstruir decisões antigas:
   3.074 registros, 0 falhas, 1.800 `MISSION runs`, 10 `PQC_BENCH` e 1.200
   testes `FAULT`. A fonte principal dos resultados da apresentação passou a
   ser esse JSON.
+- 2026-06-25: camada "satélite vivo" adicionada sem alterar firmware. O
+  dashboard ganhou toggle `Payload vivo`, coleta curta de `SENSOR_READ
+  TEMP_HUM`, `SENSOR_READ ACCEL`, `SENSOR_READ APDS`, `ANALOG POT` e
+  `DIGITAL BUTTON`, montagem de payload ASCII compacto dentro do limite de 96
+  bytes do firmware, envio `MISSION ... payload_hex`, popup com `PAYLOAD REAL
+  DA PLACA`, exportação dos sensores no JSON e falha guiada pelo potenciômetro
+  para escolher byte/máscara do bit-flip. LED/RGB/bargraph são acionados como
+  feedback físico de fase/custo; OLED permanece em `STANDBY` porque o firmware
+  atual não expõe escrita textual arbitrária.
+- 2026-06-25: recurso opcional de fechamento `STRESS PQC_LOOP 500 CONFIRM`
+  adicionado. O firmware executa até 500 rodadas ML-KEM controladas, exige
+  `CONFIRM`, retorna tempo total, médias keygen/encap/decap, heap e perfil. O
+  dashboard expõe a função apenas dentro de `RESULTADOS`, com confirmação em
+  dois cliques e aviso de timeout didático após 8 s; não entra nos botões
+  laterais nem substitui as métricas oficiais.
 
 O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar

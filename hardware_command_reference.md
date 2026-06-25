@@ -10,10 +10,10 @@ e manutenção; eles podem ser enviados pelo terminal textual avançado do paine
 ou pelo console `tools/serial_console.py`.
 
 Comandos locais do dashboard, como `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`,
-`DEMO_STOP`, `DEMO_RESTART`, `RUN_BATTERY`, `CHECKSUM` e `EXPORT_JSON`, não
-são comandos do firmware. O comando `MISSION`, por outro lado, existe no
-firmware e é o caminho principal da apresentação para medir `CLASSIC`, `PQC` e
-`PQC_CRC32`.
+`DEMO_STOP`, `DEMO_RESTART`, `RUN_BATTERY`, `CHECKSUM`, `EXPORT_JSON` e
+`TOGGLE_LIVE_PAYLOAD`, não são comandos do firmware. O comando `MISSION`, por
+outro lado, existe no firmware e é o caminho principal da apresentação para
+medir `CLASSIC`, `PQC` e `PQC_CRC32`.
 
 ## Protocolo
 
@@ -47,6 +47,7 @@ python3 tools/serial_console.py --commands
 |---|---|---|
 | `STATUS` | `STATUS` | Mostra perfil, CPU, heap, flash e radio sob demanda. |
 | `MISSION` | `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32` | Entrega mensagem curta e mede tempo, bytes, heap e resultado nos três cenários centrais do seminário. |
+| `TOGGLE_LIVE_PAYLOAD` | comando local do dashboard | Liga/desliga o modo em que sensores reais da Wisdom geram o payload antes de `MISSION`. |
 | `DEMO` | `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`, `DEMO_STOP`, `DEMO_RESTART` | Comandos locais do dashboard para executar a apresentação A/B cronometrada. |
 | `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Comando serial técnico usado para validar bit-flip e CRC32 na placa. No dashboard, use `INJECT_FAULT` e `CRC_CHECK`. |
 | `OLED` | `OLED STANDBY` | Restaura o ícone robo-satélite no display. |
@@ -56,6 +57,51 @@ HELP/terminal textual e pelo `tools/serial_console.py`, mas não devem aparecer
 como blocos clicáveis da apresentação para evitar ruído visual e serial.
 O dashboard pode acionar LED/bargraph automaticamente depois de `MISSION` como
 efeito lúdico de custo relativo; isso não transforma LED/bargraph em métrica.
+
+## Payload vivo no dashboard
+
+O modo `Payload vivo` é uma orquestração do dashboard, não um novo comando de
+firmware. Quando ligado, antes de `ENVIAR MSG` o dashboard consulta:
+
+```text
+SENSOR_READ TEMP_HUM
+SENSOR_READ ACCEL
+SENSOR_READ APDS
+ANALOG POT
+DIGITAL BUTTON
+```
+
+Com essas respostas, ele monta um payload ASCII compacto e envia uma chamada
+`MISSION` com payload hexadecimal:
+
+```text
+MISSION PQC_CRC32 5051432D5341547C533D34327C...
+```
+
+O firmware mede normalmente `bytes_payload`, `bytes_crypto`,
+`bytes_checksum`, `bytes_total`, `elapsed_us`, heap e flags de validação. O
+dashboard guarda também os metadados locais do payload vivo no popup e no JSON:
+
+| Campo local | Significado |
+|---|---|
+| `payload_mode` | `LIVE` quando veio dos sensores; `FIXED` quando usa payload padrão. |
+| `payload_text` | Payload ASCII montado antes de converter para hex. |
+| `payload_seq` | Sequência do envio ao vivo. |
+| `sensor_temp_c_x100`, `sensor_hum_x100` | Leituras do HTU21D em escala inteira. |
+| `sensor_accel` | `x,y,z` do acelerômetro em mg. |
+| `sensor_light` | Leitura de luz/proximidade do APDS-9960. |
+| `sensor_pot` | Valor do potenciômetro A39. |
+| `sensor_button` | Estado do botão D27. |
+| `sensor_failures` | Lista de sensores que não responderam; o payload usa `NA`. |
+
+Para falhas ao vivo, o dashboard também usa `ANALOG POT` como seletor físico
+de bit-flip: o valor 0..4095 é mapeado para uma posição dentro do payload, e o
+popup mostra `pot -> byte/mask -> resultado`.
+
+O OLED continua com `OLED STANDBY`. O firmware atual não possui comando para
+escrever texto arbitrário no display; por isso fases como `KEYGEN`, `CRC` e
+`FAULT` aparecem no popup, enquanto LED/RGB/bargraph dão feedback físico de
+processamento e custo relativo.
 
 ## Comando MISSION
 
@@ -104,6 +150,11 @@ em build C-only para `MLK_CONFIG_PARAMETER_SET=512`.
 | `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e retorna `key_match` sem imprimir segredo completo. |
 | `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Aplica bit-flip em ciphertext ML-KEM real e testa confirmação HMAC-SHA256 da chave derivada. |
 | `PQC_BENCH` | `PQC_BENCH n` | Executa `n` rodadas keygen/encap/decap; `n` aceito de 1 a 100. |
+| `STRESS` | `STRESS PQC_LOOP n CONFIRM` | Executa ML-KEM em loop extremo, de 1 a 500 rodadas, para fechamento visual de limite. Exige `CONFIRM`. |
+
+`STRESS` não é a fonte estatística oficial do seminário. Ele serve para
+mostrar, ao vivo, uma carga agressiva e controlada no hardware depois dos
+resultados consolidados.
 
 Medição registrada em 2026-06-17:
 
@@ -141,6 +192,7 @@ Validação pós-upload registrada em 2026-06-18:
 | `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e compara segredo compartilhado. |
 | `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Gera sessão ML-KEM, corrompe um byte do ciphertext, decapsula e reporta `KEY_MISMATCH`, `PROTOCOL_REJECT` ou `OK`, com CRCs curtos e tempos. |
 | `PQC_BENCH` | `PQC_BENCH n` | Executa benchmark de bancada para 1 a 100 rodadas. |
+| `STRESS` | `STRESS PQC_LOOP n CONFIRM` | Executa carga extrema de ML-KEM para demonstrar limite operacional; use `n=500` no fechamento visual. |
 | `MISSION` | `MISSION CLASSIC\|PQC\|PQC_CRC32 [payload_hex]` | Entrega mensagem curta e mede custo/bytes/segurança por cenário. |
 | `PERIPHERALS` | `PERIPHERALS` | Detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C. |
 | `I2C_SCAN` | `I2C_SCAN` | Varre o barramento I2C em SDA21/SCL22. |

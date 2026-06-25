@@ -20,10 +20,16 @@ detectada. Quando o bit-flip atinge ciphertext ML-KEM, a decapsulação não
 "detecta" sozinha a falha: o harness observa `KEY_MISMATCH`, e a confirmação
 HMAC-SHA256 transforma divergência de chave em `PROTOCOL_REJECT`.
 
+Na revisão final, a Wisdom também passou a participar como "satélite vivo":
+antes de cada envio, o dashboard pode ler sensores reais da placa, montar um
+payload compacto de telemetria e enviar esse payload para `MISSION`. Assim a
+placa não serve apenas como ponte serial; ela mede ambiente/posição, cria os
+bytes da missão e executa a criptografia sobre esses bytes.
+
 ## Cinco blocos narrativos no dashboard
 
 1. **Problema**: CubeSats usam COTS; falhas transitórias podem inverter bits.
-2. **Experimento**: Wisdom + notebook, mensagem de missão, ML-KEM-512,
+2. **Experimento**: Wisdom + notebook, payload vivo de sensores, ML-KEM-512,
    HMAC-SHA256, CRC32 e bit-flip manual.
 3. **Demo visual**: enviar `CLASSIC`, `PQC` e `PQC+CRC`; depois mostrar
    falha silenciosa versus detecção por CRC32.
@@ -98,9 +104,14 @@ respondendo pela serial. Sem `SAT CONECTADO`, o painel deve recusar o envio.
    `python3 dashboard.py --port /dev/ttyUSB0`
 2. Esperar o canto superior indicar `SAT CONECTADO`. Se aparecer `AGUARDANDO
    SAT`, não prosseguir com a demo de mensagens.
+   - Deixe o toggle `Payload vivo` ligado. Ele faz a Wisdom ler sensores reais
+     antes do envio e transformar essas leituras no payload da missão.
+   - Mostre rapidamente a placa: inclinar/tocar/girar o potenciômetro muda o
+     conteúdo que será protegido.
 3. Enviar mensagem em modo clássico:
    - Clique em `CLÁSSICA` (o botão fica azul) e em seguida clique em `ENVIAR MSG`.
-   - Mantenha o popup aberto e destaque tempo total, bytes, tag e heap.
+   - Mantenha o popup aberto e destaque `PAYLOAD REAL DA PLACA`, tempo total,
+     bytes, tag e heap.
    - Feche no `X`.
 4. Enviar mensagem em modo pós-quântico (PQC) sem integridade:
    - Clique em `PQC` (o botão fica roxo).
@@ -113,12 +124,19 @@ respondendo pela serial. Sem `SAT CONECTADO`, o painel deve recusar o envio.
    - Mantenha o popup aberto e destaque o campo `crc`, +4 bytes e validações.
    - Feche no `X`.
 6. Apoio visual de falhas transitórias (Bit-Flips) de forma manual:
-   - **Caso A (Corrupção Silenciosa):** Clique em `PQC`, depois em `FALHA` -> Observar erro silencioso (`SILENT` na timeline).
-   - **Caso B (Erro Detectado):** Clique em `PQC+CRC`, depois em `FALHA` -> Observar detecção do erro pelo guardião (`DETECTED_GUARD` na timeline).
+   - Antes de clicar, gire o potenciômetro. Ele seleciona o byte/bit que será
+     corrompido dentro do payload vivo.
+   - **Caso A (Corrupção Silenciosa):** Clique em `PQC`, depois em `FALHA` -> observar `SILENT`.
+   - **Caso B (Erro Detectado):** Clique em `PQC+CRC`, depois em `FALHA` -> observar `DETECTED_GUARD`.
 7. Fechar com resultados consolidados:
    - Clique em `RESULTADOS`.
    - Mostre a bateria real: 3.074 registros, 0 falhas, 1.800 `MISSION runs`.
    - Compare `CLASSIC`, `PQC` e `PQC_CRC32` com os números finais.
+8. Fechamento opcional de limite:
+   - Ainda em `RESULTADOS`, clique em `STRESS PQC 500` uma vez para armar.
+   - Diga: "Agora vamos repetir ML-KEM 500 vezes para mostrar o limite prático do hardware."
+   - Clique novamente para confirmar e observe o cronômetro, o aviso de espera longa e o retorno final.
+   - Se a serial demorar, use isso como evidência didática de carga, não como métrica oficial.
 
 > [!NOTE]
 > Todos os logs oficiais e dados numéricos consolidados foram gravados através de baterias automatizadas de longa duração via terminal (como o script `tools/stage8_acceptance.py`), garantindo rigor científico sem poluir o dashboard visual.
@@ -128,6 +146,10 @@ Cada cenário de mensagem abre seu próprio popup de métricas. Durante a compar
 mantenha `CLASSIC`, `PQC` e `PQC+CRC` abertos, arraste os cartões pelo topo e
 posicione-os lado a lado; feche cada um apenas pelo `X` depois de comparar tempo,
 bytes, heap e etapas ML-KEM/HMAC/CRC.
+
+O toggle `Payload vivo` não é um comando de bancada: ele apenas decide se o
+dashboard monta `MISSION ... payload_hex` a partir dos sensores da Wisdom ou
+usa o payload fixo. Para a apresentação final, mantenha ligado.
 
 ## Sequência impactante para alunos de Ciência da Computação
 
@@ -155,19 +177,24 @@ Use apenas a placa conectada. Não use `--simulated` para a apresentação final
    conversando com a Wisdom.
    Antes de enviar qualquer mensagem, pergunte: "O que vocês acham que vai
    crescer mais: tempo de CPU, bytes transmitidos ou RAM?"
-2. Clique `CLÁSSICA` -> `ENVIAR MSG`.
-   Fala: “Este é o baseline: autenticação simétrica com HMAC-SHA256.”
-3. Clique `PQC` -> `ENVIAR MSG`.
+2. Ative a camada "satélite vivo".
+   Fala: "A placa vai medir sensores agora; esses valores viram o payload que
+   será protegido. Não é uma string inventada no notebook."
+3. Clique `CLÁSSICA` -> `ENVIAR MSG`.
+   Fala: “Este é o baseline: autenticação simétrica com HMAC-SHA256 sobre o
+   payload real coletado agora.”
+4. Clique `PQC` -> `ENVIAR MSG`.
    Fala: “Agora o mesmo envio inclui ML-KEM-512. Observem `keygen`, `encap` e
    `decap`: o custo não está na animação, está no hardware.”
-4. Clique `PQC+CRC` -> `ENVIAR MSG`.
+5. Clique `PQC+CRC` -> `ENVIAR MSG`.
    Fala: “Agora somamos um guardião simples de integridade no payload. O custo
    em bytes e tempo aparece junto com a validação.”
    Arraste os três popups lado a lado e use o comparador ao vivo para destacar
    payload, HMAC, ciphertext ML-KEM e CRC32.
-5. Clique `PQC` -> `FALHA`.
-   Fala: “Sem guardião no payload, uma mutação pode passar silenciosamente.”
-6. Clique `PQC+CRC` -> `FALHA`.
+6. Gire o potenciômetro e clique `PQC` -> `FALHA`.
+   Fala: “A placa escolheu fisicamente o bit da falha. Sem guardião no payload,
+   uma mutação pode passar silenciosamente.”
+7. Gire novamente e clique `PQC+CRC` -> `FALHA`.
    Fala: “Com CRC32, o mesmo tipo de corrupção vira evento detectado.”
 
 Opcional para público mais técnico, se houver tempo:
@@ -204,18 +231,23 @@ Clique `RESULTADOS` e feche a narrativa:
 | 2-5 min | Contexto: COTS, CubeSat, falhas transitórias e ameaça quântica |
 | 5-7 min | Modelo mental: HMAC autentica, ML-KEM estabelece segredo, CRC32 detecta corrupção |
 | 7-8 min | Pergunta para a turma: prever se cresce mais CPU, bytes ou RAM |
-| 8-12 min | Enviar `CLÁSSICA`, `PQC`, `PQC+CRC`; arrastar popups e usar o comparador ao vivo |
-| 12-15 min | Demonstrar falha silenciosa vs. detecção (`PQC -> FALHA`, `PQC+CRC -> FALHA`) |
+| 8-12 min | Enviar `CLÁSSICA`, `PQC`, `PQC+CRC` com payload vivo; arrastar popups e usar o comparador |
+| 12-15 min | Girar potenciômetro e demonstrar falha silenciosa vs. detecção (`PQC -> FALHA`, `PQC+CRC -> FALHA`) |
 | 15-18 min | Abrir `RESULTADOS`: custo, segurança e limites com a bateria real |
-| 18-20 min | Demo técnica opcional `PQC_FAULT 0 0x01 CONFIRM`, próximos passos e perguntas |
+| 18-19 min | Fechamento opcional `STRESS PQC 500` no overlay `RESULTADOS`, sem substituir a bateria oficial |
+| 19-20 min | Próximos passos e perguntas |
 
 ## Perguntas para criar descoberta
 
 - Antes dos envios: "O que vai pesar mais: CPU, bytes ou RAM?"
+- Antes do payload vivo: "Que dado real da placa vocês querem que entre na
+  mensagem: luz, aceleração ou potenciômetro?"
 - Depois de `PQC`: "Por que a mensagem pequena virou um pacote muito maior?"
 - Antes de `PQC+CRC`: "CRC32 é criptografia ou detecção de erro?"
-- Antes de `FALHA`: "Se um bit mudar e ninguém conferir, o sistema percebe?"
+- Antes de `FALHA`: "Se eu girar o potenciômetro e escolher outro bit, o
+  sistema percebe sozinho?"
 - Antes de `RESULTADOS`: "O que vocês esperam que tenha ficado estável?"
+- Antes do `STRESS`: "O que acontece se repetirmos o acordo pós-quântico 500 vezes seguidas?"
 
 ## Limites que devem ser ditos
 

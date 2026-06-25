@@ -21,15 +21,29 @@ A apresentação deve comparar três cenários de entrega de uma mensagem curta:
 A tese visual é:
 
 ```text
-CLASSIC  -> menor custo, segurança clássica
+CLASSIC  -> menor custo, autenticação clássica simétrica
 PQC      -> maior custo, preparo para ameaça quântica
-PQC+CRC  -> maior robustez de integridade, com custo adicional
+PQC+CRC  -> maior robustez contra corrupção acidental, com custo adicional
 ```
 
 ## 2. O que a placa realmente faz
 
 O comando `MISSION` roda na BlackBoard Wisdom/ESP32 e mede a entrega de uma
 mensagem de missão.
+
+Na demo ao vivo, o dashboard pode acionar o modo `Payload vivo`: antes de
+`MISSION`, ele lê sensores da Wisdom, monta um payload ASCII compacto, converte
+para hexadecimal e envia `MISSION <cenario> <payload_hex>`. Isso torna a
+apresentação mais fiel a uma telemetria de CubeSat. A bateria consolidada
+abaixo continua sendo a fonte estatística oficial e usa campanhas balanceadas
+com payload padronizado; portanto, compare os resultados consolidados entre
+cenários e use o payload vivo como demonstração imersiva do mesmo fluxo.
+
+O comando `STRESS PQC_LOOP 500 CONFIRM`, acionado pelo botão protegido
+`STRESS PQC 500` dentro de `RESULTADOS`, é uma demonstração visual de limite:
+ele repete ML-KEM 500 vezes para evidenciar espera, carga e consumo relativo.
+Ele não substitui a bateria consolidada abaixo e não deve ser usado para mudar
+as conclusões estatísticas oficiais da apresentação.
 
 ### `MISSION CLASSIC`
 
@@ -278,6 +292,7 @@ Tempo médio da verificação de falha:
 Para o seminário atual:
 
 - usar o botão `RESULTADOS` do dashboard como resumo final da bateria;
+- usar `STRESS PQC 500` apenas como fechamento opcional de impacto visual;
 - não rodar bateria longa durante a apresentação;
 - demonstrar manualmente `CLÁSSICA`, `PQC`, `PQC+CRC`, `ENVIAR MSG` e
   `FALHA`;

@@ -16,6 +16,14 @@ import pygame
 class FakeSerialClient:
     def __init__(self):
         self.sent = []
+        self.last_timeout = None
+        self.responses = {
+            "SENSOR_READ TEMP_HUM": {"temp_c_x100": "2450", "hum_x100": "5530"},
+            "SENSOR_READ ACCEL": {"x_mg": "12", "y_mg": "-34", "z_mg": "1001"},
+            "SENSOR_READ APDS": {"clear": "321", "prox": "7"},
+            "ANALOG POT": {"pot": "2048"},
+            "DIGITAL BUTTON": {"button": "0"},
+        }
 
     def start(self):
         pass
@@ -23,8 +31,15 @@ class FakeSerialClient:
     def stop(self):
         pass
 
-    def send(self, command_line):
+    def send(self, command_line, *, timeout=None):
         self.sent.append(command_line)
+        self.last_timeout = timeout
+
+    def request(self, command_line, *, timeout=1.25, emit_event=False):
+        payload = self.responses.get(command_line)
+        if payload is None:
+            return {"command": command_line.upper(), "status": "ERROR", "payload": {}, "raw_payload": ""}
+        return {"command": command_line.upper(), "status": "OK", "payload": dict(payload), "raw_payload": ""}
 
     def poll(self):
         return []
@@ -104,6 +119,33 @@ class ExperimentEngineTests(unittest.TestCase):
         self.assertEqual(repeated.trial_id, 1)
         self.assertEqual(first.byte_index, repeated.byte_index)
         self.assertEqual(first.bit_mask, repeated.bit_mask)
+
+    def test_live_payload_text_fits_firmware_buffer_and_hex_roundtrips(self):
+        readings = {
+            "temp_c_x100": "2450",
+            "hum_x100": "5530",
+            "x_mg": "12",
+            "y_mg": "-34",
+            "z_mg": "1001",
+            "clear": "321",
+            "pot": "2048",
+            "button": "0",
+        }
+
+        payload_text = dashboard.live_payload_text_from_readings(42, readings)
+        payload_hex = dashboard.payload_hex_from_text(payload_text)
+
+        self.assertLessEqual(len(payload_text.encode("ascii")), dashboard.LIVE_PAYLOAD_MAX_BYTES)
+        self.assertIn("PQC-SAT|S=42", payload_text)
+        self.assertIn("|P=2048", payload_text)
+        self.assertEqual(bytes.fromhex(payload_hex).decode("ascii"), payload_text)
+
+    def test_fault_spec_from_pot_maps_full_range_to_payload_bits(self):
+        low = dashboard.fault_spec_from_pot("0", 4)
+        high = dashboard.fault_spec_from_pot("4095", 4)
+
+        self.assertEqual((low.byte_index, low.bit_mask), (0, 0x01))
+        self.assertEqual((high.byte_index, high.bit_mask), (3, 0x80))
 
 
 class DashboardCommandTests(unittest.TestCase):
@@ -424,6 +466,116 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertNotIn("MISSION PQC_CRC32", commands)
         self.assertNotIn("TELEMETRY", commands)
         self.assertNotIn("PING", commands)
+        self.assertNotIn("STRESS", commands)
+
+    def test_stress_button_requires_second_click_and_uses_long_timeout(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+
+        panel._handle_stress_button_click()
+        self.assertNotIn(dashboard.STRESS_COMMAND, fake.sent)
+        self.assertEqual(panel.stress_state, "ARMED")
+        self.assertEqual(panel.stress_status, "CONFIRME")
+
+        panel._handle_stress_button_click()
+        self.assertEqual(fake.sent[-1], dashboard.STRESS_COMMAND)
+        self.assertEqual(fake.last_timeout, dashboard.STRESS_SERIAL_TIMEOUT_SECONDS)
+        self.assertEqual(panel.stress_state, "RUNNING")
+        self.assertNotIn("STRESS", [command for _label, command in dashboard.COMMAND_BUTTONS])
+
+    def test_stress_button_remains_armed_until_second_click(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+
+        panel._handle_stress_button_click()
+        panel.update(60.0)
+
+        self.assertEqual(panel.stress_state, "ARMED")
+        self.assertNotIn(dashboard.STRESS_COMMAND, fake.sent)
+
+        panel._handle_stress_button_click()
+
+        self.assertEqual(fake.sent[-1], dashboard.STRESS_COMMAND)
+        self.assertEqual(panel.stress_state, "RUNNING")
+
+    def test_results_overlay_stress_button_click_path_arms_and_runs(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+        panel.results_overlay_visible = True
+        surface = pygame.Surface((dashboard.WIDTH, dashboard.HEIGHT), pygame.SRCALPHA)
+        panel._draw_results_overlay(surface, 0.5)
+        click = pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": panel.results_stress_btn_rect.center},
+        )
+
+        self.assertTrue(panel.handle_event(click))
+        self.assertEqual(panel.stress_state, "ARMED")
+        self.assertNotIn(dashboard.STRESS_COMMAND, fake.sent)
+
+        self.assertTrue(panel.handle_event(click))
+        self.assertEqual(fake.sent[-1], dashboard.STRESS_COMMAND)
+        self.assertEqual(panel.stress_state, "RUNNING")
+
+    def test_stress_command_from_terminal_requires_exact_confirmation(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+
+        panel._execute_command("STRESS PQC_LOOP 500")
+        self.assertNotIn(dashboard.STRESS_COMMAND, fake.sent)
+        self.assertEqual(panel.command_history[-1]["status"], "USE STRESS PQC_LOOP 500 CONFIRM")
+
+        panel._execute_command(dashboard.STRESS_COMMAND)
+        self.assertEqual(fake.sent[-1], dashboard.STRESS_COMMAND)
+        self.assertEqual(fake.last_timeout, dashboard.STRESS_SERIAL_TIMEOUT_SECONDS)
+
+    def test_stress_overlay_reports_didactic_timeout_without_cancelling(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+
+        panel._execute_command(dashboard.STRESS_COMMAND)
+        panel.update(dashboard.STRESS_DIDACTIC_TIMEOUT_SECONDS + 0.1)
+
+        self.assertEqual(panel.stress_state, "RUNNING")
+        self.assertEqual(panel.stress_status, "TIMEOUT DIDÁTICO")
+        self.assertEqual(fake.sent[-1], dashboard.STRESS_COMMAND)
+
+    def test_stress_response_exports_structured_metrics(self):
+        panel = dashboard.DashboardPanel()
+        panel.serial_connected = True
+
+        panel._apply_hardware_response(
+            dashboard.STRESS_COMMAND,
+            {
+                "op": "pqc_stress",
+                "mode": "PQC_LOOP",
+                "n": "500",
+                "ok": "500",
+                "key_match": "1",
+                "keygen_avg_us": "3301",
+                "encap_avg_us": "3864",
+                "decap_avg_us": "4988",
+                "elapsed_us": "6100000",
+                "heap": "201512",
+                "min_heap": "197624",
+                "profile": "BASELINE",
+                "cpu_mhz": "240",
+            },
+        )
+
+        self.assertEqual(panel.stress_state, "COMPLETE")
+        self.assertEqual(panel.stress_status, "STRESS OK")
+        sample = panel.hardware_samples[-1]
+        self.assertEqual(sample["source_command"], "STRESS")
+        self.assertEqual(sample["pqc"]["op"], "pqc_stress")
+        self.assertEqual(sample["pqc"]["mode"], "PQC_LOOP")
+        self.assertEqual(sample["pqc"]["n"], 500)
+        self.assertEqual(sample["pqc"]["ok"], 500)
 
     def test_dashboard_toggle_classic_and_pqc_switches_exclusively(self):
         panel = dashboard.DashboardPanel()
@@ -455,19 +607,85 @@ class DashboardCommandTests(unittest.TestCase):
         # Case 1: PQC preset -> MISSION PQC
         panel._execute_command("SET_PRESET_PQC")
         panel._execute_command("SEND_MESSAGE")
-        self.assertIn("MISSION PQC", fake.sent)
+        self.assertTrue(any(command.startswith("MISSION PQC ") for command in fake.sent))
 
         # Case 2: PQC+CRC preset -> MISSION PQC_CRC32
         fake.sent.clear()
         panel._execute_command("SET_PRESET_PQC_CRC32")
         panel._execute_command("SEND_MESSAGE")
-        self.assertIn("MISSION PQC_CRC32", fake.sent)
+        self.assertTrue(any(command.startswith("MISSION PQC_CRC32 ") for command in fake.sent))
 
         # Case 3: Classic preset -> MISSION CLASSIC
         fake.sent.clear()
         panel._execute_command("SET_PRESET_CLASSIC")
         panel._execute_command("SEND_MESSAGE")
-        self.assertIn("MISSION CLASSIC", fake.sent)
+        self.assertTrue(any(command.startswith("MISSION CLASSIC ") for command in fake.sent))
+        self.assertEqual(panel.last_live_payload["readings"]["pot"], "2048")
+        self.assertIn("|P=2048", panel.last_live_payload["payload_text"])
+
+    def test_live_mission_context_is_attached_to_overlay_and_export(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+        fake.sent.clear()
+
+        panel._execute_command("MISSION PQC_CRC32")
+        mission_command = next(command for command in fake.sent if command.startswith("MISSION PQC_CRC32 "))
+        payload_len = len(bytes.fromhex(mission_command.split()[2]))
+        panel._apply_hardware_response(
+            mission_command,
+            {
+                "scenario": "PQC_CRC32",
+                "result": "DELIVERED",
+                "crypto": "ML-KEM-512",
+                "checksum": "CRC32",
+                "elapsed_us": "15000",
+                "payload_len": str(payload_len),
+                "bytes_payload": str(payload_len),
+                "bytes_crypto": "800",
+                "bytes_checksum": "4",
+                "bytes_total": str(payload_len + 804),
+                "key_match": "1",
+                "tag_match": "1",
+                "crc_match": "1",
+            },
+        )
+
+        mission = panel.mission_overlays["PQC_CRC32"]
+        self.assertEqual(mission["payload_mode"], "LIVE")
+        self.assertIn("|P=2048", mission["payload_text"])
+        self.assertEqual(mission["sensor_pot"], "2048")
+        sample = panel.hardware_samples[-1]["mission"]
+        self.assertEqual(sample["payload_mode"], "LIVE")
+        self.assertEqual(sample["sensor_pot"], 2048)
+
+    def test_live_payload_collection_marks_missing_sensor_as_partial(self):
+        fake = FakeSerialClient()
+        fake.responses.pop("SENSOR_READ APDS")
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+
+        snapshot = panel._collect_live_payload_snapshot()
+
+        self.assertEqual(snapshot["status"], "PARTIAL")
+        self.assertIn("APDS", snapshot["failures"])
+        self.assertIn("|L=NA", snapshot["payload_text"])
+
+    def test_inject_fault_uses_potentiometer_selector_when_satellite_is_online(self):
+        fake = FakeSerialClient()
+        fake.responses["ANALOG POT"] = {"pot": "4095"}
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+        fake.sent.clear()
+
+        panel._execute_command("INJECT_FAULT")
+
+        event = panel.last_fault_event
+        self.assertEqual(event.byte_index, len(panel.last_live_payload["payload_text"].encode("ascii")) - 1)
+        self.assertEqual(event.bit_mask, 0x80)
+        self.assertEqual(panel.fault_overlay["selector_pot"], "4095")
+        self.assertIn("potenciômetro", panel.fault_flow_animation["steps"][1]["explain"])
+        self.assertTrue(any(command.startswith("FAULT NONE ") for command in fake.sent))
 
     def test_mission_popup_persists_until_user_closes_it(self):
         panel = dashboard.DashboardPanel()
@@ -644,6 +862,25 @@ class DashboardCommandTests(unittest.TestCase):
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
 
+    def test_results_overlay_content_fits_projector_target_resolutions(self):
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            for width, height in ((1920, 1080), (1366, 768)):
+                dashboard.WIDTH, dashboard.HEIGHT = width, height
+                surface = pygame.Surface((width, height), pygame.SRCALPHA)
+                panel = dashboard.DashboardPanel()
+                panel.results_overlay_visible = True
+
+                panel._draw_results_overlay(surface, 0.5)
+
+                panel_rect, _close_rect = panel._results_overlay_geometry()
+                self.assertIsNotNone(panel.results_stress_btn_rect)
+                self.assertLessEqual(panel.results_stress_btn_rect.bottom, panel_rect.bottom - 8)
+                self.assertIsNotNone(panel.results_overlay_content_bottom)
+                self.assertLessEqual(panel.results_overlay_content_bottom, panel_rect.bottom - 8)
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
     def test_onboarding_draws_all_slides_in_projector_target_resolutions(self):
         old_size = (dashboard.WIDTH, dashboard.HEIGHT)
         try:
@@ -798,8 +1035,10 @@ class DashboardCommandTests(unittest.TestCase):
 
         panel._execute_command("MISSION PQC_CRC32")
 
-        self.assertEqual(fake.sent[:3], ["MISSION PQC_CRC32", "BARGRAPH 100", "LED GREEN"])
-        self.assertEqual(panel.command_history[-1]["cmd"], "MISSION PQC_CRC32")
+        self.assertEqual(fake.sent[0:2], ["LED YELLOW", "BARGRAPH 10"])
+        self.assertTrue(fake.sent[2].startswith("MISSION PQC_CRC32 "))
+        self.assertEqual(fake.sent[3:6], ["BARGRAPH 100", "LED GREEN", "RGB 0 255 120"])
+        self.assertTrue(panel.command_history[-1]["cmd"].startswith("MISSION PQC_CRC32 "))
         self.assertEqual(panel.command_history[-1]["status"], "QUEUED")
 
     def test_mission_response_exports_consolidated_metrics(self):

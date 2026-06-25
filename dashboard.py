@@ -24,7 +24,7 @@ import zlib
 
 import pygame
 
-from tools.serial_bridge import SerialBridge, SerialBridgeError, list_serial_ports
+from tools.serial_bridge import SerialBridge, SerialBridgeError, SerialBridgeTimeout, list_serial_ports
 from tools.serial_commands import (
     DASHBOARD_COMMAND_NAMES,
     FIRMWARE_COMMAND_NAMES,
@@ -40,7 +40,7 @@ screen = None
 clock = pygame.time.Clock()
 FPS = 60
 SIMULATION_SEED = 42
-DEFAULT_PAYLOAD = b"PQC-SAT|TEMP=24.5|STATUS=OK"
+DEFAULT_PAYLOAD = b"PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK"
 RUN_SCHEMA_VERSION = "pqc-sat-run-v2"
 DEFAULT_LOG_DIR = Path("logs")
 SPLASH_SECONDS = 1.6
@@ -48,6 +48,11 @@ TIMELINE_WINDOW = 16
 SERIAL_STARTUP_COMMANDS = ("OLED STANDBY",)
 SERIAL_RECONNECT_DELAY = 1.5
 SERIAL_TIMEOUT_SECONDS = 5.0
+LIVE_PAYLOAD_REQUEST_TIMEOUT_SECONDS = 1.25
+LIVE_PAYLOAD_MAX_BYTES = 96
+STRESS_COMMAND = "STRESS PQC_LOOP 500 CONFIRM"
+STRESS_SERIAL_TIMEOUT_SECONDS = 30.0
+STRESS_DIDACTIC_TIMEOUT_SECONDS = 8.0
 AUTO_TELEMETRY_ENABLED = False
 TELEMETRY_POLL_SECONDS = 30.0
 CPU_LOAD_WINDOW_SECONDS = 5.0
@@ -59,8 +64,8 @@ MISSION_FLOW_ANIMATION_SECONDS = 12.0
 FAULT_FLOW_ANIMATION_SECONDS = 9.5
 HELP_HINT_LINES = (
     "Botões: comandos visuais da demo.",
+    "Payload vivo usa sensores no envio.",
     "Terminal: HELP mostra comandos avançados.",
-    "Ex.: MISSION PQC, PQC_KAT, HELP LED",
 )
 COMMAND_BUTTONS = (
     ("ENVIAR MSG", "SEND_MESSAGE"),
@@ -532,6 +537,63 @@ def _format_elapsed(value):
     return f"{parsed} us"
 
 
+def _compact_value(value, default="NA"):
+    if value is None or value == "":
+        return default
+    text = str(value).strip()
+    if not text:
+        return default
+    return text.replace("|", "/").replace(" ", "_")[:12]
+
+
+def live_payload_text_from_readings(seq, readings, *, max_bytes=LIVE_PAYLOAD_MAX_BYTES):
+    """Build a compact ASCII payload that fits the firmware mission buffer."""
+
+    temp = _compact_value(readings.get("temp_c_x100"))
+    hum = _compact_value(readings.get("hum_x100"))
+    ax = _compact_value(readings.get("x_mg"))
+    ay = _compact_value(readings.get("y_mg"))
+    az = _compact_value(readings.get("z_mg"))
+    light = _compact_value(readings.get("clear"))
+    pot = _compact_value(readings.get("pot"))
+    button = _compact_value(readings.get("button"))
+    fields = (
+        ("S", str(seq % 10000)),
+        ("T", temp),
+        ("H", hum),
+        ("X", ax),
+        ("Y", ay),
+        ("Z", az),
+        ("L", light),
+        ("P", pot),
+        ("B", button),
+        ("OK", ""),
+    )
+    payload = "PQC-SAT"
+    for key, value in fields:
+        chunk = f"|{key}" if value == "" else f"|{key}={value}"
+        if len((payload + chunk).encode("ascii", errors="replace")) > max_bytes:
+            break
+        payload += chunk
+    return payload
+
+
+def payload_hex_from_text(payload_text):
+    return payload_text.encode("ascii", errors="replace").hex().upper()
+
+
+def fault_spec_from_pot(pot_value, payload_len):
+    if payload_len <= 0:
+        raise ValueError("payload vazio")
+    parsed = _optional_int(pot_value)
+    if parsed is None:
+        return None
+    clamped = max(0, min(4095, parsed))
+    total_bits = payload_len * 8
+    bit_position = min(total_bits - 1, int(round((clamped / 4095) * (total_bits - 1))))
+    return FaultSpec(byte_index=bit_position // 8, bit_mask=1 << (bit_position % 8))
+
+
 def _process_rss_bytes():
     try:
         import resource
@@ -837,8 +899,19 @@ class DashboardSerialClient:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
 
-    def send(self, command_line):
-        self._tx.put(command_line)
+    def send(self, command_line, *, timeout=None):
+        self._tx.put({"command": command_line, "reply": None, "emit": True, "timeout": timeout})
+
+    def request(self, command_line, *, timeout=LIVE_PAYLOAD_REQUEST_TIMEOUT_SECONDS, emit_event=False):
+        reply = queue.Queue(maxsize=1)
+        self._tx.put({"command": command_line, "reply": reply, "emit": emit_event})
+        try:
+            event_type, payload = reply.get(timeout=timeout)
+        except queue.Empty as exc:
+            raise SerialBridgeTimeout(f"timeout waiting for live request: {command_line}") from exc
+        if event_type == "error":
+            raise SerialBridgeError(payload.get("status", "serial request error"))
+        return payload
 
     def poll(self):
         events = []
@@ -897,7 +970,21 @@ class DashboardSerialClient:
                             continue
                         if command_line is None:
                             break
-                        if not self._send_one(bridge, command_line):
+                        reply = None
+                        emit_event = True
+                        timeout_override = None
+                        if isinstance(command_line, dict):
+                            reply = command_line.get("reply")
+                            emit_event = bool(command_line.get("emit", True))
+                            timeout_override = command_line.get("timeout")
+                            command_line = command_line.get("command")
+                        if not self._send_one(
+                            bridge,
+                            command_line,
+                            reply=reply,
+                            emit_event=emit_event,
+                            timeout_override=timeout_override,
+                        ):
                             break
             except SerialBridgeError as exc:
                 self._rx.put(("state", {"connected": False, "status": str(exc)}))
@@ -925,10 +1012,25 @@ class DashboardSerialClient:
         while not self._stop.is_set() and time.monotonic() < deadline:
             time.sleep(0.05)
 
-    def _send_one(self, bridge, command_line):
+    @staticmethod
+    def _notify_reply(reply, event):
+        if reply is None:
+            return
+        try:
+            reply.put_nowait(event)
+        except queue.Full:
+            pass
+
+    def _send_one(self, bridge, command_line, *, reply=None, emit_event=True, timeout_override=None):
         try:
             command, args = self._split_command(command_line)
-            frame = bridge.send(command, args)
+            previous_timeout = bridge.timeout
+            if timeout_override is not None:
+                bridge.timeout = float(timeout_override)
+            try:
+                frame = bridge.send(command, args)
+            finally:
+                bridge.timeout = previous_timeout
             payload = {}
             raw_payload = ""
             if frame.payload_fields:
@@ -937,23 +1039,30 @@ class DashboardSerialClient:
                     payload = decode_key_values(frame.payload_fields)
                 except ProtocolError:
                     payload = {"payload": raw_payload}
-            self._rx.put(
-                (
-                    "response",
-                    {
-                        "command": command_line.upper(),
-                        "status": frame.status or "UNKNOWN",
-                        "payload": payload,
-                        "raw_payload": raw_payload,
-                    },
-                )
+            event = (
+                "response",
+                {
+                    "command": command_line.upper(),
+                    "status": frame.status or "UNKNOWN",
+                    "payload": payload,
+                    "raw_payload": raw_payload,
+                },
             )
+            if emit_event:
+                self._rx.put(event)
+            self._notify_reply(reply, event)
             return True
         except ProtocolError as exc:
-            self._rx.put(("error", {"command": command_line.upper(), "status": str(exc)}))
+            event = ("error", {"command": command_line.upper(), "status": str(exc)})
+            if emit_event:
+                self._rx.put(event)
+            self._notify_reply(reply, event)
             return True
         except SerialBridgeError as exc:
-            self._rx.put(("error", {"command": command_line.upper(), "status": str(exc)}))
+            event = ("error", {"command": command_line.upper(), "status": str(exc)})
+            if emit_event:
+                self._rx.put(event)
+            self._notify_reply(reply, event)
             self._rx.put(("state", {"connected": False, "status": str(exc)}))
             return False
 
@@ -1096,6 +1205,7 @@ class DashboardPanel:
         self.help_scroll = 0
         self.command_history = []
         self.command_button_rects = []
+        self.live_payload_toggle_rect = None
         self.input_text = ""
         self.input_active = True
         self.cursor_blink = 0
@@ -1128,8 +1238,20 @@ class DashboardPanel:
         self.pqc_enabled = True
         self.classic_enabled = False
         self.message_preset = "PQC"
+        self.live_payload_enabled = True
+        self.live_payload_seq = 1
+        self.last_live_payload = None
+        self.pending_mission_contexts = {}
+        self.pending_fault_contexts = {}
         self.results_overlay_visible = False
         self.top_results_btn_rect = None
+        self.results_stress_btn_rect = None
+        self.results_overlay_content_bottom = None
+        self.stress_state = "IDLE"
+        self.stress_armed_until = 0.0
+        self.stress_started_at = 0.0
+        self.stress_payload = {}
+        self.stress_status = "PRONTO"
         self.guard_mode = "NONE"
         self.cpu_active_window = []
         self.last_cpu_load_pct = 0.0
@@ -1202,18 +1324,21 @@ class DashboardPanel:
                 panel_rect, close_rect = self._results_overlay_geometry()
                 if close_rect.collidepoint(event.pos):
                     self.results_overlay_visible = False
-                    return
+                    return True
+                if self.results_stress_btn_rect is not None and self.results_stress_btn_rect.collidepoint(event.pos):
+                    self._handle_stress_button_click()
+                    return True
                 if not panel_rect.collidepoint(event.pos):
                     self.results_overlay_visible = False
-                    return
-                return
+                    return True
+                return True
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.results_overlay_visible = False
-                return
+                return True
             elif event.type == pygame.MOUSEWHEEL:
-                return
-            return
+                return True
+            return True
 
         if self._handle_fault_overlay_event(event):
             return True
@@ -1222,6 +1347,14 @@ class DashboardPanel:
             return True
 
         if event.type == pygame.MOUSEBUTTONDOWN:
+            if (
+                event.button == 1
+                and self.live_payload_toggle_rect is not None
+                and self.live_payload_toggle_rect.collidepoint(event.pos)
+            ):
+                self._execute_command("TOGGLE_LIVE_PAYLOAD")
+                self.input_active = False
+                return
             if event.button == 1 and self._handle_command_button_click(event.pos):
                 self.input_active = False
                 return
@@ -1397,6 +1530,11 @@ class DashboardPanel:
             if mission_status is None:
                 return
             status = mission_status
+        elif cmd_upper == "TOGGLE_LIVE_PAYLOAD":
+            self.live_payload_enabled = not self.live_payload_enabled
+            self.session_dirty = True
+            self.session_status = "PAYLOAD VIVO" if self.live_payload_enabled else "PAYLOAD FIXO"
+            status = "PAYLOAD VIVO ON" if self.live_payload_enabled else "PAYLOAD VIVO OFF"
         elif cmd_upper == "PQC_STATUS":
             if self.serial_connected:
                 self._queue_serial_command("PQC_INFO", visible=True)
@@ -1407,6 +1545,10 @@ class DashboardPanel:
         elif cmd_upper == "PQC_RESULTS":
             self.results_overlay_visible = not getattr(self, "results_overlay_visible", False)
             status = "SHOW_RESULTS" if self.results_overlay_visible else "HIDE_RESULTS"
+        elif command_name == "STRESS":
+            status = self._execute_stress_command(cmd_clean)
+            if status is None:
+                return
         elif cmd_upper == "CRC_CHECK":
             status = self._run_experiment_command("CRC32")
         elif cmd_upper in {"EXPORT_JSON", "SAVE_SESSION"}:
@@ -1445,6 +1587,43 @@ class DashboardPanel:
 
         self._append_history(cmd_upper, status)
 
+    def _handle_stress_button_click(self):
+        if self.stress_state == "RUNNING":
+            self._append_history("STRESS", "RUNNING")
+            return
+        if self.stress_state == "ARMED":
+            status = self._execute_stress_command(STRESS_COMMAND)
+            if status is not None:
+                self._append_history("STRESS", status)
+            return
+        self.stress_armed_until = 0.0
+        self.stress_state = "ARMED"
+        self.stress_payload = {}
+        self.stress_status = "CONFIRME"
+        self._append_history("STRESS", "CONFIRMAR")
+
+    def _execute_stress_command(self, command_line):
+        normalized = command_line.strip().upper()
+        if normalized != STRESS_COMMAND:
+            return "USE STRESS PQC_LOOP 500 CONFIRM"
+        if self.serial_client is None or not self.serial_connected:
+            self.stress_state = "ERROR"
+            self.stress_status = "SAT OFF"
+            self.stress_payload = {}
+            return "SAT OFF"
+
+        self.stress_state = "RUNNING"
+        self.stress_started_at = self.uptime
+        self.stress_armed_until = 0.0
+        self.stress_payload = {}
+        self.stress_status = "ML-KEM EM LOOP"
+        self.session_status = "STRESS PQC"
+        self._queue_serial_command("LED YELLOW", visible=False)
+        self._queue_serial_command("BARGRAPH 5", visible=False)
+        self._queue_serial_command("RGB 255 80 0", visible=False)
+        self._queue_serial_command(STRESS_COMMAND, visible=True, timeout=STRESS_SERIAL_TIMEOUT_SECONDS)
+        return None
+
     def _current_message_scenario(self):
         if self.message_preset in {"CLASSIC", "PQC", "PQC_CRC32"}:
             return self.message_preset
@@ -1473,32 +1652,139 @@ class DashboardPanel:
         self.session_status = labels[scenario]
         return labels[scenario]
 
+    def _request_serial_payload(self, command_line, *, timeout=LIVE_PAYLOAD_REQUEST_TIMEOUT_SECONDS):
+        if self.serial_client is None or not self.serial_connected or not hasattr(self.serial_client, "request"):
+            return {"ok": False, "payload": {}, "status": "UNAVAILABLE"}
+        try:
+            response = self.serial_client.request(command_line, timeout=timeout, emit_event=False)
+        except SerialBridgeError as exc:
+            return {"ok": False, "payload": {}, "status": str(exc)}
+        status = str(response.get("status", "")).upper()
+        payload = dict(response.get("payload") or {})
+        return {"ok": status == "OK", "payload": payload, "status": status or "UNKNOWN"}
+
+    def _collect_live_payload_snapshot(self):
+        readings = {}
+        sources = {}
+        failures = []
+        commands = (
+            ("TEMP_HUM", "SENSOR_READ TEMP_HUM"),
+            ("ACCEL", "SENSOR_READ ACCEL"),
+            ("APDS", "SENSOR_READ APDS"),
+            ("POT", "ANALOG POT"),
+            ("BUTTON", "DIGITAL BUTTON"),
+        )
+        for label, command in commands:
+            result = self._request_serial_payload(command)
+            sources[label] = result["status"]
+            if result["ok"]:
+                readings.update(result["payload"])
+            else:
+                failures.append(label)
+
+        seq = self.live_payload_seq
+        self.live_payload_seq += 1
+        payload_text = live_payload_text_from_readings(seq, readings)
+        payload_hex = payload_hex_from_text(payload_text)
+        snapshot = {
+            "enabled": True,
+            "seq": seq,
+            "payload_text": payload_text,
+            "payload_hex": payload_hex,
+            "payload_len": len(payload_text.encode("ascii", errors="replace")),
+            "readings": readings,
+            "sources": sources,
+            "failures": failures,
+            "status": "OK" if not failures else "PARTIAL",
+            "pot": readings.get("pot"),
+            "button": readings.get("button"),
+        }
+        self.last_live_payload = snapshot
+        return snapshot
+
+    def _fixed_payload_snapshot(self):
+        payload_text = DEFAULT_PAYLOAD.decode("ascii", errors="replace")
+        snapshot = {
+            "enabled": False,
+            "seq": self.live_payload_seq,
+            "payload_text": payload_text,
+            "payload_hex": payload_hex_from_text(payload_text),
+            "payload_len": len(DEFAULT_PAYLOAD),
+            "readings": {},
+            "sources": {},
+            "failures": [],
+            "status": "FIXED",
+            "pot": None,
+            "button": None,
+        }
+        self.last_live_payload = snapshot
+        return snapshot
+
+    def _mission_context_for_send(self):
+        if self.live_payload_enabled:
+            return self._collect_live_payload_snapshot()
+        return self._fixed_payload_snapshot()
+
+    def _remember_pending_mission_context(self, scenario, snapshot):
+        if not snapshot:
+            return
+        self.pending_mission_contexts.setdefault(scenario, []).append(snapshot)
+
+    def _pop_pending_mission_context(self, scenario):
+        queue_for_scenario = self.pending_mission_contexts.get(scenario)
+        if not queue_for_scenario:
+            return None
+        snapshot = queue_for_scenario.pop(0)
+        if not queue_for_scenario:
+            self.pending_mission_contexts.pop(scenario, None)
+        return snapshot
+
+    def _remember_pending_fault_context(self, command_line, snapshot, spec):
+        if not snapshot:
+            return
+        self.pending_fault_contexts[command_line.upper()] = {
+            "snapshot": snapshot,
+            "spec": spec,
+        }
+
+    def _pop_pending_fault_context(self, command_line):
+        return self.pending_fault_contexts.pop(command_line.upper(), None)
+
     def _execute_mission_command(self, args):
-        if len(args) != 1:
+        if len(args) not in {1, 2}:
             return "INVALID_INPUT"
         scenario = args[0].upper().replace("+", "_")
         if scenario not in {"CLASSIC", "PQC", "PQC_CRC32"}:
             return "INVALID_INPUT"
+        manual_payload_hex = args[1].upper() if len(args) == 2 else ""
         self._set_message_preset(scenario)
         if self.serial_client is None or not self.serial_connected:
             self.session_status = "AGUARDANDO SAT"
             return "SAT OFF"
 
-        command = f"MISSION {scenario}"
+        self._queue_serial_command("LED YELLOW", visible=False)
+        self._queue_serial_command("BARGRAPH 10", visible=False)
+        if manual_payload_hex:
+            command = f"MISSION {scenario} {manual_payload_hex}"
+        else:
+            snapshot = self._mission_context_for_send()
+            command = f"MISSION {scenario} {snapshot['payload_hex']}" if snapshot.get("payload_hex") else f"MISSION {scenario}"
+            self._remember_pending_mission_context(scenario, snapshot)
         self._queue_serial_command(command, visible=True)
         for effect_command in self._mission_effect_commands(scenario):
             self._queue_serial_command(effect_command, visible=False)
+        self._queue_serial_command("OLED STANDBY", visible=False)
         self.session_status = f"MISSÃO {scenario}"
         return None
 
     @staticmethod
     def _mission_effect_commands(scenario):
         if scenario == "CLASSIC":
-            return ("BARGRAPH 25", "LED BLUE")
+            return ("BARGRAPH 25", "LED BLUE", "RGB 0 80 255")
         if scenario == "PQC":
-            return ("BARGRAPH 75", "LED MAGENTA")
+            return ("BARGRAPH 75", "LED MAGENTA", "RGB 180 40 255")
         if scenario == "PQC_CRC32":
-            return ("BARGRAPH 100", "LED GREEN")
+            return ("BARGRAPH 100", "LED GREEN", "RGB 0 255 120")
         return ()
 
     def _execute_checksum_command(self, command_name, args):
@@ -1549,8 +1835,17 @@ class DashboardPanel:
         return False
 
     def _run_experiment_command(self, guard, args=None, campaign_trial_id=None):
+        args = args or []
+        snapshot = None
         try:
-            spec = self._fault_spec_from_args(args or [])
+            spec = self._fault_spec_from_args(args)
+            if not args and self.satellite_online():
+                snapshot = self._mission_context_for_send()
+                payload_bytes = snapshot["payload_text"].encode("ascii", errors="replace")
+                self.experiment.payload = payload_bytes
+                pot_spec = fault_spec_from_pot(snapshot.get("pot"), len(payload_bytes))
+                if pot_spec is not None:
+                    spec = pot_spec
             mode = "HARDWARE" if self.satellite_online() else "SIMULATED"
             event = self.experiment.run_fault(
                 guard=guard,
@@ -1568,10 +1863,21 @@ class DashboardPanel:
         self.session_dirty = True
         self._refresh_experiment_metrics()
         self._trigger_fault_effect(event)
-        self._open_fault_overlay_from_event(event)
+        self._open_fault_overlay_from_event(event, snapshot=snapshot)
 
         if self.serial_connected:
-            self._queue_serial_command(event.to_firmware_command(), visible=True)
+            self._queue_serial_command("LED YELLOW", visible=False)
+            self._queue_serial_command("BARGRAPH 50", visible=False)
+            command_line = event.to_firmware_command()
+            self._remember_pending_fault_context(command_line, snapshot, event)
+            self._queue_serial_command(command_line, visible=True)
+            if event.result == "SILENT":
+                self._queue_serial_command("LED RED", visible=False)
+                self._queue_serial_command("RGB 255 20 40", visible=False)
+            elif event.result == "DETECTED_GUARD":
+                self._queue_serial_command("LED GREEN", visible=False)
+                self._queue_serial_command("RGB 0 255 120", visible=False)
+            self._queue_serial_command("OLED STANDBY", visible=False)
 
         if event.result == "SILENT":
             self.session_status = "DEGRADADO (SIM)"
@@ -1589,6 +1895,7 @@ class DashboardPanel:
                 return status
 
         self.experiment.reset()
+        self.experiment.payload = DEFAULT_PAYLOAD
         self.hardware_samples.clear()
         self.battery_runs = 0
         self.last_fault_event = None
@@ -1626,6 +1933,11 @@ class DashboardPanel:
         self.dragging_mission_overlay = None
         self.mission_drag_offset = (0, 0)
         self.mission_flow_animation = None
+        self.pending_mission_contexts.clear()
+        self.pending_fault_contexts.clear()
+        self.last_live_payload = None
+        self.live_payload_seq = 1
+        self.live_payload_enabled = True
         self.message_preset = "PQC"
         self.classic_enabled = False
         self.pqc_enabled = True
@@ -1804,6 +2116,7 @@ class DashboardPanel:
         if not 1 <= attempts <= 100:
             return "INVALID_INPUT"
 
+        self.experiment.payload = DEFAULT_PAYLOAD
         specs = [self.experiment.next_spec() for _ in range(attempts)]
         self.battery_runs += 1
         previous_run_id = getattr(self, "_active_campaign_run_id", "manual")
@@ -1868,6 +2181,7 @@ class DashboardPanel:
                 return status
 
         self.experiment.reset()
+        self.experiment.payload = DEFAULT_PAYLOAD
         self.experiment_events = self.experiment.events
         self.last_fault_event = None
         self._refresh_experiment_metrics()
@@ -1994,7 +2308,7 @@ class DashboardPanel:
             self.effect_color = C_ACCENT_GREEN
             self.effect_label = event.result
 
-    def _open_fault_overlay_from_event(self, event):
+    def _open_fault_overlay_from_event(self, event, snapshot=None):
         before_byte = self._byte_from_hex_at(event.before_hex, event.byte_index)
         after_byte = self._byte_from_hex_at(event.after_hex, event.byte_index)
         fault = {
@@ -2016,10 +2330,13 @@ class DashboardPanel:
             "elapsed_us": event.elapsed_us,
             "mode": event.mode,
         }
+        if snapshot:
+            fault.update(self._fault_context_fields(snapshot, event))
         self._open_fault_overlay(fault)
 
     def _open_fault_overlay_from_payload(self, command, payload):
         command_name = command.split()[0].upper()
+        context = self._pop_pending_fault_context(command)
         is_pqc_fault = command_name == "PQC_FAULT"
         target = str(payload.get("target", "CIPHERTEXT" if is_pqc_fault else "PAYLOAD")).upper()
         guard = payload.get("guard")
@@ -2053,6 +2370,8 @@ class DashboardPanel:
             "elapsed_us": _optional_int(payload.get("elapsed_us")),
             "mode": "HARDWARE",
         }
+        if context:
+            fault.update(self._fault_context_fields(context.get("snapshot"), context.get("spec")))
         self._open_fault_overlay(fault)
 
     def _open_fault_overlay(self, fault):
@@ -2127,7 +2446,10 @@ class DashboardPanel:
                 {
                     "label": "BIT-FLIP",
                     "detail": f"byte {fault.get('byte_index', '--')} mask {fault.get('bit_mask', '--')}",
-                    "explain": "Um único bit é invertido. Em PQC isso pode mudar o segredo derivado pelo receptor.",
+                    "explain": self._fault_selector_explanation(
+                        fault,
+                        "Em PQC isso pode mudar o segredo derivado pelo receptor.",
+                    ),
                     "color": C_ACCENT_RED,
                 },
                 {
@@ -2163,7 +2485,10 @@ class DashboardPanel:
             {
                 "label": "BIT-FLIP",
                 "detail": f"byte {fault.get('byte_index', '--')} mask {fault.get('bit_mask', '--')}",
-                "explain": "A radiação simulada inverte um único bit. O byte muda, mas o sistema ainda precisa perceber.",
+                "explain": self._fault_selector_explanation(
+                    fault,
+                    "O byte muda, mas o sistema ainda precisa perceber.",
+                ),
                 "color": C_ACCENT_RED,
             },
             {
@@ -2237,11 +2562,18 @@ class DashboardPanel:
             return "A falha atingiu o material PQC; compare segredo, tag e resultado final."
         return "A tentativa terminou sem divergência observada."
 
-    def _queue_serial_command(self, command_line, visible=True):
+    @staticmethod
+    def _fault_selector_explanation(fault, suffix):
+        pot = fault.get("selector_pot")
+        if pot not in {None, "", "NA"}:
+            return f"O potenciômetro da Wisdom escolheu o bit da falha simulada. {suffix}"
+        return f"A radiação simulada inverte um único bit. {suffix}"
+
+    def _queue_serial_command(self, command_line, visible=True, timeout=None):
         if self.serial_client is None:
             self._append_history(command_line, "SERIAL OFF")
             return
-        self.serial_client.send(command_line)
+        self.serial_client.send(command_line, timeout=timeout)
         if visible:
             self._append_history(command_line, "QUEUED")
 
@@ -2252,6 +2584,10 @@ class DashboardPanel:
             self.effect_timer = max(0.0, self.effect_timer - dt)
         if self.mission_effect_timer > 0:
             self.mission_effect_timer = max(0.0, self.mission_effect_timer - dt)
+        if self.stress_state == "RUNNING":
+            elapsed = self.uptime - self.stress_started_at
+            if elapsed >= STRESS_DIDACTIC_TIMEOUT_SECONDS:
+                self.stress_status = "TIMEOUT DIDÁTICO"
         if self.mission_flow_animation is not None and not self.mission_flow_animation.get("paused"):
             self.mission_flow_animation["age"] += dt
             if self.mission_flow_animation["age"] >= self.mission_flow_animation["duration"]:
@@ -2306,8 +2642,19 @@ class DashboardPanel:
                     bytes_total = self.hardware_payload.get("bytes_total")
                     if elapsed is not None and bytes_total is not None:
                         status = f"{_format_elapsed(elapsed)}, {bytes_total} B"
+                elif command.startswith("STRESS"):
+                    elapsed = self.hardware_payload.get("elapsed_us")
+                    ok = self.hardware_payload.get("ok")
+                    total = self.hardware_payload.get("n")
+                    if elapsed is not None and ok is not None and total is not None:
+                        status = f"{ok}/{total}, {_format_elapsed(elapsed)}"
                 self._append_history(command, status)
             elif event_type == "error":
+                command = payload["command"]
+                if command.startswith("STRESS"):
+                    self.stress_state = "ERROR"
+                    self.stress_status = "TIMEOUT REAL"
+                    self.stress_payload = {"error": payload["status"]}
                 self._append_history(payload["command"], "ERROR")
                 self.serial_status = payload["status"]
 
@@ -2332,7 +2679,21 @@ class DashboardPanel:
             self._update_pqc_label(payload)
             if command.startswith("PQC_FAULT"):
                 self._open_fault_overlay_from_payload(command, payload)
+        elif command.startswith("STRESS"):
+            self.hardware_payload = payload
+            self.stress_payload = dict(payload)
+            ok = _optional_int(payload.get("ok"))
+            total = _optional_int(payload.get("n"))
+            self.stress_state = "COMPLETE" if ok is not None and total is not None and ok == total else "ERROR"
+            self.stress_status = "STRESS OK" if self.stress_state == "COMPLETE" else "STRESS FALHOU"
+            self.session_status = self.stress_status
+            self.pqc_algorithm = "ML-KEM-512 (STRESS)"
         elif command.startswith("MISSION"):
+            scenario = self._normalize_mission_scenario(payload.get("scenario", "MISSION"))
+            if "payload_mode" not in payload:
+                snapshot = self._pop_pending_mission_context(scenario)
+                if snapshot:
+                    payload.update(self._mission_context_fields(snapshot))
             self.hardware_payload = payload
             self._open_mission_overlay(payload)
             scenario = payload.get("scenario", "MISSION")
@@ -2346,10 +2707,49 @@ class DashboardPanel:
     def _normalize_mission_scenario(scenario):
         return str(scenario or "MISSION").upper().replace("+", "_")
 
+    @staticmethod
+    def _mission_context_fields(snapshot):
+        readings = snapshot.get("readings", {}) if snapshot else {}
+        failures = snapshot.get("failures", []) if snapshot else []
+        return {
+            "payload_mode": "LIVE" if snapshot and snapshot.get("enabled") else "FIXED",
+            "payload_live_status": snapshot.get("status", "") if snapshot else "",
+            "payload_text": snapshot.get("payload_text", "") if snapshot else "",
+            "payload_hex_sent": snapshot.get("payload_hex", "") if snapshot else "",
+            "payload_seq": snapshot.get("seq", "") if snapshot else "",
+            "sensor_temp_c_x100": readings.get("temp_c_x100", "NA"),
+            "sensor_hum_x100": readings.get("hum_x100", "NA"),
+            "sensor_accel": ",".join(
+                str(readings.get(key, "NA")) for key in ("x_mg", "y_mg", "z_mg")
+            ),
+            "sensor_light": readings.get("clear", "NA"),
+            "sensor_pot": readings.get("pot", "NA"),
+            "sensor_button": readings.get("button", "NA"),
+            "sensor_failures": ",".join(failures) if failures else "",
+        }
+
+    @classmethod
+    def _fault_context_fields(cls, snapshot, event_or_spec):
+        readings = snapshot.get("readings", {}) if snapshot else {}
+        pot = snapshot.get("pot", readings.get("pot", "NA")) if snapshot else "NA"
+        byte_index = getattr(event_or_spec, "byte_index", None)
+        bit_mask = getattr(event_or_spec, "bit_mask", None)
+        return {
+            "payload_mode": "LIVE" if snapshot and snapshot.get("enabled") else "FIXED",
+            "payload_text": snapshot.get("payload_text", "") if snapshot else "",
+            "payload_hex_sent": snapshot.get("payload_hex", "") if snapshot else "",
+            "selector_pot": pot if pot is not None else "NA",
+            "selector_byte_index": byte_index if byte_index is not None else "--",
+            "selector_bit_mask": f"0x{bit_mask:02X}" if isinstance(bit_mask, int) else "--",
+        }
+
     def _open_mission_overlay(self, payload):
         mission = dict(payload)
         scenario = self._normalize_mission_scenario(mission.get("scenario", "MISSION"))
         mission["scenario"] = scenario
+        snapshot = None if "payload_mode" in mission else self._pop_pending_mission_context(scenario)
+        if snapshot:
+            mission.update(self._mission_context_fields(snapshot))
         self.mission_overlays[scenario] = mission
         if scenario not in self.mission_overlay_order:
             self.mission_overlay_order.append(scenario)
@@ -2387,11 +2787,17 @@ class DashboardPanel:
         if total <= 0:
             return []
 
+        live_mode = str(mission.get("payload_mode", "")).upper() == "LIVE"
+        payload_explain = (
+            "A Wisdom acabou de medir ambiente/posição e montou o payload real da missão. Esses bytes entram no pacote antes da proteção criptográfica."
+            if live_mode
+            else "A placa recebe o payload bruto. Ainda não há bytes de autenticação, KEM ou checksum anexados."
+        )
         steps = [
             {
                 "label": "PAYLOAD",
-                "detail": "mensagem base",
-                "explain": "A placa recebe o payload bruto. Ainda não há bytes de autenticação, KEM ou checksum anexados.",
+                "detail": "telemetria viva" if live_mode else "mensagem base",
+                "explain": payload_explain,
                 "kind": "payload",
                 "packet_bytes": payload,
                 "added_bytes": payload,
@@ -2660,7 +3066,7 @@ class DashboardPanel:
 
     def _pqc_sample_export(self, command, payload):
         source_command = command.split()[0].upper()
-        if not source_command.startswith("PQC") and not any(key.startswith("pqc_") for key in payload):
+        if source_command != "STRESS" and not source_command.startswith("PQC") and not any(key.startswith("pqc_") for key in payload):
             return {}
 
         text_fields = (
@@ -2672,6 +3078,7 @@ class DashboardPanel:
             "pqc_license",
             "source",
             "op",
+            "mode",
             "target",
             "result",
             "confirmation",
@@ -2740,20 +3147,32 @@ class DashboardPanel:
             "crypto",
             "checksum",
             "confirmation",
+            "payload_mode",
+            "payload_live_status",
+            "payload_text",
+            "payload_hex_sent",
             "payload_crc32",
             "crc_tx",
             "crc_rx",
+            "sensor_accel",
+            "sensor_failures",
         )
         numeric_fields = (
             "key_match",
             "tag_ready",
             "tag_match",
             "crc_match",
+            "payload_seq",
             "payload_len",
             "bytes_payload",
             "bytes_crypto",
             "bytes_checksum",
             "bytes_total",
+            "sensor_temp_c_x100",
+            "sensor_hum_x100",
+            "sensor_light",
+            "sensor_pot",
+            "sensor_button",
             "keygen_us",
             "encap_us",
             "decap_us",
@@ -2786,13 +3205,13 @@ class DashboardPanel:
             self._draw_results_overlay(surface, t)
 
     def _results_overlay_geometry(self):
-        margin = max(26, int(min(WIDTH, HEIGHT) * 0.04))
-        w = min(int(WIDTH * 0.88), WIDTH - margin * 2)
-        h = min(int(HEIGHT * 0.88), HEIGHT - margin * 2)
+        margin = max(18, int(min(WIDTH, HEIGHT) * 0.025))
+        w = min(int(WIDTH * 0.92), WIDTH - margin * 2)
+        h = min(int(HEIGHT * 0.94), HEIGHT - margin * 2)
         x = (WIDTH - w) // 2
         y = (HEIGHT - h) // 2
-        close_w = 118 if WIDTH < 1500 else 150
-        close_rect = pygame.Rect(x + w - close_w - 28, y + 28, close_w, 36)
+        close_w = 112 if WIDTH < 1500 else 144
+        close_rect = pygame.Rect(x + w - close_w - 22, y + 20, close_w, 34)
         return pygame.Rect(x, y, w, h), close_rect
 
     def _draw_wrapped_text(self, surface, font, text, color, x, y, max_width, line_spacing=20, max_lines=None):
@@ -2811,9 +3230,76 @@ class DashboardPanel:
             return C_ACCENT_ORANGE
         return C_TEXT_PRIMARY
 
+    def _draw_stress_results_control(self, surface, x, y, width, mouse_pos):
+        card_h = 86
+        rect = pygame.Rect(x, y, width, card_h)
+        state = self.stress_state
+        running = state == "RUNNING"
+        armed = state == "ARMED" and not running
+        color = C_ACCENT_ORANGE if running or armed else C_ACCENT_CYAN
+        if state == "COMPLETE":
+            color = C_ACCENT_GREEN
+        elif state == "ERROR":
+            color = C_ACCENT_RED
+
+        pygame.draw.rect(surface, (15, 20, 38), rect, border_radius=5)
+        pygame.draw.rect(surface, color, rect, width=1, border_radius=5)
+
+        surface.blit(self._render_clipped(FONT_LABEL, "FECHAMENTO: STRESS PQC CONTROLADO", color, width - 20), (x + 10, y + 8))
+        elapsed = max(0.0, self.uptime - self.stress_started_at) if running else 0.0
+        if running:
+            detail = f"{self.stress_status}  {elapsed:.1f}s / timeout real {int(STRESS_SERIAL_TIMEOUT_SECONDS)}s"
+        elif state in {"COMPLETE", "ERROR"} and self.stress_payload:
+            payload = self.stress_payload
+            if "error" in payload:
+                detail = f"{self.stress_status}: {payload.get('error')}"
+            else:
+                detail = (
+                    f"{payload.get('ok', '--')}/{payload.get('n', '--')} rounds, "
+                    f"{_format_elapsed(payload.get('elapsed_us'))}, heap min {_format_bytes(payload.get('min_heap'))}"
+                )
+        else:
+            detail = "Clique uma vez para armar; clique novamente para executar ML-KEM 500x."
+        self._draw_wrapped_text(surface, FONT_LABEL, detail, C_TEXT_PRIMARY, x + 10, y + 29, width - 178, line_spacing=16, max_lines=2)
+
+        if state in {"COMPLETE", "ERROR"} and self.stress_payload and "error" not in self.stress_payload:
+            payload = self.stress_payload
+            metrics = (
+                f"keygen {_format_elapsed(payload.get('keygen_avg_us'))}",
+                f"encap {_format_elapsed(payload.get('encap_avg_us'))}",
+                f"decap {_format_elapsed(payload.get('decap_avg_us'))}",
+            )
+            surface.blit(self._render_clipped(FONT_LABEL, "  ".join(metrics), C_TEXT_DIM, width - 20), (x + 10, y + 59))
+        elif running and self.stress_status == "TIMEOUT DIDÁTICO":
+            surface.blit(self._render_clipped(FONT_LABEL, "Espera longa; a serial continua aguardando resposta real.", C_ACCENT_ORANGE, width - 20), (x + 10, y + 59))
+        else:
+            surface.blit(self._render_clipped(FONT_LABEL, "Fechamento visual; não substitui a bateria oficial.", C_TEXT_DIM, width - 20), (x + 10, y + 59))
+
+        btn_w = 150
+        btn_h = 34
+        btn = pygame.Rect(x + width - btn_w - 10, y + 34, btn_w, btn_h)
+        self.results_stress_btn_rect = btn
+        hovered = btn.collidepoint(mouse_pos)
+        if running:
+            label = "RODANDO..."
+        elif armed:
+            label = "CONFIRMAR"
+        else:
+            label = "STRESS PQC 500"
+        fill = (80, 44, 16) if hovered or armed else (24, 34, 58)
+        if state == "ERROR":
+            fill = (70, 20, 30) if hovered else (46, 18, 26)
+        pygame.draw.rect(surface, fill, btn, border_radius=5)
+        pygame.draw.rect(surface, color, btn, width=1, border_radius=5)
+        text = self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, btn.width - 12)
+        surface.blit(text, (btn.x + (btn.width - text.get_width()) // 2, btn.y + (btn.height - text.get_height()) // 2))
+        return y + card_h + 12
+
     def _draw_results_overlay(self, surface, t):
         panel_rect, close_rect = self._results_overlay_geometry()
         x, y, w, h = panel_rect
+        self.results_stress_btn_rect = None
+        self.results_overlay_content_bottom = None
 
         panel_surf = pygame.Surface((w, h), pygame.SRCALPHA)
         panel_surf.fill((12, 14, 30, 236))
@@ -2821,15 +3307,15 @@ class DashboardPanel:
 
         pygame.draw.rect(surface, C_PANEL_BORDER, panel_rect, width=2, border_radius=8)
 
-        header_h = 92
+        header_h = 78
         pygame.draw.rect(surface, C_PANEL_HEADER, (x + 2, y + 2, w - 4, header_h), border_radius=8)
         pygame.draw.line(surface, C_ACCENT_CYAN, (x, y + header_h), (x + w, y + header_h), 2)
 
         title_max = max(260, close_rect.x - (x + 36) - 18)
         title = "RESULTADOS CONSOLIDADOS DA BATERIA REAL"
-        surface.blit(self._render_clipped(FONT_TITLE, title, C_ACCENT_CYAN, title_max), (x + 36, y + 19))
+        surface.blit(self._render_clipped(FONT_HEADER, title, C_ACCENT_CYAN, title_max), (x + 30, y + 16))
         subtitle = f"{CONSOLIDATED_ACCEPTANCE_LABEL}: {CONSOLIDATED_SUMMARY['records']} registros, {CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões"
-        surface.blit(self._render_clipped(FONT_BODY, subtitle, C_TEXT_DIM, title_max), (x + 36, y + 54))
+        surface.blit(self._render_clipped(FONT_LABEL, subtitle, C_TEXT_DIM, title_max), (x + 30, y + 48))
 
         try:
             mouse_pos = pygame.mouse.get_pos()
@@ -2843,12 +3329,12 @@ class DashboardPanel:
         surface.blit(c_txt, (close_rect.x + (close_rect.width - c_txt.get_width()) // 2, close_rect.y + (close_rect.height - c_txt.get_height()) // 2))
 
         body_x = x + max(24, int(w * 0.035))
-        body_y = y + header_h + 24
+        body_y = y + header_h + 16
         body_w = w - (body_x - x) * 2
         gap = 18
         two_cols = body_w >= 920
         col_w = (body_w - gap) // 2 if two_cols else body_w
-        col_h = h - (body_y - y) - 32
+        col_h = h - (body_y - y) - 24
 
         if two_cols:
             left = pygame.Rect(body_x, body_y, col_w, col_h)
@@ -2864,12 +3350,12 @@ class DashboardPanel:
         # Coluna esquerda: custo das missões.
         pad = 18
         lx = left.x + pad
-        ly = left.y + 18
+        ly = left.y + 14
         lw = left.width - pad * 2
         surface.blit(self._render_clipped(FONT_HEADER, "CUSTO DAS MISSÕES (240 MHz)", C_ACCENT_CYAN, lw), (lx, ly))
-        ly += 38
+        ly += 32
 
-        table_h = min(170, max(142, int(left.height * 0.36)))
+        table_h = min(154, max(132, int(left.height * 0.32)))
         pygame.draw.rect(surface, C_PANEL_HEADER, (lx, ly, lw, table_h), border_radius=4)
         pygame.draw.rect(surface, C_PANEL_BORDER, (lx, ly, lw, table_h), width=1, border_radius=4)
         headers = ("CENÁRIO", "TEMPO", "BYTES", "STATUS")
@@ -2909,22 +3395,24 @@ class DashboardPanel:
             "A 80 MHz, PQC subiu para 38,8 ms e 34,1x o baseline clássico.",
         )
         for note in notes:
+            if ly > left.bottom - 42:
+                break
             ly = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, lx, ly, lw, line_spacing=18, max_lines=2)
             ly += 3
 
         # Coluna direita: segurança, campanha e próximos passos.
         rx = right.x + pad
-        ry = right.y + 18
+        ry = right.y + 14
         rw = right.width - pad * 2
         surface.blit(self._render_clipped(FONT_HEADER, "SEGURANÇA E BENCHMARK", C_ACCENT_CYAN, rw), (rx, ry))
-        ry += 38
+        ry += 32
 
-        bench_h = min(132, max(112, int(right.height * 0.25)))
+        bench_h = min(112, max(96, int(right.height * 0.21)))
         pygame.draw.rect(surface, C_PANEL_HEADER, (rx, ry, rw, bench_h), border_radius=4)
         pygame.draw.rect(surface, C_PANEL_BORDER, (rx, ry, rw, bench_h), width=1, border_radius=4)
         surface.blit(self._render_clipped(FONT_LABEL, "ML-KEM-512, média em us, 100 rounds", C_ACCENT_ORANGE, rw - 20), (rx + 10, ry + 10))
         b_col_ws = (int(rw * 0.38), int(rw * 0.2), int(rw * 0.2), rw - int(rw * 0.38) - int(rw * 0.2) - int(rw * 0.2) - 8)
-        by = ry + 36
+        by = ry + 32
         for row_index, row in enumerate(CONSOLIDATED_PQC_BENCH):
             cx = rx + 10
             for col_index, cell in enumerate(row):
@@ -2932,8 +3420,8 @@ class DashboardPanel:
                 cx += b_col_ws[col_index]
             if row_index == 0:
                 pygame.draw.line(surface, C_PANEL_BORDER, (rx, by + 24), (rx + rw, by + 24), 1)
-            by += 38
-        ry += bench_h + 16
+            by += 32
+        ry += bench_h + 12
 
         security_notes = (
             f"Aceite: {CONSOLIDATED_SUMMARY['records']} registros, {CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões.",
@@ -2943,29 +3431,35 @@ class DashboardPanel:
             "PQC_FAULT com confirmação: PROTOCOL_REJECT.",
         )
         for note in security_notes:
-            ry = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, rx, ry, rw, line_spacing=18, max_lines=2)
+            if ry > right.bottom - 188:
+                break
+            ry = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, rx, ry, rw, line_spacing=17, max_lines=1)
             ry += 3
 
-        ry += 6
-        pygame.draw.line(surface, C_PANEL_BORDER, (rx, ry), (rx + rw, ry), 1)
-        ry += 14
-        surface.blit(self._render_clipped(FONT_LABEL, "TRÊS MENSAGENS PARA FECHAR", C_ACCENT_GREEN, rw), (rx, ry))
-        ry += 24
-        block_gap = 8
-        block_w = max(120, (rw - block_gap * 2) // 3)
-        block_h = min(74, max(58, right.bottom - ry - 8))
-        narrative_blocks = (
-            ("CUSTO", "PQC: 25,9x tempo e 11,5x bytes.", C_ACCENT_ORANGE),
-            ("SEGURANÇA", "CRC detecta; HMAC autentica.", C_ACCENT_GREEN),
-            ("LIMITES", "Energia real fica como próximo passo.", C_ACCENT_CYAN),
-        )
-        for index, (label, body, color) in enumerate(narrative_blocks):
-            bx = rx + index * (block_w + block_gap)
-            bw = block_w if index < 2 else rw - (block_w + block_gap) * 2
-            pygame.draw.rect(surface, (15, 20, 38), (bx, ry, bw, block_h), border_radius=5)
-            pygame.draw.rect(surface, color, (bx, ry, bw, block_h), width=1, border_radius=5)
-            surface.blit(self._render_clipped(FONT_LABEL, label, color, bw - 12), (bx + 7, ry + 7))
-            self._draw_wrapped_text(surface, FONT_LABEL, body, C_TEXT_PRIMARY, bx + 7, ry + 27, bw - 14, line_spacing=15, max_lines=2)
+        ry = self._draw_stress_results_control(surface, rx, ry + 4, rw, mouse_pos)
+        content_bottom = ry
+        if right.bottom - ry >= 86:
+            pygame.draw.line(surface, C_PANEL_BORDER, (rx, ry), (rx + rw, ry), 1)
+            ry += 10
+            surface.blit(self._render_clipped(FONT_LABEL, "TRÊS MENSAGENS PARA FECHAR", C_ACCENT_GREEN, rw), (rx, ry))
+            ry += 22
+            block_gap = 8
+            block_w = max(120, (rw - block_gap * 2) // 3)
+            block_h = min(54, max(44, right.bottom - ry - 8))
+            narrative_blocks = (
+                ("CUSTO", "PQC: 25,9x tempo.", C_ACCENT_ORANGE),
+                ("CRC32", "Detecta corrupção.", C_ACCENT_GREEN),
+                ("LIMITE", "Energia real exige medidor.", C_ACCENT_CYAN),
+            )
+            for index, (label, body, color) in enumerate(narrative_blocks):
+                bx = rx + index * (block_w + block_gap)
+                bw = block_w if index < 2 else rw - (block_w + block_gap) * 2
+                pygame.draw.rect(surface, (15, 20, 38), (bx, ry, bw, block_h), border_radius=5)
+                pygame.draw.rect(surface, color, (bx, ry, bw, block_h), width=1, border_radius=5)
+                surface.blit(self._render_clipped(FONT_LABEL, label, color, bw - 12), (bx + 7, ry + 6))
+                self._draw_wrapped_text(surface, FONT_LABEL, body, C_TEXT_PRIMARY, bx + 7, ry + 24, bw - 14, line_spacing=14, max_lines=2)
+            content_bottom = ry + block_h
+        self.results_overlay_content_bottom = max(ly, content_bottom)
 
     def _draw_fault_effect(self, surface, t, satellite):
         if self.effect_timer <= 0:
@@ -3059,6 +3553,8 @@ class DashboardPanel:
             f"byte={self.fault_overlay.get('byte_index', '--')}  "
             f"mask={self.fault_overlay.get('bit_mask', '--')}"
         )
+        if self.fault_overlay.get("selector_pot") not in {None, "", "NA"}:
+            subtitle += f"  pot={self.fault_overlay.get('selector_pot')}"
         surface.blit(self._render_clipped(FONT_LABEL, subtitle, C_TEXT_DIM, rect.width - 28), (rect.x + 14, rect.y + 48))
 
         if self.fault_flow_animation is not None:
@@ -3185,7 +3681,19 @@ class DashboardPanel:
 
         self._draw_fault_byte_rows(surface, x, y + 96, width, fault)
 
-        metric_y = y + 176
+        selector_y = y + 158
+        if fault.get("selector_pot") not in {None, "", "NA"} or fault.get("payload_text"):
+            selector = (
+                f"pot {fault.get('selector_pot', 'NA')} -> "
+                f"byte {fault.get('selector_byte_index', fault.get('byte_index', '--'))} "
+                f"mask {fault.get('selector_bit_mask', fault.get('bit_mask', '--'))}"
+            )
+            surface.blit(self._render_clipped(FONT_LABEL, selector, C_ACCENT_ORANGE, width), (x, selector_y))
+            payload_text = str(fault.get("payload_text", ""))
+            if payload_text:
+                surface.blit(self._render_clipped(FONT_LABEL, payload_text, C_TEXT_DIM, width), (x, selector_y + 16))
+
+        metric_y = y + 194
         metric_gap = 8
         metric_w = (width - metric_gap) // 2
         metrics = (
@@ -3560,6 +4068,7 @@ class DashboardPanel:
         x = panel_rect.x + 14
         cw = pw - 28
         y = self._draw_command_buttons(surface, x, y, cw, t) + 10
+        y = self._draw_live_payload_toggle(surface, x, y, cw) + 10
         pygame.draw.line(surface, C_PANEL_BORDER, (x, y), (x + cw, y), 1)
         y += 10
 
@@ -3712,6 +4221,28 @@ class DashboardPanel:
 
         rows = math.ceil(len(COMMAND_BUTTONS) / columns)
         return y + rows * button_h + max(0, rows - 1) * gap
+
+    def _draw_live_payload_toggle(self, surface, x, y, width):
+        rect = pygame.Rect(x, y, width, 34)
+        self.live_payload_toggle_rect = rect
+        active = bool(self.live_payload_enabled)
+        border = C_ACCENT_GREEN if active else C_PANEL_BORDER
+        fill = (10, 42, 30) if active else (18, 20, 40)
+        pygame.draw.rect(surface, fill, rect, border_radius=5)
+        pygame.draw.rect(surface, border, rect, width=1, border_radius=5)
+
+        knob_rect = pygame.Rect(rect.right - 58, rect.y + 8, 42, 18)
+        pygame.draw.rect(surface, (8, 12, 24), knob_rect, border_radius=9)
+        knob_x = knob_rect.right - 15 if active else knob_rect.x + 5
+        pygame.draw.circle(surface, C_ACCENT_GREEN if active else C_TEXT_DIM, (knob_x, knob_rect.centery), 6)
+
+        label = "Payload vivo"
+        status = "ON" if active else "OFF"
+        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, width - 86), (rect.x + 9, rect.y + 5))
+        detail = "sensores -> MISSION" if active else "payload fixo"
+        surface.blit(self._render_clipped(FONT_LABEL, detail, C_TEXT_DIM, width - 86), (rect.x + 9, rect.y + 19))
+        surface.blit(FONT_LABEL.render(status, True, C_ACCENT_GREEN if active else C_TEXT_DIM), (knob_rect.x - 28, rect.y + 11))
+        return rect.bottom
 
     def _render_clipped(self, font, text, color, max_width):
         if font.size(text)[0] <= max_width:
@@ -3884,7 +4415,7 @@ class DashboardPanel:
     def _mission_overlay_size(self):
         width = 380 if WIDTH >= 1600 else 340
         width = min(width, max(280, WIDTH - 40))
-        height = min(354, max(326, HEIGHT - 120))
+        height = min(390, max(354, HEIGHT - 120))
         return width, height
 
     def _mission_overlay_geometry(self, scenario=None):
@@ -4081,7 +4612,8 @@ class DashboardPanel:
             pygame.draw.rect(surface, C_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), width=1, border_radius=3)
 
             part_values = {label: value for label, value, _part_color in parts}
-            line1 = f"pay {part_values.get('payload', 0)}B  hmac {part_values.get('HMAC', 0)}B"
+            payload_label = "payload real" if str(mission.get("payload_mode", "")).upper() == "LIVE" else "payload"
+            line1 = f"{payload_label} {part_values.get('payload', 0)}B  hmac {part_values.get('HMAC', 0)}B"
             line2 = f"kem {part_values.get('ML-KEM', 0)}B  crc {part_values.get('CRC', 0)}B"
             surface.blit(self._render_clipped(FONT_LABEL, line1, C_TEXT_DIM, col_w - 12), (x + 7, y + 67))
             surface.blit(self._render_clipped(FONT_LABEL, line2, C_TEXT_DIM, col_w - 12), (x + 7, y + 81))
@@ -4312,6 +4844,33 @@ class DashboardPanel:
         )
         surface.blit(self._render_clipped(FONT_LABEL, validation, C_TEXT_DIM, rect.width - 28), (rect.x + 14, validation_y))
 
+        live_y = validation_y + 24
+        if live_y < rect.bottom - 62:
+            self._draw_mission_live_payload(surface, rect, mission, live_y)
+
+    def _draw_mission_live_payload(self, surface, rect, mission, y):
+        mode = str(mission.get("payload_mode", "FIXED")).upper()
+        title = "PAYLOAD REAL DA PLACA" if mode == "LIVE" else "PAYLOAD FIXO"
+        color = C_ACCENT_GREEN if mode == "LIVE" else C_TEXT_DIM
+        box_h = min(58, rect.bottom - y - 10)
+        if box_h < 46:
+            return
+        box = pygame.Rect(rect.x + 14, y, rect.width - 28, box_h)
+        pygame.draw.rect(surface, (14, 20, 38), box, border_radius=5)
+        pygame.draw.rect(surface, color, box, width=1, border_radius=5)
+        surface.blit(self._render_clipped(FONT_LABEL, title, color, box.width - 12), (box.x + 7, box.y + 5))
+        payload_text = str(mission.get("payload_text", ""))
+        if payload_text:
+            surface.blit(self._render_clipped(FONT_LABEL, payload_text, C_TEXT_PRIMARY, box.width - 12), (box.x + 7, box.y + 20))
+        if box.height < 56:
+            return
+        sensors = (
+            f"T={mission.get('sensor_temp_c_x100', 'NA')} "
+            f"ACC={mission.get('sensor_accel', 'NA')} "
+            f"L={mission.get('sensor_light', 'NA')} "
+            f"POT={mission.get('sensor_pot', 'NA')}"
+        )
+        surface.blit(self._render_clipped(FONT_LABEL, sensors, C_TEXT_DIM, box.width - 12), (box.x + 7, box.y + 35))
 
     def _draw_top_bar(self, surface, t):
         """Barra superior com titulo e status."""
@@ -5141,7 +5700,7 @@ class Onboarding:
         surface.blit(self.wrap_render(FONT_HEADER, "O QUE COMPARAR", C_ACCENT_ORANGE, rw), (rx, ry))
         ry += 38
         comparisons = [
-            "CPU e RAM ficam sempre no topo.",
+            "Sensores da Wisdom viram payload real.",
             "Popups pausáveis mostram pacote, bit-flip e verificações.",
             "CLASSIC é o baseline barato: 511 us e 73 bytes.",
             "PQC: 13.234 us e 841 bytes por causa do ML-KEM-512.",

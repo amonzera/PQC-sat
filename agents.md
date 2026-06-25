@@ -155,6 +155,10 @@ ML-KEM/FIPS 203.
 - O botão superior `RESULTADOS` e o onboarding fazem parte da apresentação:
   eles devem resumir a bateria real, conclusões e próximos passos, sem iniciar
   coletas demoradas nem adicionar comandos técnicos ao menu lateral.
+- `STRESS PQC_LOOP 500 CONFIRM` é um fechamento opcional e protegido dentro de
+  `RESULTADOS`, com confirmação explícita. Ele demonstra carga extrema de
+  ML-KEM no hardware, mas não deve virar botão lateral nem substituir as
+  métricas oficiais da bateria longa.
 - `ENVIAR MSG` e `MISSION ...` não podem simular/reproduzir métricas
   consolidadas quando a placa não estiver conectada. A demo principal deve
   usar resposta serial real da Wisdom; modo `--simulated` é apenas ensaio

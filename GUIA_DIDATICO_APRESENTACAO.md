@@ -8,10 +8,10 @@ afirmado.
 
 ## 1. Ideia em uma frase
 
-O PQC-SAT mostra que, em um sistema embarcado, criptografia mais forte pode
-custar mais CPU, RAM, tempo e trafego; e que esse custo aumenta quando, alem
-da criptografia pós-quântica, também exigimos verificação de integridade por
-checksum.
+O PQC-SAT mostra que, em um sistema embarcado, mecanismos criptográficos mais
+modernos e custosos podem exigir mais CPU, RAM, tempo e trafego; e que esse
+custo aumenta quando, alem da criptografia pós-quântica, também exigimos
+verificação de integridade por checksum.
 
 ## 2. A historia da apresentação
 
@@ -69,6 +69,46 @@ introduz os conceitos, o painel principal conduz a demonstração e o botão
 Por isso, os botões visuais foram reduzidos ao roteiro principal.
 Hoje os botões centrais da apresentação sao `"ENVIAR MSG"`, `"CLÁSSICA"`, `"PQC"`, `"PQC+CRC"` e `"FALHA"`.
 
+### Modo Satélite Vivo
+
+O dashboard agora tem um toggle discreto chamado `Payload vivo`, ligado por
+padrão. Esse modo torna a apresentação mais fiel à ideia de um computador de
+bordo:
+
+1. o dashboard pede leituras reais à Wisdom;
+2. a placa responde com sensores e entradas físicas;
+3. o dashboard monta um payload curto com esses valores;
+4. esse payload é convertido para hexadecimal;
+5. o comando enviado vira `MISSION CLASSIC|PQC|PQC_CRC32 payload_hex`;
+6. o firmware mede o custo criptográfico sobre esse payload real.
+
+O payload fica parecido com:
+
+```text
+PQC-SAT|S=42|T=2450|H=5530|X=12|Y=-34|Z=1001|L=321|P=2048|B=0|OK
+```
+
+Como ler esse exemplo:
+
+- `S`: número de sequência do envio;
+- `T` e `H`: temperatura e umidade em escala inteira;
+- `X`, `Y`, `Z`: aceleração nos três eixos;
+- `L`: leitura de luz/proximidade;
+- `P`: potenciômetro;
+- `B`: botão;
+- `OK`: marcador de status.
+
+Se algum sensor não responder, a demo não trava. O campo aparece como `NA` e o
+popup marca o payload como parcial. Isso é intencional: em sistemas embarcados,
+um sensor pode falhar sem impedir que o computador de bordo continue operando
+de forma degradada.
+
+Esse modo é importante para a fala do seminário:
+
+> Agora a placa não só responde a comandos. Ela mede o ambiente, monta a
+> telemetria da missão e executa a criptografia sobre dados criados naquele
+> instante.
+
 ### Onboarding do dashboard
 
 Ao abrir o dashboard sem `--no-splash`, aparece uma introdução em cinco telas.
@@ -101,11 +141,27 @@ real:
 - comparacao `CLASSIC`, `PQC` e `PQC_CRC32`;
 - resultados de segurança (`PQC_KAT`, `PQC_FAULT`, `FAULT NONE` e `FAULT CRC32`);
 - conclusões e próximos passos.
+- fechamento opcional `STRESS PQC 500`, que repete ML-KEM 500 vezes para
+  mostrar carga extrema controlada.
 
 Use esse botão no final da demo ao vivo para consolidar a fala:
 
 > O que vimos manualmente agora também foi medido em uma bateria longa antes da
 > apresentação. Estes sao os números reais que sustentam a conclusão.
+
+Se houver tempo, use o botão `STRESS PQC 500` dentro de `RESULTADOS`:
+
+1. clique uma vez para armar;
+2. explique que será uma carga agressiva, não um benchmark oficial;
+3. clique novamente para confirmar;
+4. observe o cronômetro e o aviso de espera longa;
+5. leia o resumo final de rounds, tempo total, médias ML-KEM e heap mínimo.
+
+Fala curta:
+
+> Agora não estamos enviando uma mensagem; estamos repetindo o acordo
+> pós-quântico 500 vezes. A ideia é mostrar o limite prático aparecendo no
+> tempo de resposta do hardware.
 
 ### Hardware Wisdom/ESP32
 
@@ -174,6 +230,17 @@ MISSION PQC
 MISSION PQC_CRC32
 ```
 
+Na apresentação, o dashboard normalmente envia a versão com payload vivo:
+
+```text
+MISSION PQC_CRC32 5051432D5341547C533D...
+```
+
+Esse hexadecimal é apenas a forma serial dos bytes do payload. O popup traduz
+a ideia visualmente mostrando `PAYLOAD REAL DA PLACA`, os sensores usados, o
+tamanho do payload e depois as etapas `KEYGEN`, `ENCAP`, `DECAP`, `HMAC`,
+`CRC32` e verificação.
+
 Leitura para explicar em sala:
 
 - `CLASSIC` mostra o custo de proteger uma mensagem com criptografia clássica
@@ -201,6 +268,18 @@ No projeto, os bit-flips aparecem de duas formas:
 
 - no dashboard, sobre um payload didático;
 - no firmware, sobre ciphertext ML-KEM ou payload hexadecimal.
+
+Com a camada de satélite vivo, o botão `FALHA` usa o potenciômetro da Wisdom
+como seletor didático:
+
+1. o apresentador gira o potenciômetro;
+2. o dashboard lê `ANALOG POT`;
+3. o valor de 0 a 4095 é mapeado para uma posição de bit dentro do payload;
+4. o bit é invertido;
+5. a janela mostra `pot -> byte/mask -> payload alterado -> resultado`.
+
+Isso não é radiação física. É uma forma controlada, visível e repetível de
+mostrar o efeito de uma falha transitória em um computador embarcado.
 
 ### Checksum CRC32
 
@@ -474,7 +553,8 @@ O CRC32 trata os dados como um polinomio e divide por um polinomio fixo
 ```text
   dados originais  --divisao polinomial-->  resto = CRC32 (4 bytes)
 
-  Se QUALQUER bit mudar --> o resto muda --> corrupcao detectada
+  Nos single-bit flips cobertos pela demo:
+  bit muda --> o resto muda --> corrupcao detectada
 ```
 
 **Importante: CRC32 NÃO e criptografia.**
@@ -848,6 +928,7 @@ Esses comandos existem e sao úteis, mas devem ficar no terminal/HELP ou no
 | `RUN_BATTERY` | E coleta local, não narrativa principal |
 | `PQC_KAT` | Importante para bancada, mas técnico demais para o fluxo visual |
 | `PQC_BENCH` | Gera dados, mas não é a demo principal |
+| `STRESS` | Fica protegido dentro de `RESULTADOS`; é fechamento de impacto, não botão lateral |
 | `PQC_FAULT` | Comando técnico opcional no terminal se a serial estiver estável; não deve virar botão |
 | `LED`, `RGB`, `BARGRAPH` | Efeito visual de hardware; no dashboard eles sao acionados indiretamente por `MISSION` |
 | sensores | Extras da placa, fora do argumento principal |

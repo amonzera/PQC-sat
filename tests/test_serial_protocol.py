@@ -1,5 +1,8 @@
 import contextlib
 import io
+from pathlib import Path
+import subprocess
+import sys
 import unittest
 from unittest import mock
 
@@ -15,10 +18,27 @@ from tools.serial_protocol import (
     decode_key_values,
     parse_frame,
 )
-from tools.serial_commands import DEMO_FIRMWARE_COMMAND_NAMES, FIRMWARE_COMMAND_NAMES, command_help_lines
+from tools.serial_commands import (
+    DEMO_FIRMWARE_COMMAND_NAMES,
+    FIRMWARE_COMMAND_NAMES,
+    command_help_lines,
+    is_demo_firmware_command,
+)
 
 
 class SerialProtocolTests(unittest.TestCase):
+    def test_serial_bridge_can_run_as_direct_script(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "tools/serial_bridge.py"],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_build_command_uppercases_command(self):
         self.assertEqual(build_command(7, "ping"), "V1|7|PING\n")
 
@@ -73,21 +93,32 @@ class SerialProtocolTests(unittest.TestCase):
         rendered = "\n".join(lines)
         self.assertIn("OLED STANDBY", rendered)
         self.assertIn("MISSION PQC_CRC32", rendered)
+        self.assertIn("LED WHITE|RED|GREEN|BLUE|CYAN|MAGENTA|YELLOW|OFF", rendered)
+        self.assertNotIn("YELLOW|OFF muda", rendered)
+        self.assertIn("      muda a cor do indicador principal", rendered)
         full_rendered = "\n".join(command_help_lines(demo_only=False))
         self.assertIn("OLED INIT|CLEAR|TEST|STANDBY", full_rendered)
         self.assertIn("MISSION CLASSIC|PQC|PQC_CRC32", full_rendered)
+
+    def test_dashboard_led_effect_commands_are_known(self):
+        for command in ("LED YELLOW", "LED MAGENTA", "LED GREEN", "LED RED", "LED BLUE"):
+            self.assertTrue(is_demo_firmware_command(command), command)
 
     def test_pqc_bench_commands_are_full_catalog_only(self):
         for command_name in ("PQC_INFO", "PQC_KAT", "PQC_KEYGEN", "PQC_ENCAP", "PQC_DECAP", "PQC_FAULT", "PQC_BENCH"):
             self.assertIn(command_name, FIRMWARE_COMMAND_NAMES)
             self.assertNotIn(command_name, DEMO_FIRMWARE_COMMAND_NAMES)
+        self.assertIn("STRESS", FIRMWARE_COMMAND_NAMES)
+        self.assertNotIn("STRESS", DEMO_FIRMWARE_COMMAND_NAMES)
 
         full_rendered = "\n".join(command_help_lines(demo_only=False))
         demo_rendered = "\n".join(command_help_lines())
         self.assertIn("PQC_INFO", full_rendered)
         self.assertIn("PQC_FAULT", full_rendered)
+        self.assertIn("STRESS PQC_LOOP n CONFIRM", full_rendered)
         self.assertNotIn("PQC_INFO", demo_rendered)
         self.assertNotIn("PQC_FAULT", demo_rendered)
+        self.assertNotIn("STRESS PQC_LOOP", demo_rendered)
 
     def test_interactive_console_help_is_local_only(self):
         class FakeBridge:

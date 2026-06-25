@@ -74,7 +74,7 @@ No resultado consolidado:
 payload: 41 bytes
 tag HMAC: 32 bytes
 total: 73 bytes
-tempo médio: 721 us
+tempo médio: 511 us
 ```
 
 Esse cenário **não executa ML-KEM**. Ele não mede criptografia assimétrica
@@ -119,7 +119,7 @@ payload: 41 bytes
 ciphertext ML-KEM: 768 bytes
 tag HMAC: 32 bytes
 total: 841 bytes
-tempo médio: 13.536 us
+tempo médio: 13.234 us
 ```
 
 Importante: a chave pública ML-KEM tem 800 bytes, mas **não entra** no
@@ -168,7 +168,7 @@ ciphertext ML-KEM: 768 bytes
 tag HMAC: 32 bytes
 CRC32: 4 bytes
 total: 845 bytes
-tempo médio: 13.367 us
+tempo médio: 13.130 us
 crc_us médio: ~10 us
 ```
 
@@ -1031,11 +1031,11 @@ ML-KEM estabelece um segredo; esse segredo autentica a mensagem via HMAC.
 ## 15. Roteiro de fala técnica de 2 minutos
 
 > No modo clássico, a placa calcula uma tag HMAC-SHA256 sobre o payload usando
-> uma chave simétrica didática. Isso custa pouco: 721 us e 73 bytes no nosso
+> uma chave simétrica didática. Isso custa pouco: 511 us e 73 bytes no nosso
 > baseline. No modo PQC, antes de autenticar a mensagem, a placa executa
 > ML-KEM-512: gera chave, encapsula um segredo e decapsula o ciphertext. Aí ela
 > usa o segredo compartilhado para o HMAC. O pacote sobe para 841 bytes porque
-> inclui ciphertext ML-KEM e tag HMAC, e o tempo sobe para 13.536 us. No modo
+> inclui ciphertext ML-KEM e tag HMAC, e o tempo sobe para 13.234 us. No modo
 > PQC+CRC, adicionamos CRC32 ao payload. CRC32 não é criptografia; ele detecta
 > corrupção acidental. Ele soma só 4 bytes e cerca de 10 us, mas ajuda a mostrar
 > visualmente a diferença entre falha silenciosa e erro detectado.

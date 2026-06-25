@@ -28,6 +28,7 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PQC_DECAP", "decapsula ciphertext armazenado e compara segredo"),
     CommandInfo("PQC_FAULT index mask [CONFIRM|NONE]", "aplica bit-flip em ciphertext ML-KEM e testa confirmação"),
     CommandInfo("PQC_BENCH n", "executa n rodadas keygen/encap/decap, 1..100"),
+    CommandInfo("STRESS PQC_LOOP n CONFIRM", "executa ML-KEM em loop extremo, 1..500, com confirmação explícita"),
     CommandInfo("MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]", "envia mensagem curta e mede custo/bytes/segurança por cenário"),
     CommandInfo("PERIPHERALS", "detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C"),
     CommandInfo("I2C_SCAN", "varre o barramento I2C SDA21/SCL22"),
@@ -62,6 +63,7 @@ DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("SET_PRESET_PQC", "seleciona preset visual PQC antes de ENVIAR MSG"),
     CommandInfo("SET_PRESET_PQC_CRC32", "seleciona preset visual PQC+CRC antes de ENVIAR MSG"),
     CommandInfo("SEND_MESSAGE", "envia mensagem usando o preset visual selecionado"),
+    CommandInfo("TOGGLE_LIVE_PAYLOAD", "liga/desliga payload de missão gerado por sensores da Wisdom"),
     CommandInfo("MISSION CLASSIC|PQC|PQC_CRC32", "executa entrega de mensagem nos cenários da apresentação"),
     CommandInfo("CRC_CHECK", "aplica bit-flip e verifica CRC32 real"),
     CommandInfo("EXPORT_JSON", "salva eventos e métricas em JSON"),
@@ -87,7 +89,7 @@ DEMO_FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("SENSOR_READ APDS", "lê luz/proximidade do APDS-9960"),
     CommandInfo("OLED STANDBY", "restaura o ícone robô-satélite no display"),
     CommandInfo("LED TEST", "executa teste visual do indicador principal"),
-    CommandInfo("LED WHITE|RED|GREEN|BLUE|OFF", "muda a cor do indicador principal"),
+    CommandInfo("LED WHITE|RED|GREEN|BLUE|CYAN|MAGENTA|YELLOW|OFF", "muda a cor do indicador principal"),
     CommandInfo("RGB TEST", "executa teste vermelho/verde/azul do RGB"),
     CommandInfo("RGB R G B", "define uma cor RGB para efeito visual"),
     CommandInfo("RGB OFF", "desliga o LED RGB"),
@@ -116,7 +118,17 @@ def is_demo_firmware_command(command_line: str) -> bool:
     if name == "OLED":
         return len(parts) == 2 and parts[1] == "STANDBY"
     if name == "LED":
-        return len(parts) == 2 and parts[1] in {"TEST", "WHITE", "RED", "GREEN", "BLUE", "OFF"}
+        return len(parts) == 2 and parts[1] in {
+            "TEST",
+            "WHITE",
+            "RED",
+            "GREEN",
+            "BLUE",
+            "CYAN",
+            "MAGENTA",
+            "YELLOW",
+            "OFF",
+        }
     if name == "RGB":
         if len(parts) == 2:
             return parts[1] in {"TEST", "OFF"}
@@ -138,21 +150,30 @@ def _is_u8(value: str) -> bool:
     return 0 <= parsed <= 255
 
 
+def _format_help_entry(info: CommandInfo, *, width: int = 38) -> list[str]:
+    if len(info.usage) <= width:
+        return [f"  {info.usage:<{width}} {info.description}"]
+    return [f"  {info.usage}", f"      {info.description}"]
+
+
 def command_help_lines(*, include_dashboard: bool = False, demo_only: bool = True) -> list[str]:
     """Return compact human-readable help lines for terminal or dashboard use."""
 
     lines: list[str] = []
     if include_dashboard:
         lines.append("Comandos locais do dashboard:")
-        lines.extend(f"  {info.usage:<38} {info.description}" for info in DASHBOARD_COMMANDS)
+        for info in DASHBOARD_COMMANDS:
+            lines.extend(_format_help_entry(info))
         lines.append("")
 
     if demo_only:
         lines.append("Comandos de demonstração ao vivo:")
-        lines.extend(f"  {info.usage:<38} {info.description}" for info in DEMO_FIRMWARE_COMMANDS)
+        for info in DEMO_FIRMWARE_COMMANDS:
+            lines.extend(_format_help_entry(info))
         lines.append("")
         lines.append("Comandos completos de bancada: hardware_command_reference.md")
     else:
         lines.append("Comandos completos do firmware ESP32:")
-        lines.extend(f"  {info.usage:<38} {info.description}" for info in FIRMWARE_COMMANDS)
+        for info in FIRMWARE_COMMANDS:
+            lines.extend(_format_help_entry(info))
     return lines

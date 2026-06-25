@@ -4,9 +4,14 @@
 from __future__ import annotations
 
 import itertools
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.serial_protocol import ProtocolError, ProtocolFrame, build_command, parse_frame
 

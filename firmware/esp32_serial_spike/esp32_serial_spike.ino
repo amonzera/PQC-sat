@@ -1453,6 +1453,83 @@ static void handle_pqc_bench(const char *request_id, size_t field_count, char *f
   end_result();
 }
 
+static void handle_stress(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 6) {
+    print_error(request_id, "BAD_ARGS", "expected_PQC_LOOP_n_CONFIRM");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  uppercase_ascii(fields[5]);
+  if (strcmp(fields[3], "PQC_LOOP") != 0) {
+    print_error(request_id, "BAD_STRESS_MODE", "expected_PQC_LOOP");
+    return;
+  }
+  if (strcmp(fields[5], "CONFIRM") != 0) {
+    print_error(request_id, "CONFIRM_REQUIRED", "append_CONFIRM");
+    return;
+  }
+
+  int parsed = 0;
+  if (!parse_int_range(fields[4], 1, 500, &parsed)) {
+    print_error(request_id, "BAD_ROUNDS", "expected_1_to_500");
+    return;
+  }
+
+  const uint16_t rounds = static_cast<uint16_t>(parsed);
+  const uint32_t started = micros();
+  uint64_t total_keygen = 0;
+  uint64_t total_encap = 0;
+  uint64_t total_decap = 0;
+  uint16_t ok = 0;
+  bool last_match = false;
+
+  set_rgb(255, 80, 0);
+  set_bar_percent(5);
+
+  for (uint16_t i = 0; i < rounds; ++i) {
+    uint32_t keygen_us = 0;
+    uint32_t encap_us = 0;
+    uint32_t decap_us = 0;
+    bool key_match = false;
+    if (run_pqc_round(&keygen_us, &encap_us, &decap_us, &key_match)) {
+      ok++;
+    }
+    last_match = key_match;
+    total_keygen += keygen_us;
+    total_encap += encap_us;
+    total_decap += decap_us;
+    if ((i % 25U) == 0U || i + 1U == rounds) {
+      const uint8_t percent = static_cast<uint8_t>(((static_cast<uint32_t>(i) + 1U) * 100U) / rounds);
+      set_bar_percent(percent);
+    }
+    delay(0);
+  }
+
+  const bool all_ok = ok == rounds;
+  if (all_ok) {
+    set_main_led_rgb(0, 255, 120);
+  } else {
+    set_main_led_rgb(255, 20, 40);
+  }
+
+  begin_result(request_id, all_ok ? "OK" : "ERROR");
+  print_kv("op", "pqc_stress");
+  print_kv("mode", "PQC_LOOP");
+  print_kv_u32("n", rounds);
+  print_kv_u32("ok", ok);
+  print_kv_bool("key_match", last_match);
+  print_kv_u32("keygen_avg_us", static_cast<uint32_t>(total_keygen / rounds));
+  print_kv_u32("encap_avg_us", static_cast<uint32_t>(total_encap / rounds));
+  print_kv_u32("decap_avg_us", static_cast<uint32_t>(total_decap / rounds));
+  print_kv_u32("elapsed_us", micros() - started);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  print_kv("profile", active_profile);
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  end_result();
+}
+
 static void handle_mission(const char *request_id, size_t field_count, char *fields[]) {
   if (field_count < 4 || field_count > 5) {
     print_error(request_id, "BAD_ARGS", "expected_CLASSIC_PQC_PQC_CRC32_payloadhex");
@@ -2140,6 +2217,9 @@ static void send_help_detail(const char *request_id, const char *command) {
   } else if (strcmp(command, "PQC_BENCH") == 0) {
     print_kv("usage", "PQC_BENCH n");
     print_kv("does", "benchmark keygen encap decap");
+  } else if (strcmp(command, "STRESS") == 0) {
+    print_kv("usage", "STRESS PQC_LOOP n CONFIRM");
+    print_kv("does", "executa ML-KEM em loop extremo");
   } else if (strcmp(command, "MISSION") == 0) {
     print_kv("usage", "MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]");
     print_kv("does", "envia mensagem e mede custo por cenario");
@@ -2171,7 +2251,7 @@ static void send_help_detail(const char *request_id, const char *command) {
     print_kv("usage", "BARGRAPH 0..4 0..100 LEVEL n PERCENT n TEST");
     print_kv("does", "controla LEDs de porcentagem");
   } else if (strcmp(command, "LED") == 0) {
-    print_kv("usage", "LED ON OFF TOGGLE TEST WHITE RED GREEN BLUE");
+    print_kv("usage", "LED ON OFF TOGGLE TEST WHITE RED GREEN BLUE CYAN MAGENTA YELLOW");
     print_kv("does", "controla indicador principal e RGB");
   } else if (strcmp(command, "RELAY") == 0) {
     print_kv("usage", "RELAY ON OFF TOGGLE");
@@ -2208,7 +2288,7 @@ static void send_help(const char *request_id, size_t field_count, char *fields[]
   begin_result(request_id, "OK");
   print_kv("usage", "HELP [COMMAND]");
   print_kv("cmd1", "HELLO,PING,STATUS,TELEMETRY,FAULT,PERIPHERALS");
-  print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_FAULT,PQC_BENCH");
+  print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_FAULT,PQC_BENCH,STRESS");
   print_kv("cmd3", "MISSION,I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ,ANALOG,DIGITAL");
   print_kv("cmd4", "RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS");
   print_kv("cmd5", "HELP");
@@ -2258,6 +2338,8 @@ static void process_frame(char *line) {
     handle_pqc_fault(request_id, field_count, fields);
   } else if (strcmp(command, "PQC_BENCH") == 0) {
     handle_pqc_bench(request_id, field_count, fields);
+  } else if (strcmp(command, "STRESS") == 0) {
+    handle_stress(request_id, field_count, fields);
   } else if (strcmp(command, "MISSION") == 0) {
     handle_mission(request_id, field_count, fields);
   } else if (strcmp(command, "PERIPHERALS") == 0) {
