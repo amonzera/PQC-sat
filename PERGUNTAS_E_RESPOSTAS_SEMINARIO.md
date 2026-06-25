@@ -15,11 +15,11 @@ representa um CubeSat completo.
 
 **Resposta curta:** O projeto mostra que migrar para criptografia
 pós-quântica em hardware limitado tem custo real. Na Wisdom/ESP32, uma
-mensagem clássica autenticada com HMAC-SHA256 levou em média 721 us e 73 bytes.
-Quando usamos ML-KEM-512 no fluxo PQC, a entrega foi para 13.536 us e 841
-bytes. Com PQC mais CRC32, ficou em 13.367 us e 845 bytes. A parte de bit-flip
-mostra que, sem guardião, uma corrupção pode passar silenciosamente; com CRC32,
-ela é detectada.
+mensagem clássica autenticada com HMAC-SHA256 levou em média 511 us e 73 bytes.
+Quando usamos ML-KEM-512 no fluxo PQC, a entrega foi para 13.234 us e 841
+bytes. Com PQC mais CRC32, ficou em 13.130 us e 845 bytes. A parte de bit-flip
+mostra que, sem guardião, 600/600 corrupções passaram silenciosamente; com
+CRC32, 600/600 foram detectadas.
 
 **Resposta completa:** Estamos simulando a lógica de um computador de bordo
 COTS inspirado em CubeSat. A placa recebe uma mensagem curta e a processa em
@@ -228,13 +228,14 @@ confirmar se a chave derivada bate.
 ### O que é falha silenciosa?
 
 É quando um dado foi alterado, mas o sistema aceita ou segue em frente sem
-perceber. No projeto, sem CRC32 no payload, a demo A/B registrou 5/5 falhas
-silenciosas.
+perceber. No projeto, sem CRC32 no payload, a coleta final registrou 600/600
+falhas silenciosas.
 
 ### O que é erro detectado?
 
 É quando o sistema percebe que algo foi alterado e marca a entrega como
-inválida ou suspeita. Com CRC32, a demo A/B registrou 5/5 falhas detectadas.
+inválida ou suspeita. Com CRC32, a coleta final registrou 600/600 falhas
+detectadas.
 
 ### CRC32 detecta qualquer erro?
 
@@ -326,24 +327,24 @@ versão é tempo e tráfego, não exaustão de RAM.
 
 No perfil baseline de 240 MHz:
 
-- `CLASSIC`: 721 us, 73 bytes;
-- `PQC`: 13.536 us, 841 bytes;
-- `PQC_CRC32`: 13.367 us, 845 bytes.
+- `CLASSIC`: 511 us, 73 bytes;
+- `PQC`: 13.234 us, 841 bytes;
+- `PQC_CRC32`: 13.130 us, 845 bytes.
 
-Isso dá aproximadamente 18,8x mais tempo e 11,5x mais bytes para PQC em
+Isso dá aproximadamente 25,9x mais tempo e 11,5x mais bytes para PQC em
 comparação com `CLASSIC`.
 
 ### Quantas vezes os testes rodaram?
 
-A bateria final teve 83 registros, 0 falhas, 27 execuções `MISSION` e 2
-execuções `PQC_BENCH` com 100 rounds cada. Nos resultados `MISSION` baseline,
-foram 8 amostras por cenário na consolidação apresentada.
+A bateria final teve 3.074 registros, 0 falhas, 1.800 execuções `MISSION`,
+1.200 testes `FAULT` e 10 execuções `PQC_BENCH` com 100 rounds cada. Nos
+resultados `MISSION`, foram 300 amostras por cenário em cada perfil.
 
 ### Por que `PQC_CRC32` aparece um pouco mais rápido que `PQC` no tempo total?
 
 Porque os tempos totais têm variação natural de execução. O CRC32 aparece no
 subtempo específico como ~10 us e adiciona +4 bytes. A diferença pequena entre
-13.536 us e 13.367 us no total não deve ser vendida como "CRC deixa mais
+13.234 us e 13.130 us no total não deve ser vendida como "CRC deixa mais
 rápido"; é ruído/variação experimental.
 
 ### Então qual é a conclusão correta sobre CRC32?
@@ -418,8 +419,8 @@ ajuda a mostrar o custo médio das etapas ML-KEM separadas da demo visual.
 
 ### Qual etapa ML-KEM foi mais cara?
 
-Nos números consolidados, decap foi a etapa mais cara: cerca de 4.985 us a
-240 MHz e 15.204 us a 80 MHz no `PQC_BENCH 100`.
+Nos números consolidados, decap foi a etapa mais cara: cerca de 4.990 us a
+240 MHz e 15.217 us a 80 MHz no `PQC_BENCH 100`.
 
 ### Por que decap é importante?
 
@@ -585,7 +586,7 @@ e os resultados consolidados ficam no botão `RESULTADOS` e nos arquivos JSON.
 No arquivo:
 
 ```text
-logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json
+logs/20260625T005330Z_final_metrics_dev-ttyusb0.json
 ```
 
 E resumidos em `METRICAS_CONSOLIDADAS.md`.
@@ -648,8 +649,8 @@ prova integração funcional e mede custo em uma placa específica.
 ### O que garante que os números não são inventados?
 
 As métricas vêm de comandos reais da placa e foram exportadas em JSON. A
-bateria final registrou 83 entradas, 0 falhas, 27 `MISSION runs` e 2
-`PQC_BENCH` de 100 rodadas.
+bateria final registrou 3.074 entradas, 0 falhas, 1.800 `MISSION runs`, 1.200
+testes `FAULT` e 10 `PQC_BENCH` de 100 rodadas.
 
 ### Por que confiar nos resultados se só há uma placa?
 
@@ -690,16 +691,16 @@ ambiental.
 
 ### Qual foi o custo de `CLASSIC`?
 
-721 us em média, 73 bytes, heap livre 201.412 bytes, resultado `DELIVERED`.
+511 us em média, 73 bytes, heap livre 201.412 bytes, resultado `DELIVERED`.
 
 ### Qual foi o custo de `PQC`?
 
-13.536 us em média, 841 bytes, heap livre 201.412 bytes, resultado
+13.234 us em média, 841 bytes, heap livre 201.412 bytes, resultado
 `DELIVERED`.
 
 ### Qual foi o custo de `PQC_CRC32`?
 
-13.367 us em média, 845 bytes, heap livre 201.412 bytes, resultado
+13.130 us em média, 845 bytes, heap livre 201.412 bytes, resultado
 `DELIVERED`.
 
 ### Qual foi o overhead de bytes do CRC32?
@@ -712,7 +713,7 @@ No subtempo específico, cerca de 10 us a 240 MHz e 30 us a 80 MHz.
 
 ### Quanto PQC foi mais lento que CLASSIC?
 
-18,8x mais lento no perfil baseline de 240 MHz e 30,1x mais lento no perfil
+25,9x mais lento no perfil baseline de 240 MHz e 34,1x mais lento no perfil
 limitado de 80 MHz.
 
 ### Quanto PQC foi maior em bytes?
@@ -824,7 +825,7 @@ cifra simétrica.
 Não. Foi funcional, mas custou muito mais tempo e bytes.
 
 **"Qual número mais importante?"**  
-PQC foi 18,8x mais lento e 11,5x maior em bytes que `CLASSIC` a 240 MHz.
+PQC foi 25,9x mais lento e 11,5x maior em bytes que `CLASSIC` a 240 MHz.
 
 **"A energia foi medida?"**  
 Não. Usamos tempo de CPU como proxy; energia real exige medidor externo.

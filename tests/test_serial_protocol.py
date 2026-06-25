@@ -3,6 +3,7 @@ import io
 import unittest
 from unittest import mock
 
+from tools import final_metrics_battery
 from tools import serial_console
 from tools import stage8_acceptance
 from tools.serial_bridge import SerialBridgeError
@@ -121,6 +122,107 @@ class SerialProtocolTests(unittest.TestCase):
 
         self.assertEqual(status, 1)
         self.assertIn("error: missing port", stderr.getvalue())
+
+    def test_final_metrics_battery_plans_balanced_profiles(self):
+        args = mock.Mock(
+            profiles=["BASELINE"],
+            cycles=2,
+            bench_repeats=1,
+            bench_rounds=5,
+            fault_payload_hex=final_metrics_battery.DEFAULT_FAULT_PAYLOAD_HEX,
+        )
+
+        plan = final_metrics_battery.planned_commands(args)
+        commands = [command for command, _phase, _profile in plan]
+
+        self.assertIn("PROFILE BASELINE", commands)
+        self.assertEqual(commands.count("MISSION CLASSIC"), 2)
+        self.assertEqual(commands.count("MISSION PQC"), 2)
+        self.assertEqual(commands.count("MISSION PQC_CRC32"), 2)
+        self.assertEqual(commands.count("PQC_BENCH 5"), 1)
+        self.assertEqual(sum(command.startswith("FAULT NONE ") for command in commands), 2)
+        self.assertEqual(sum(command.startswith("FAULT CRC32 ") for command in commands), 2)
+
+    def test_final_metrics_battery_summarizes_presentation_ratios(self):
+        records = [
+            {
+                "ok": True,
+                "command": "MISSION CLASSIC",
+                "profile_requested": "BASELINE",
+                "payload": {
+                    "profile": "BASELINE",
+                    "result": "DELIVERED",
+                    "elapsed_us": "100",
+                    "bytes_total": "10",
+                    "tag_match": "1",
+                },
+            },
+            {
+                "ok": True,
+                "command": "MISSION PQC",
+                "profile_requested": "BASELINE",
+                "payload": {
+                    "profile": "BASELINE",
+                    "result": "DELIVERED",
+                    "elapsed_us": "500",
+                    "bytes_total": "50",
+                    "key_match": "1",
+                    "tag_match": "1",
+                },
+            },
+            {
+                "ok": True,
+                "command": "MISSION PQC_CRC32",
+                "profile_requested": "BASELINE",
+                "payload": {
+                    "profile": "BASELINE",
+                    "result": "DELIVERED",
+                    "elapsed_us": "540",
+                    "bytes_total": "54",
+                    "key_match": "1",
+                    "tag_match": "1",
+                    "crc_match": "1",
+                    "crc_us": "7",
+                },
+            },
+            {
+                "ok": True,
+                "command": "PQC_BENCH 100",
+                "profile_requested": "BASELINE",
+                "payload": {
+                    "profile": "BASELINE",
+                    "ok": "100",
+                    "keygen_avg_us": "3300",
+                    "encap_avg_us": "3860",
+                    "decap_avg_us": "4990",
+                },
+            },
+            {
+                "ok": True,
+                "command": "FAULT CRC32 5051 0 0x01",
+                "profile_requested": "BASELINE",
+                "payload": {
+                    "profile": "BASELINE",
+                    "guard": "CRC32",
+                    "result": "DETECTED_GUARD",
+                    "elapsed_us": "12",
+                },
+            },
+        ]
+
+        summary = final_metrics_battery.summarize(records, actual_elapsed_s=3.2)
+
+        self.assertTrue(summary["ok"])
+        self.assertEqual(summary["mission_runs"], 3)
+        self.assertEqual(summary["pqc_bench_runs"], 1)
+        self.assertEqual(summary["fault_runs"], 1)
+        ratios = summary["mission"]["BASELINE"]["ratios"]
+        self.assertEqual(ratios["pqc_vs_classic_elapsed"], 5.0)
+        self.assertEqual(ratios["pqc_crc32_vs_classic_bytes"], 5.4)
+        self.assertEqual(ratios["crc32_extra_bytes"], 4.0)
+        self.assertEqual(ratios["crc32_avg_us"], 7.0)
+        faults = summary["faults"]["BASELINE"]["guards"]["CRC32"]["results"]
+        self.assertEqual(faults["DETECTED_GUARD"], 1)
 
 
 if __name__ == "__main__":

@@ -287,18 +287,19 @@ Estado atual:
   autosave no fechamento, cleanup preservando traceback, cache de superfícies,
   métricas essenciais no topo, testes headless de resoluções, runner de aceitação em
   `tools/stage8_acceptance.py` e roteiro em `APRESENTACAO_ROTEIRO.md`.
-  A aceitação de hardware passou e foi consolidada em
-  `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json` com 1.817,23 s,
-  83 registros, 0 falhas, 27 MISSION runs, 2 benchmarks PQC e demo headless OK.
+  A aceitação de hardware passou e a coleta final de métricas foi consolidada
+  em `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json` com 1.681,24 s,
+  3.074 registros, 0 falhas, 1.800 MISSION runs, 10 benchmarks PQC e 1.200
+  testes de falha.
 
 Validação real em placa após upload em 2026-06-18: `PQC_KAT` retornou
 `kat=pass` com `ss_crc32=0xD9DA8D6C`; `PQC_FAULT 0 0x01 CONFIRM` retornou
 `PROTOCOL_REJECT`; `PQC_FAULT 0 0x01 NONE` retornou `KEY_MISMATCH`;
-`PQC_BENCH 100` em `BASELINE` retornou `ok=100`, `keygen_avg_us=3298`,
-`encap_avg_us=3861`, `decap_avg_us=4985`; `PQC_BENCH 100` em
-`OBC-1U-LIMITED` retornou `ok=100`, `keygen_avg_us=10056`,
-`encap_avg_us=11780`, `decap_avg_us=15204`; `FAULT CRC32 ... 0 0x01`
-retornou `DETECTED_GUARD` (8/8 detectados). Nenhum comando imprime chave privada, segredo
+na coleta final, `PQC_BENCH 100` em `BASELINE` teve médias
+`keygen_avg_us=3302`, `encap_avg_us=3866`, `decap_avg_us=4990`; em
+`OBC-1U-LIMITED` teve médias `keygen_avg_us=10066`,
+`encap_avg_us=11787`, `decap_avg_us=15217`; `FAULT CRC32 ...`
+retornou `DETECTED_GUARD` na coleta final (600/600 detectados). Nenhum comando imprime chave privada, segredo
 compartilhado completo ou material suficiente para reconstruir a sessão.
 
 ## Estrutura

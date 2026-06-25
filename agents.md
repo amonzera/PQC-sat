@@ -91,6 +91,10 @@ implementar.
 - aceitação hardware da etapa 8 validada e consolidada em
   `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`, com 1.817,23 s,
   83 registros, 0 falhas, 27 MISSION runs, 2 benchmarks PQC e demo headless OK;
+- coleta final de métricas concluída em
+  `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`, com 1.681,24 s,
+  3.074 registros, 0 falhas, 1.800 MISSION runs, 10 benchmarks PQC e 1.200
+  testes de falha; essa é a fonte principal atual para `RESULTADOS`;
 - roteiro de apresentação criado em `APRESENTACAO_ROTEIRO.md`, com cinco
   slides, sequência de demo, limites científicos e checklist pré-apresentação;
 - metodologia de métricas consolidada em `METRICAS_CONSOLIDADAS.md`.
@@ -163,7 +167,8 @@ ML-KEM/FIPS 203.
   textual de engenharia.
 - Os logs oficiais e métricas consolidadas do projeto devem ser registrados e
   coletados exclusivamente através de baterias de testes longas e controladas
-  no terminal (como o script `tools/stage8_acceptance.py`), e NUNCA a partir de
+  no terminal (como `tools/final_metrics_battery.py` para resultados finais e
+  `tools/stage8_acceptance.py` para aceite/regressão), e NUNCA a partir de
   demonstrações manuais ou campanhas visuais ao vivo no dashboard.
 - Resultados experimentais devem vir de bytes mutados e verificações reais.
 - Mantenha a aleatoriedade do experimento separada da aleatoriedade visual.
@@ -177,6 +182,10 @@ ML-KEM/FIPS 203.
   chamar o agente novamente, o agente deve analisar os logs/resultados gerados.
   Smoke tests curtos podem ser executados pelo agente apenas quando forem
   necessários e autorizados.
+  Para gerar uma nova coleta estatística final, indique ao operador:
+  `python3 tools/final_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 100 --pause 0.25 --bench-repeats 3 --bench-rounds 100`.
+  O resumo esperado é `ok=true`, `failed=0`, `mission_runs=600`,
+  `pqc_bench_runs=6` e `fault_runs=400`.
   Para repetir o aceite longo deste projeto, indique ao operador:
   `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 tools/stage8_acceptance.py --port /dev/ttyUSB0 --timeout 12 --duration 1800 --interval 30`.
   O resumo esperado é `ok=true`, `failed=0`, `dashboard_demo_ok=true` e

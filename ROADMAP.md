@@ -1,6 +1,6 @@
 # Roadmap consolidado - PQC-SAT
 
-Versão revisada em 2026-06-19.
+Versão revisada em 2026-06-24.
 
 ## 1. Visão geral
 
@@ -145,6 +145,19 @@ projeto sem reconstruir decisões antigas:
   fluxo mostra `payload/ciphertext`, bit-flip, guardião, verificação e
   resultado, incluindo byte antes/depois, CRC antes/depois e diferença entre
   `SILENT`, `DETECTED_GUARD`, `KEY_MISMATCH` e `PROTOCOL_REJECT`.
+- 2026-06-24: smoke test curto com hardware real passou em `/dev/ttyUSB0`,
+  gerando `logs/20260624T233542Z_stage8_acceptance_dev-ttyusb0.json` com
+  `failed=0`, `mission_runs=6`, `pqc_bench_runs=2` e `dashboard_demo_ok=true`.
+- 2026-06-24: criado `tools/final_metrics_battery.py`, runner dedicado para
+  coleta longa de resultados finais. Ele separa a coleta estatística do aceite
+  de regressão, executa ciclos balanceados por perfil (`BASELINE` e
+  `OBC-1U-LIMITED`), agrega `MISSION`, `PQC_BENCH` e `FAULT` no próprio JSON e
+  deve ser rodado manualmente no terminal pelo operador.
+- 2026-06-25: bateria final de métricas concluída em
+  `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`: 1.681,24 s,
+  3.074 registros, 0 falhas, 1.800 `MISSION runs`, 10 `PQC_BENCH` e 1.200
+  testes `FAULT`. A fonte principal dos resultados da apresentação passou a
+  ser esse JSON.
 
 O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar
@@ -592,8 +605,11 @@ Entregas:
 - teste headless de layout em 1920x1080 e 1366x768 implementado;
 - runner `tools/stage8_acceptance.py` implementado para aceitação serial,
   benchmark, campanha prolongada e demo headless com exportação JSON;
-- campanha prolongada validada por
-  `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`;
+- runner `tools/final_metrics_battery.py` implementado para nova coleta longa
+  de métricas finais, com ciclos balanceados por perfil, resumo estatístico e
+  JSON pronto para consolidação em tabelas da apresentação;
+- campanha final de métricas validada por
+  `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`;
 - projetor validado por confirmação do usuário em 2026-06-18, após ajuste
   visual para reduzir botões e métricas;
 - roteiro de 20 minutos, onboarding do dashboard e painel de resultados
@@ -632,6 +648,8 @@ falha conhecida nos cenários testados".
 - entrega de mensagem demonstrável em `CLASSIC`, `PQC` e `PQC_CRC32`;
 - popup independente e arrastável por cenário para comparação visual lado a lado;
 - campanha reproduzível;
+- bateria final dedicada em `tools/final_metrics_battery.py` para gerar
+  resultados estatísticos novos quando necessário;
 - comparação A/B baseada em bytes;
 - JSON;
 - demo automatizada;

@@ -93,13 +93,13 @@ a narrativa sem depender de uma aula separada antes da demonstração.
 O botão `RESULTADOS`, na faixa superior do dashboard, abre o resumo da bateria
 real:
 
-- fonte dos dados: `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`;
-- 83 registros;
+- fonte dos dados: `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`;
+- 3.074 registros;
 - 0 falhas no aceite;
-- 27 execuções `MISSION`;
-- 2 benchmarks `PQC_BENCH`;
+- 1.800 execuções `MISSION`;
+- 10 benchmarks `PQC_BENCH`;
 - comparacao `CLASSIC`, `PQC` e `PQC_CRC32`;
-- resultados de segurança (`PQC_KAT`, `PQC_FAULT`, demo A/B e CRC32);
+- resultados de segurança (`PQC_KAT`, `PQC_FAULT`, `FAULT NONE` e `FAULT CRC32`);
 - conclusões e próximos passos.
 
 Use esse botão no final da demo ao vivo para consolidar a fala:
@@ -220,7 +220,7 @@ O projeto exporta JSON para que os resultados não dependam apenas da animacao.
 
 Arquivos principais de resultado:
 
-- `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`;
+- `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`;
 - `logs/20260618T234008Z_sim-42.json`.
 
 O JSON guarda:
@@ -242,29 +242,30 @@ registrados de forma auditavel.
 Fonte principal:
 
 ```text
-logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json
+logs/20260625T005330Z_final_metrics_dev-ttyusb0.json
 ```
 
-Esse arquivo é o aceite consolidado com os comandos `MISSION` incluidos.
+Esse arquivo é a coleta final consolidada com os comandos `MISSION`,
+`PQC_BENCH` e `FAULT` incluidos.
 
 Resumo do aceite final:
 
 | Medida | Resultado |
 |---|---|
-| Tempo total | 1.817,23 s |
-| Registros | 83 |
+| Tempo total | 1.681,24 s |
+| Registros | 3.074 |
 | Falhas no aceite | 0 |
-| Comandos no long-run | 27 MISSION runs |
-| Benchmarks PQC | 2 |
-| Demo headless | OK |
-| Payload CRC32 | 8/8 `DETECTED_GUARD` |
+| Comandos no long-run | 1.800 MISSION runs |
+| Benchmarks PQC | 10 |
+| Falhas sem CRC32 | 600/600 `SILENT` |
+| Payload CRC32 | 600/600 `DETECTED_GUARD` |
 
-Resultados da demo A/B:
+Resultados de falha de payload:
 
 | Cenário | Resultado |
 |---|---|
-| A, sem CRC32 | 5/5 falhas silenciosas |
-| B, com CRC32 | 5/5 falhas detectadas |
+| Sem CRC32 | 600/600 falhas silenciosas |
+| Com CRC32 | 600/600 falhas detectadas |
 
 Resultados PQC:
 
@@ -278,8 +279,8 @@ Benchmark ML-KEM-512:
 
 | Perfil | CPU | `keygen_avg_us` | `encap_avg_us` | `decap_avg_us` |
 |---|---:|---:|---:|---:|
-| `BASELINE` | 240 MHz | 3298 | 3861 | 4985 |
-| `OBC-1U-LIMITED` | 80 MHz | 10056 | 11780 | 15204 |
+| `BASELINE` | 240 MHz | 3302 | 3866 | 4990 |
+| `OBC-1U-LIMITED` | 80 MHz | 10066 | 11787 | 15217 |
 
 Leitura simples:
 
@@ -292,13 +293,13 @@ Comparacao MISSION (BASELINE, 240 MHz):
 
 | Cenário | `elapsed_us` (avg) | `bytes_total` | `heap` | `result` |
 |---|---:|---:|---:|---|
-| CLASSIC | 721 | 73 | 201.412 | DELIVERED |
-| PQC | 13.536 | 841 | 201.412 | DELIVERED |
-| PQC_CRC32 | 13.367 | 845 | 201.412 | DELIVERED |
+| CLASSIC | 511 | 73 | 201.412 | DELIVERED |
+| PQC | 13.234 | 841 | 201.412 | DELIVERED |
+| PQC_CRC32 | 13.130 | 845 | 201.412 | DELIVERED |
 
 Razoes observadas no BASELINE (240 MHz):
 
-- PQC é 18,8x mais lento que CLASSIC em tempo;
+- PQC é 25,9x mais lento que CLASSIC em tempo;
 - PQC transmite 11,5x mais bytes que CLASSIC;
 - CRC32 adiciona ~10 us e +4 bytes sobre o fluxo PQC.
 
@@ -515,28 +516,28 @@ Tamanhos de chave:
 Quando o dashboard envia `MISSION PQC_CRC32`, o firmware executa estas
 etapas em sequência:
 
-1. **keygen**: gera par de chaves ML-KEM-512 (~3.679 us)
-2. **encap**: encapsula um segredo usando a chave publica (~3.988 us)
-3. **decap**: decapsula o ciphertext com a chave privada (~5.087 us)
+1. **keygen**: gera par de chaves ML-KEM-512 (~3.586 us)
+2. **encap**: encapsula um segredo usando a chave publica (~3.911 us)
+3. **decap**: decapsula o ciphertext com a chave privada (~5.012 us)
 4. **Compara**: verifica se `ss_alice == ss_bob` (`key_match`)
 5. **HMAC tag**: calcula tag de autenticação sobre a mensagem usando o
    segredo derivado (~435 us)
-6. **HMAC verify**: recalcula e compara a tag (~163 us)
+6. **HMAC verify**: recalcula e compara a tag (~168 us)
 7. **CRC32 TX**: calcula CRC32 do payload (~5 us)
 8. **CRC32 RX**: recalcula CRC32 e compara (~5 us)
-9. **Total**: ~13.367 us para completar a entrega da mensagem
+9. **Total**: ~13.130 us para completar a entrega da mensagem
 
 ```text
   Fluxo no firmware (PQC_CRC32):
 
   keygen -----> encap -----> decap -----> compara ss
-  (3.679 us)    (3.988 us)   (5.087 us)
+  (3.586 us)    (3.911 us)   (5.012 us)
                                            |
                                            v
                                      HMAC tag (435 us)
                                            |
                                            v
-                                     HMAC verify (163 us)
+                                     HMAC verify (168 us)
                                            |
                                            v
                                      CRC32 TX (5 us)
@@ -545,7 +546,7 @@ etapas em sequência:
                                      CRC32 RX (5 us)
                                            |
                                            v
-                                     DELIVERED (~13.367 us total)
+                                     DELIVERED (~13.130 us total)
 ```
 
 ### 5.9 Tabela comparativa: criptografia clássica vs PQC
@@ -556,8 +557,8 @@ etapas em sequência:
 | Tipo de chave | Simetrica fixa | Assimetrica gerada por sessão |
 | Tamanho de chave | 32 bytes | pk=800, sk=1.632 bytes |
 | Bytes transmitidos | 73 | 841 |
-| Tempo (240 MHz) | ~721 us | ~13.536 us |
-| Tempo (80 MHz) | ~1.283 us | ~38.646 us |
+| Tempo (240 MHz) | ~511 us | ~13.234 us |
+| Tempo (80 MHz) | ~1.139 us | ~38.837 us |
 | Resiste a quântico | Sim (chave simetrica) | Sim (reticulados) |
 | Custo de adicionar CRC32 | N/A | +10 us, +4 bytes |
 
@@ -876,7 +877,7 @@ MISSION PQC_CRC32
 ```
 
 Use o botão `RESULTADOS` e o arquivo
-`logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json` para mostrar a
+`logs/20260625T005330Z_final_metrics_dev-ttyusb0.json` para mostrar a
 tabela final de `elapsed_us`, `bytes_total` e `heap`.
 
 ### Resultado 2: CRC32 detectou o payload alterado
@@ -889,7 +890,7 @@ Use a frase:
 Base:
 
 ```text
-8/8 DETECTED_GUARD no aceite final
+600/600 DETECTED_GUARD na coleta final
 ```
 
 ### Resultado 3: ML-KEM funcionou na Wisdom
@@ -1013,7 +1014,7 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 | `PERGUNTAS_E_RESPOSTAS_SEMINARIO.md` | Banco de perguntas prováveis e respostas para treino |
 | `ROADMAP.md` | Histórico técnico consolidado |
 | `hardware_command_reference.md` | Comandos completos de bancada |
-| `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json` | Evidencia principal do aceite |
+| `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json` | Evidencia principal da coleta final |
 
 ## 14. Sugestao de fala completa
 
@@ -1049,12 +1050,12 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 
 ### Interpretar resultados
 
-> No aceite final tivemos 83 registros, 0 falhas, 27 MISSION runs, dois
-> benchmarks PQC e demo A/B bem-sucedida. CLASSIC entrega em 721 us com 73
-> bytes; PQC custa 13.536 us com 841 bytes; PQC+CRC custa 13.367 us com 845
-> bytes. PQC é 18,8x mais lento, mas prepara o sistema para o mundo
-> pós-quântico. No payload, CRC32 detecta a alteração (8/8 DETECTED_GUARD);
-> no ML-KEM, a confirmação de chave rejeita a sessão divergente.
+> Na coleta final tivemos 3.074 registros, 0 falhas, 1.800 MISSION runs e 10
+> benchmarks PQC. CLASSIC entrega em 511 us com 73 bytes; PQC custa 13.234 us
+> com 841 bytes; PQC+CRC custa 13.130 us com 845 bytes. PQC é 25,9x mais
+> lento no perfil baseline, mas prepara o sistema para o mundo pós-quântico.
+> No payload, CRC32 detecta a alteração (600/600 DETECTED_GUARD); no ML-KEM, a
+> confirmação de chave rejeita a sessão divergente.
 
 ### Fechar com limites
 
@@ -1096,11 +1097,11 @@ Experimento:
   Wisdom/ESP32 + dashboard Python.
 
 Demo:
-  CLASSIC: HMAC-SHA256 -> baseline classico (721 us, 73 bytes).
-  PQC: ML-KEM-512 + HMAC -> custo pos-quantico (13.536 us, 841 bytes).
-  PQC+CRC: ML-KEM + HMAC + CRC32 -> integridade adicional (13.367 us, 845 bytes).
+  CLASSIC: HMAC-SHA256 -> baseline classico (511 us, 73 bytes).
+  PQC: ML-KEM-512 + HMAC -> custo pos-quantico (13.234 us, 841 bytes).
+  PQC+CRC: ML-KEM + HMAC + CRC32 -> integridade adicional (13.130 us, 845 bytes).
   A/B bit-flip: sem CRC32 -> silencioso; com CRC32 -> detectado.
-  PQC e 18,8x mais lento e 11,5x mais pesado que CLASSIC.
+  PQC e 25,9x mais lento e 11,5x mais pesado que CLASSIC.
 
 PQC:
   ML-KEM-512 real na placa.
@@ -1108,11 +1109,11 @@ PQC:
   Confirmacao HMAC-SHA256 -> PROTOCOL_REJECT.
 
 Resultado:
-  83 registros, 0 falhas no aceite.
-  8/8 DETECTED_GUARD em payload CRC32.
+  3.074 registros, 0 falhas no aceite.
+  600/600 DETECTED_GUARD em payload CRC32.
   PQC_KAT passou.
   Benchmarks em 240 MHz e 80 MHz medidos.
-  CLASSIC=721 us / PQC=13.536 us / PQC_CRC32=13.367 us.
+  CLASSIC=511 us / PQC=13.234 us / PQC_CRC32=13.130 us.
 
 Limites:
   Nao e radiacao fisica.

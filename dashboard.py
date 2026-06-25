@@ -75,24 +75,24 @@ MISSION_PRESET_COMMANDS = {
     "SET_PRESET_PQC_CRC32": "PQC_CRC32",
 }
 MISSION_OVERLAY_SCENARIOS = ("CLASSIC", "PQC", "PQC_CRC32")
-CONSOLIDATED_ACCEPTANCE_LOG = "logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json"
-CONSOLIDATED_ACCEPTANCE_LABEL = "20260618T234008Z"
+CONSOLIDATED_ACCEPTANCE_LOG = "logs/20260625T005330Z_final_metrics_dev-ttyusb0.json"
+CONSOLIDATED_ACCEPTANCE_LABEL = "20260625T005330Z"
 CONSOLIDATED_SUMMARY = {
-    "elapsed_s": 1817.23,
-    "records": 83,
+    "elapsed_s": 1681.24,
+    "records": 3074,
     "failed": 0,
-    "mission_runs": 27,
-    "pqc_bench_runs": 2,
-    "demo_none_silent": "5/5",
-    "demo_crc_detected": "5/5",
-    "crc_acceptance": "8/8",
+    "mission_runs": 1800,
+    "pqc_bench_runs": 10,
+    "demo_none_silent": "600/600",
+    "demo_crc_detected": "600/600",
+    "crc_acceptance": "600/600",
 }
 CONSOLIDATED_MISSION_BASELINE = {
     "CLASSIC": {
         "label": "CLASSIC (HMAC)",
         "crypto": "HMAC-SHA256",
         "checksum": "NONE",
-        "elapsed_us": 721,
+        "elapsed_us": 511,
         "bytes_total": 73,
         "bytes_payload": 41,
         "bytes_crypto": 32,
@@ -100,8 +100,8 @@ CONSOLIDATED_MISSION_BASELINE = {
         "keygen_us": 0,
         "encap_us": 0,
         "decap_us": 0,
-        "tag_us": 528,
-        "verify_us": 166,
+        "tag_us": 335,
+        "verify_us": 168,
         "crc_us": 0,
         "heap": 201412,
         "result": "DELIVERED",
@@ -110,16 +110,16 @@ CONSOLIDATED_MISSION_BASELINE = {
         "label": "PQC (ML-KEM)",
         "crypto": "ML-KEM-512",
         "checksum": "NONE",
-        "elapsed_us": 13536,
+        "elapsed_us": 13234,
         "bytes_total": 841,
         "bytes_payload": 41,
         "bytes_crypto": 800,
         "bytes_checksum": 0,
-        "keygen_us": 3923,
-        "encap_us": 3975,
-        "decap_us": 5026,
-        "tag_us": 421,
-        "verify_us": 165,
+        "keygen_us": 3684,
+        "encap_us": 3937,
+        "decap_us": 5029,
+        "tag_us": 408,
+        "verify_us": 168,
         "crc_us": 0,
         "heap": 201412,
         "result": "DELIVERED",
@@ -128,24 +128,24 @@ CONSOLIDATED_MISSION_BASELINE = {
         "label": "PQC + CRC32",
         "crypto": "ML-KEM-512",
         "checksum": "CRC32",
-        "elapsed_us": 13367,
+        "elapsed_us": 13130,
         "bytes_total": 845,
         "bytes_payload": 41,
         "bytes_crypto": 800,
         "bytes_checksum": 4,
-        "keygen_us": 3679,
-        "encap_us": 3988,
-        "decap_us": 5087,
+        "keygen_us": 3586,
+        "encap_us": 3911,
+        "decap_us": 5012,
         "tag_us": 435,
-        "verify_us": 163,
+        "verify_us": 168,
         "crc_us": 10,
         "heap": 201412,
         "result": "DELIVERED",
     },
 }
 CONSOLIDATED_PQC_BENCH = (
-    ("BASELINE 240 MHz", "3.298", "3.861", "4.985"),
-    ("LIMITED 80 MHz", "10.056", "11.780", "15.204"),
+    ("BASELINE 240 MHz", "3.302", "3.866", "4.990"),
+    ("LIMITED 80 MHz", "10.066", "11.787", "15.217"),
 )
 
 # --- Paleta de Cores ----------------------------------------------------------
@@ -2156,7 +2156,7 @@ class DashboardPanel:
         return (
             {
                 "label": "PAYLOAD",
-                "detail": "mensagem antes da radiação simulada",
+                "detail": "payload íntegro",
                 "explain": "Começamos com o payload íntegro. É o mesmo tipo de dado que o satélite enviaria na missão.",
                 "color": C_ACCENT_BLUE,
             },
@@ -2169,7 +2169,11 @@ class DashboardPanel:
             {
                 "label": "GUARD",
                 "detail": "CRC32 ativo" if guard == "CRC32" else "sem checksum",
-                "explain": "Com CRC32, guardamos uma assinatura curta do payload. Sem ele, não há comparação de integridade.",
+                "explain": (
+                    "O CRC32 guardado antes da falha será comparado com o CRC recalculado depois."
+                    if guard == "CRC32"
+                    else "Sem checksum, o sistema não tem uma referência simples para comparar o payload."
+                ),
                 "color": C_ACCENT_GREEN if guard == "CRC32" else C_TEXT_DIM,
             },
             {
@@ -2204,6 +2208,17 @@ class DashboardPanel:
             "PROTOCOL_REJECT": "REJEIÇÃO DO PROTOCOLO",
             "KEY_MISMATCH": "CHAVE DIVERGENTE",
             "OK": "SEM IMPACTO",
+        }
+        return labels.get(str(result), str(result or "--"))
+
+    @staticmethod
+    def _fault_result_short_label(result):
+        labels = {
+            "SILENT": "SILENCIOSA",
+            "DETECTED_GUARD": "DETECTADA",
+            "PROTOCOL_REJECT": "REJEITADA",
+            "KEY_MISMATCH": "CHAVE DIF.",
+            "OK": "OK",
         }
         return labels.get(str(result), str(result or "--"))
 
@@ -2888,10 +2903,10 @@ class DashboardPanel:
 
         ly += table_h + 18
         notes = (
-            "PQC foi 18,8x mais lento e 11,5x maior em bytes que CLASSIC.",
+            "PQC foi 25,9x mais lento e 11,5x maior em bytes que CLASSIC.",
             "PQC+CRC32 manteve a entrega funcional e adicionou +4 bytes ao pacote.",
             "A RAM livre ficou estável: 201.412 B de heap nas amostras consolidadas.",
-            "A 80 MHz, PQC subiu para 38,6 ms, evidenciando dependência de CPU.",
+            "A 80 MHz, PQC subiu para 38,8 ms e 34,1x o baseline clássico.",
         )
         for note in notes:
             ly = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, lx, ly, lw, line_spacing=18, max_lines=2)
@@ -2923,8 +2938,8 @@ class DashboardPanel:
         security_notes = (
             f"Aceite: {CONSOLIDATED_SUMMARY['records']} registros, {CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões.",
             "PQC_KAT aprovado: ss_crc32=0xD9DA8D6C.",
-            "Demo A/B: 5/5 silenciosas sem CRC32; 5/5 detectadas com CRC32.",
-            "Aceite serial: 8/8 bit-flips de payload detectados por CRC32.",
+            "Falhas payload: 600/600 silenciosas sem CRC32; 600/600 detectadas com CRC32.",
+            "Coleta final: 10 PQC_BENCH de 100 rounds, todos OK.",
             "PQC_FAULT com confirmação: PROTOCOL_REJECT.",
         )
         for note in security_notes:
@@ -2940,7 +2955,7 @@ class DashboardPanel:
         block_w = max(120, (rw - block_gap * 2) // 3)
         block_h = min(74, max(58, right.bottom - ry - 8))
         narrative_blocks = (
-            ("CUSTO", "PQC: 18,8x tempo e 11,5x bytes.", C_ACCENT_ORANGE),
+            ("CUSTO", "PQC: 25,9x tempo e 11,5x bytes.", C_ACCENT_ORANGE),
             ("SEGURANÇA", "CRC detecta; HMAC autentica.", C_ACCENT_GREEN),
             ("LIMITES", "Energia real fica como próximo passo.", C_ACCENT_CYAN),
         )
@@ -3032,7 +3047,7 @@ class DashboardPanel:
         pygame.draw.line(panel, (*C_PANEL_BORDER, 180), (0, 44), (rect.width, 44), 1)
         surface.blit(panel, rect.topleft)
 
-        title = f"FALHA {self.fault_overlay.get('target', 'PAYLOAD')} | {self._fault_result_label(result)}"
+        title = f"FALHA {self.fault_overlay.get('target', 'PAYLOAD')} | {self._fault_result_short_label(result)}"
         surface.blit(self._render_clipped(FONT_SMALL, title, C_TEXT_PRIMARY, rect.width - 62), (rect.x + 14, rect.y + 12))
         pygame.draw.rect(surface, (58, 18, 28), close_rect, border_radius=5)
         pygame.draw.rect(surface, C_ACCENT_RED, close_rect, width=1, border_radius=5)
@@ -3200,9 +3215,19 @@ class DashboardPanel:
         after = self._parse_int_auto(fault.get("after_byte"))
         mask = self._parse_int_auto(fault.get("bit_mask"))
         if before is None or after is None:
+            before_crc = str(fault.get("crc_before") or "--")
+            after_crc = str(fault.get("crc_after") or "--")
+            flags = []
+            if fault.get("key_match") is not None:
+                flags.append(f"key={str(fault.get('key_match')).lower()}")
+            if fault.get("tag_match") is not None:
+                flags.append(f"tag={str(fault.get('tag_match')).lower()}")
+            if fault.get("confirmation"):
+                flags.append(f"confirm={fault.get('confirmation')}")
             lines = (
-                f"byte antes: {fault.get('before_byte', '--')}",
-                f"byte depois: {fault.get('after_byte', '--')}",
+                f"ct crc antes: {before_crc[-8:]}",
+                f"ct crc depois: {after_crc[-8:]}",
+                "  ".join(flags) if flags else "byte específico indisponível no resumo",
             )
             for line in lines:
                 surface.blit(self._render_clipped(FONT_LABEL, line, C_TEXT_DIM, width), (x, y))
@@ -4776,7 +4801,7 @@ class Onboarding:
         self.satellite.draw(surface, t)
 
         panel_surf = pygame.Surface((self.w, self.h), pygame.SRCALPHA)
-        panel_surf.fill((12, 14, 30, 225))
+        panel_surf.fill((12, 14, 30, 242))
         surface.blit(panel_surf, (self.x, self.y))
 
         pygame.draw.rect(surface, C_PANEL_BORDER, (self.x, self.y, self.w, self.h), width=2, border_radius=8)
@@ -4946,10 +4971,9 @@ class Onboarding:
         surface.blit(sub, (self.x + int(self.w * 0.04), self.y + 60))
 
         paragraphs = [
-            "Para resistir à ameaça quântica, o NIST padronizou em 2024 o ML-KEM (FIPS 203), baseado no problema Learning With Errors (LWE) sobre reticulados de centenas de dimensões.",
-            "Um KEM não cifra a mensagem diretamente. Ele executa KEYGEN, ENCAP e DECAP para estabelecer um segredo compartilhado; depois esse segredo alimenta mecanismos simétricos como HMAC.",
-            "O ESP32 roda ML-KEM-512 real. A chave pública tem 800 bytes, o ciphertext tem 768 bytes e o segredo compartilhado tem 32 bytes. É por isso que o custo aparece em CPU, RAM e bytes transmitidos.",
-            "Na demonstração, o popup de envio mostra esse caminho passo a passo e pode ser pausado para explicar onde o pacote cresce."
+            "ML-KEM (FIPS 203) é um mecanismo pós-quântico baseado em reticulados e no problema Learning With Errors.",
+            "Um KEM não cifra a mensagem diretamente: ele executa KEYGEN, ENCAP e DECAP para criar um segredo compartilhado usado depois pelo HMAC.",
+            "Na Wisdom, o custo aparece no pacote e no tempo: chave pública de 800 B, ciphertext de 768 B e segredo de 32 B. O popup pausável mostra onde isso entra.",
         ]
 
         text_max_w = self.w - int(self.w * 0.08)
@@ -4957,7 +4981,7 @@ class Onboarding:
 
         # Diagrama de KEM responsivo posicionado dinamicamente abaixo do texto
         bx = self.x + int(self.w * 0.04)
-        by = max(last_y + 15, self.y + int(self.h * 0.58))
+        by = max(last_y + 20, self.y + int(self.h * 0.60))
         box_w = self.w - int(self.w * 0.08)
         box_h = int(self.h * 0.16)
         pygame.draw.rect(surface, C_PANEL_BG, (bx, by, box_w, box_h), border_radius=6)
@@ -5018,7 +5042,7 @@ class Onboarding:
                 "body": [
                     "HMAC-SHA256 com chave simétrica.",
                     "Serve como baseline: o caminho barato.",
-                    "Resultado real: 721 us, 73 bytes.",
+                    "Resultado real: 511 us, 73 bytes.",
                 ],
             },
             {
@@ -5027,7 +5051,7 @@ class Onboarding:
                 "body": [
                     "ML-KEM-512 estabelece segredo.",
                     "Depois HMAC autentica a mensagem.",
-                    "Resultado real: 13.536 us, 841 bytes.",
+                    "Resultado real: 13.234 us, 841 bytes.",
                 ],
             },
             {
@@ -5036,7 +5060,7 @@ class Onboarding:
                 "body": [
                     "Mesmo fluxo PQC com checksum no payload.",
                     "Mostra detecção de corrupção por bit-flip.",
-                    "Resultado real: 13.367 us, 845 bytes.",
+                    "Resultado real: 13.130 us, 845 bytes.",
                 ],
             },
         ]
@@ -5063,14 +5087,13 @@ class Onboarding:
         surface.blit(self.wrap_render(FONT_HEADER, "O QUE ESTAMOS MEDINDO", C_ACCENT_CYAN, mw), (mx, my))
         my += 38
         metric_lines = [
-            "Tempo total: custo de CPU para entregar a mensagem.",
-            "Bytes: custo de comunicação do protocolo.",
-            "Heap/RAM: margem de memória disponível na placa.",
-            "Pacote: payload + HMAC + ciphertext ML-KEM + CRC32.",
-            "Segurança: DELIVERED, SILENT, DETECTED_GUARD ou PROTOCOL_REJECT.",
+            "Tempo/CPU: custo para entregar a mensagem.",
+            "Bytes: tráfego do protocolo e composição do pacote.",
+            "Heap/RAM: margem restante na placa.",
+            "Resultado: DELIVERED, SILENT, DETECTED_GUARD ou PROTOCOL_REJECT.",
         ]
         for line in metric_lines:
-            my = self.draw_wrapped_onboarding(surface, f"- {line}", mx, my, mw, C_TEXT_PRIMARY, line_spacing=20, max_lines=1)
+            my = self.draw_wrapped_onboarding(surface, f"- {line}", mx, my, mw, C_TEXT_PRIMARY, line_spacing=18, max_lines=1)
 
     def draw_slide_4(self, surface):
         title = FONT_TITLE.render("5. COMO LER A DEMONSTRAÇÃO AO VIVO", True, C_ACCENT_CYAN)
@@ -5101,8 +5124,8 @@ class Onboarding:
             ("CLÁSSICA", "envia a mensagem com HMAC-SHA256."),
             ("PQC", "troca para ML-KEM-512 + HMAC."),
             ("PQC+CRC", "usa ML-KEM-512 e CRC32 no payload."),
-            ("ENVIAR MSG", "abre popup pausável para explicar KEYGEN, ENCAP, DECAP, HMAC e CRC."),
-            ("FALHA", "injeta bit-flip para comparar SILENT vs DETECTED."),
+            ("ENVIAR MSG", "abre popup pausável do fluxo interno."),
+            ("FALHA", "mostra bit-flip, CRC e resultado."),
             ("RESULTADOS", "abre a consolidação real da bateria longa."),
         ]
         for label, desc in steps:
@@ -5118,12 +5141,12 @@ class Onboarding:
         surface.blit(self.wrap_render(FONT_HEADER, "O QUE COMPARAR", C_ACCENT_ORANGE, rw), (rx, ry))
         ry += 38
         comparisons = [
-            "CPU e RAM ficam na faixa superior durante toda a animação.",
-            "O popup mostra o pacote crescendo antes de revelar as métricas finais.",
-            "CLASSIC é o baseline barato: 721 us e 73 bytes.",
-            "PQC sobe para 13.536 us e 841 bytes porque executa ML-KEM-512.",
-            "PQC+CRC32 adiciona +4 bytes e detecta corrupção acidental no payload.",
-            "O botão RESULTADOS mostra 83 registros, 0 falhas e conclusões.",
+            "CPU e RAM ficam sempre no topo.",
+            "Popups pausáveis mostram pacote, bit-flip e verificações.",
+            "CLASSIC é o baseline barato: 511 us e 73 bytes.",
+            "PQC: 13.234 us e 841 bytes por causa do ML-KEM-512.",
+            "PQC+CRC32: +4 bytes e detecção de corrupção no payload.",
+            "RESULTADOS fecha com 3.074 registros, 0 falhas e conclusões.",
         ]
         for item in comparisons:
             ry = self.draw_wrapped_onboarding(surface, f"- {item}", rx, ry, rw, C_TEXT_PRIMARY, max_lines=2)

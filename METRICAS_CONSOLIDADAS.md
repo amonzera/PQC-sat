@@ -135,65 +135,86 @@ perceber o crescimento de custo.
 Fonte principal:
 
 ```text
-logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json
+logs/20260625T005330Z_final_metrics_dev-ttyusb0.json
 ```
 
-Aceite final: 83 registros, 0 falhas, 27 MISSION runs, 2 PQC_BENCH (100 rounds
-cada), demo A/B headless OK, duracao 1.817,23 s.
+Coleta final: 3.074 registros, 0 falhas, 1.800 `MISSION runs`, 10
+`PQC_BENCH` de 100 rounds, 1.200 testes `FAULT`, duracao 1.681,24 s.
 
-### MISSION — BASELINE (240 MHz, 8 amostras)
+Configuração:
+
+- 300 ciclos por perfil;
+- 300 amostras por cenário em `BASELINE` 240 MHz;
+- 300 amostras por cenário em `OBC-1U-LIMITED` 80 MHz;
+- 5 execuções `PQC_BENCH 100` por perfil;
+- 300 `FAULT NONE` e 300 `FAULT CRC32` por perfil.
+
+### MISSION — BASELINE (240 MHz, 300 amostras por cenário)
 
 | Campo | CLASSIC | PQC | PQC_CRC32 |
 |---|---:|---:|---:|
-| `elapsed_us` (avg) | 721 | 13.536 | 13.367 |
-| `elapsed_us` (min) | 681 | 13.211 | 13.110 |
-| `elapsed_us` (max) | 773 | 13.813 | 14.114 |
-| `elapsed_us` (stdev) | 33 | 174 | 454 |
-| `keygen_us` (avg) | 0 | 3.923 | 3.679 |
-| `encap_us` (avg) | 0 | 3.975 | 3.988 |
-| `decap_us` (avg) | 0 | 5.026 | 5.087 |
-| `tag_us` (avg) | 528 | 421 | 435 |
-| `verify_us` (avg) | 166 | 165 | 163 |
+| `elapsed_us` (avg) | 511 | 13.234 | 13.130 |
+| `elapsed_us` (median) | 504 | 13.175 | 13.111 |
+| `elapsed_us` (p95) | 509 | 13.545 | 13.123 |
+| `elapsed_us` (min) | 498 | 13.161 | 13.083 |
+| `elapsed_us` (max) | 922 | 14.155 | 14.084 |
+| `elapsed_us` (stdev) | 39 | 214 | 136 |
+| `keygen_us` (avg) | 0 | 3.684 | 3.586 |
+| `encap_us` (avg) | 0 | 3.937 | 3.911 |
+| `decap_us` (avg) | 0 | 5.029 | 5.012 |
+| `tag_us` (avg) | 335 | 408 | 435 |
+| `verify_us` (avg) | 168 | 168 | 168 |
 | `crc_us` (avg) | 0 | 0 | 10 |
 | `bytes_total` | 73 | 841 | 845 |
 | `heap` | 201.412 | 201.412 | 201.412 |
 | `min_heap` | 197.624 | 197.624 | 197.624 |
 | `result` | DELIVERED | DELIVERED | DELIVERED |
-| `key_match` | 1 (100%) | 1 (100%) | 1 (100%) |
-| `tag_match` | 1 (100%) | 1 (100%) | 1 (100%) |
-| `crc_match` | 1 (100%) | 1 (100%) | 1 (100%) |
+| `runs OK` | 300/300 | 300/300 | 300/300 |
+| `tag_match` | 100% | 100% | 100% |
+| `key_match` | 100% | 100% | 100% |
+| `crc_match` | 100% | 100% | 100% |
 
-### MISSION — OBC-1U-LIMITED (80 MHz, 1 amostra)
+### MISSION — OBC-1U-LIMITED (80 MHz, 300 amostras por cenário)
 
 | Campo | CLASSIC | PQC | PQC_CRC32 |
 |---|---:|---:|---:|
-| `elapsed_us` | 1.283 | 38.646 | 38.647 |
-| `keygen_us` | 0 | 10.411 | 10.360 |
-| `encap_us` | 0 | 11.821 | 11.793 |
-| `decap_us` | 0 | 15.197 | 15.231 |
-| `tag_us` | 794 | 738 | 723 |
-| `verify_us` | 465 | 465 | 491 |
+| `elapsed_us` (avg) | 1.139 | 38.837 | 38.738 |
+| `elapsed_us` (median) | 1.130 | 38.689 | 38.643 |
+| `elapsed_us` (p95) | 1.157 | 39.085 | 38.672 |
+| `elapsed_us` (min) | 1.112 | 38.637 | 38.587 |
+| `elapsed_us` (max) | 1.457 | 42.020 | 41.625 |
+| `elapsed_us` (stdev) | 36 | 631 | 533 |
+| `keygen_us` (avg) | 0 | 10.469 | 10.380 |
+| `encap_us` (avg) | 0 | 11.869 | 11.838 |
+| `decap_us` (avg) | 0 | 15.265 | 15.244 |
+| `tag_us` (avg) | 648 | 740 | 751 |
+| `verify_us` (avg) | 478 | 477 | 477 |
 | `crc_us` | 0 | 0 | 30 |
 | `bytes_total` | 73 | 841 | 845 |
 | `heap` | 201.412 | 201.412 | 201.412 |
+| `min_heap` | 197.624 | 197.624 | 197.624 |
 | `result` | DELIVERED | DELIVERED | DELIVERED |
+| `runs OK` | 300/300 | 300/300 | 300/300 |
+| `tag_match` | 100% | 100% | 100% |
+| `key_match` | 100% | 100% | 100% |
+| `crc_match` | 100% | 100% | 100% |
 
 ### Razoes observadas
 
 | Comparacao | Tempo | Bytes |
 |---|---:|---:|
-| PQC / CLASSIC (BASELINE) | 18,8x | 11,5x |
-| PQC_CRC32 / CLASSIC (BASELINE) | 18,5x | 11,6x |
-| PQC / CLASSIC (OBC-1U-LIMITED) | 30,1x | 11,5x |
-| PQC_CRC32 / CLASSIC (OBC-1U-LIMITED) | 30,1x | 11,6x |
+| PQC / CLASSIC (BASELINE) | 25,9x | 11,5x |
+| PQC_CRC32 / CLASSIC (BASELINE) | 25,7x | 11,6x |
+| PQC / CLASSIC (OBC-1U-LIMITED) | 34,1x | 11,5x |
+| PQC_CRC32 / CLASSIC (OBC-1U-LIMITED) | 34,0x | 11,6x |
 | CRC32 custo adicional sobre PQC (BASELINE) | ~10 us | +4 bytes |
 | CRC32 custo adicional sobre PQC (OBC-1U-LIMITED) | ~30 us | +4 bytes |
 
 Leitura didática:
 
-- A 240 MHz, PQC custa quase 19 vezes mais tempo que o baseline clássico.
-- A 80 MHz, a mesma operação PQC custa 30 vezes mais, porque o ML-KEM sofre
-  mais com CPU reduzida do que o HMAC puro.
+- A 240 MHz, PQC custa cerca de 26 vezes mais tempo que o baseline clássico.
+- A 80 MHz, a mesma operação PQC custa cerca de 34 vezes mais que o clássico
+  limitado. O ML-KEM sofre mais com CPU reduzida do que o HMAC puro.
 - O CRC32 adiciona custo negligivel (~10 us a 240 MHz, ~30 us a 80 MHz),
   mostrando que verificação de integridade no payload é barata.
 - O trafego PQC da missao e 11,5x maior que o clássico porque o pacote de
@@ -205,12 +226,12 @@ Leitura didática:
 
 ### PQC_BENCH (100 rounds)
 
-| Perfil | CPU | `keygen_avg_us` | `encap_avg_us` | `decap_avg_us` |
-|---|---:|---:|---:|---:|
-| BASELINE | 240 MHz | 3.298 | 3.861 | 4.985 |
-| OBC-1U-LIMITED | 80 MHz | 10.056 | 11.780 | 15.204 |
+| Perfil | CPU | Runs | `keygen_avg_us` | `encap_avg_us` | `decap_avg_us` |
+|---|---:|---:|---:|---:|---:|
+| BASELINE | 240 MHz | 5 | 3.302 | 3.866 | 4.990 |
+| OBC-1U-LIMITED | 80 MHz | 5 | 10.066 | 11.787 | 15.217 |
 
-Fator de desaceleracao 80/240 MHz: keygen ~3,0x, encap ~3,1x, decap ~3,0x.
+Fator de desaceleracao 80/240 MHz: keygen ~3,0x, encap ~3,0x, decap ~3,0x.
 
 ### Testes de segurança
 
@@ -219,27 +240,36 @@ Fator de desaceleracao 80/240 MHz: keygen ~3,0x, encap ~3,1x, decap ~3,0x.
 | PQC_KAT | `kat=pass`, `ss_crc32=0xD9DA8D6C` |
 | PQC_FAULT 0 0x01 CONFIRM | `PROTOCOL_REJECT`, `key_match=0` |
 | PQC_FAULT 0 0x01 NONE | `KEY_MISMATCH`, `key_match=0` |
-| FAULT CRC32 (aceite) | 8/8 `DETECTED_GUARD` |
+| FAULT NONE (coleta final) | 600/600 `SILENT` |
+| FAULT CRC32 (coleta final) | 600/600 `DETECTED_GUARD` |
 
-### Demo A/B
+### Falhas de payload na coleta final
 
-| Cenário | Resultado |
-|---|---|
-| A, sem CRC32 | 5/5 falhas silenciosas |
-| B, com CRC32 | 5/5 falhas detectadas |
+| Perfil | Sem CRC32 | Com CRC32 |
+|---|---:|---:|
+| BASELINE 240 MHz | 300/300 `SILENT` | 300/300 `DETECTED_GUARD` |
+| OBC-1U-LIMITED 80 MHz | 300/300 `SILENT` | 300/300 `DETECTED_GUARD` |
+
+Tempo médio da verificação de falha:
+
+| Perfil | `FAULT NONE` | `FAULT CRC32` |
+|---|---:|---:|
+| BASELINE 240 MHz | 17 us | 13 us |
+| OBC-1U-LIMITED 80 MHz | 44 us | 39 us |
 
 ### Conclusões para o seminário
 
 1. O objetivo principal foi atingido: a Wisdom/ESP32 executou ML-KEM-512 real,
    entregou mensagens nos três cenários e exportou métricas de tempo, bytes e
    heap.
-2. O custo temporal de PQC e o resultado mais forte: `PQC` foi 18,8x mais
-   lento que `CLASSIC` a 240 MHz e 30,1x mais lento no perfil limitado de
+2. O custo temporal de PQC e o resultado mais forte: `PQC` foi 25,9x mais
+   lento que `CLASSIC` a 240 MHz e 34,1x mais lento no perfil limitado de
    80 MHz.
 3. O custo de trafego também é didático: `PQC` saiu de 73 bytes para 841
    bytes por entrega consolidada.
 4. CRC32 adicionou custo pequeno no payload (+4 bytes e ~10 us a 240 MHz), mas
-   tornou visível a diferença entre falha silenciosa e erro detectado.
+   tornou visível a diferença entre falha silenciosa e erro detectado:
+   600/600 `SILENT` sem CRC32 contra 600/600 `DETECTED_GUARD` com CRC32.
 5. A RAM livre permaneceu estável, então a evidencia principal desta versão e
    tempo/trafego, não exaustao de heap.
 
@@ -251,7 +281,7 @@ Para o seminário atual:
 - não rodar bateria longa durante a apresentação;
 - demonstrar manualmente `CLÁSSICA`, `PQC`, `PQC+CRC`, `ENVIAR MSG` e
   `FALHA`;
-- citar `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json` como fonte
+- citar `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json` como fonte
   dos dados consolidados.
 
 Para evolucao cientifica futura:
@@ -297,15 +327,74 @@ Resultado esperado:
 - `elapsed_us` de `PQC_CRC32` deve ser maior ou próximo de `PQC`, com
   `crc_us` visível.
 
-## 6. Bateria longa já realizada e como repetir
+## 6. Bateria final robusta para novos resultados
 
-A bateria longa usada na apresentação já foi realizada e consolidada em
-`logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`. Não rode outra
-bateria durante o seminário.
+A bateria longa usada como fonte atual da apresentação foi realizada e
+consolidada em `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`. Não
+rode outra bateria durante o seminário.
 
 Baterias longas não devem ser iniciadas pelo agente. Se a montagem física
 mudar e for necessário repetir a coleta, o operador roda no terminal e depois
 chama o agente para analisar o JSON.
+
+Para consolidar um resultado novo e mais sólido para a seção `RESULTADOS`, use
+o runner dedicado:
+
+```bash
+python3 tools/final_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 100 --pause 0.25 --bench-repeats 3 --bench-rounds 100
+```
+
+Esse comando executa, em `BASELINE` 240 MHz e `OBC-1U-LIMITED` 80 MHz:
+
+- 100 ciclos por perfil;
+- 300 `MISSION` por perfil, sendo 100 `CLASSIC`, 100 `PQC` e 100
+  `PQC_CRC32`;
+- 200 testes de falha por perfil, alternando `FAULT NONE` e `FAULT CRC32`;
+- 3 execuções `PQC_BENCH 100` por perfil;
+- `PQC_KAT`, `PQC_INFO`, `STATUS` e `TELEMETRY` como preflight/saúde.
+
+Resultado esperado no terminal:
+
+```text
+final_metrics_json=logs/YYYYMMDDTHHMMSSZ_final_metrics_dev-ttyusb0.json
+summary={"ok": true, "failed": 0, "mission_runs": 600, "pqc_bench_runs": 6, "fault_runs": 400, ...}
+```
+
+Se quiser uma coleta mais forte, mas mais demorada, use:
+
+```bash
+python3 tools/final_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 300 --pause 0.5 --bench-repeats 5 --bench-rounds 100
+```
+
+Resultado esperado:
+
+```text
+mission_runs=1800
+pqc_bench_runs=10
+fault_runs=1200
+failed=0
+ok=true
+```
+
+Antes de iniciar a coleta real, confira o plano sem abrir a porta serial:
+
+```bash
+python3 tools/final_metrics_battery.py --dry-run --cycles 100 --bench-repeats 3 --bench-rounds 100
+```
+
+Depois que o JSON for gerado, chame o agente para consolidar o arquivo novo em
+tabelas. O campo principal para análise é `summary`, que já contém:
+
+- estatísticas por perfil e cenário em `summary.mission`;
+- razões `PQC/CLASSIC`, `PQC+CRC/CLASSIC` e overhead de CRC32;
+- estatísticas de `PQC_BENCH` em `summary.pqc_bench`;
+- contagem de falhas silenciosas/detectadas em `summary.faults`;
+- lista dos comandos com falha em `summary.failed_commands`.
+
+Use `tools/stage8_acceptance.py` apenas para aceite/regressão geral. Para
+métricas finais da apresentação, prefira `tools/final_metrics_battery.py`.
+
+## 6.1. Aceite longo da etapa 8
 
 Comando:
 

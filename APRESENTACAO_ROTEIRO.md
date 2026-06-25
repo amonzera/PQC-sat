@@ -37,37 +37,37 @@ de slides externos para conduzir a apresentação.
 
 ## Resultados para apresentar
 
-Fonte principal: `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`.
+Fonte principal: `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`.
 
 | Medida | Resultado |
 |---|---|
-| Aceitação final | 1.817,23 s, 83 registros, 0 falhas |
-| MISSION runs | 27 (9 CLASSIC, 9 PQC, 9 PQC_CRC32) |
-| Demo A/B | 5/5 falhas silenciosas em A; 5/5 detectadas em B |
-| CRC32 payload | 8/8 `DETECTED_GUARD` no aceite final |
+| Coleta final | 1.681,24 s, 3.074 registros, 0 falhas |
+| MISSION runs | 1.800 (600 CLASSIC, 600 PQC, 600 PQC_CRC32) |
+| Falhas sem CRC32 | 600/600 `SILENT` |
+| Falhas com CRC32 | 600/600 `DETECTED_GUARD` |
 | `PQC_KAT` | `kat=pass`, `ss_crc32=0xD9DA8D6C` |
 | `PQC_FAULT CONFIRM` | `PROTOCOL_REJECT`, `confirmation=HMAC-SHA256` |
 | `PQC_FAULT NONE` | `KEY_MISMATCH` |
 
 | Perfil | `keygen_avg_us` | `encap_avg_us` | `decap_avg_us` |
 |---|---:|---:|---:|
-| `BASELINE` 240 MHz | 3.298 | 3.861 | 4.985 |
-| `OBC-1U-LIMITED` 80 MHz | 10.056 | 11.780 | 15.204 |
+| `BASELINE` 240 MHz | 3.302 | 3.866 | 4.990 |
+| `OBC-1U-LIMITED` 80 MHz | 10.066 | 11.787 | 15.217 |
 
 Leitura didática: limitar o ESP32 para 80 MHz aumenta o custo temporal do
 ML-KEM-512, mas a operação continua funcional. O custo de checksum no payload
 é baixo e suficiente para demonstrar a diferença entre falha silenciosa e erro
 detectado.
 
-Comparacao MISSION BASELINE (240 MHz, media de 8 amostras):
+Comparacao MISSION BASELINE (240 MHz, media de 300 amostras por cenário):
 
 | Cenário | Tempo total (us) | Bytes | Heap livre | Resultado |
 |---|---:|---:|---:|---|
-| `CLASSIC` | 721 | 73 | 201.412 | DELIVERED |
-| `PQC` | 13.536 | 841 | 201.412 | DELIVERED |
-| `PQC_CRC32` | 13.367 | 845 | 201.412 | DELIVERED |
+| `CLASSIC` | 511 | 73 | 201.412 | DELIVERED |
+| `PQC` | 13.234 | 841 | 201.412 | DELIVERED |
+| `PQC_CRC32` | 13.130 | 845 | 201.412 | DELIVERED |
 
-Razoes: PQC é 18,8x mais lento e 11,5x maior que CLASSIC.
+Razoes: PQC é 25,9x mais lento e 11,5x maior que CLASSIC.
 CRC32 adiciona ~10 us e +4 bytes sobre PQC.
 
 Conclusões:
@@ -117,7 +117,7 @@ respondendo pela serial. Sem `SAT CONECTADO`, o painel deve recusar o envio.
    - **Caso B (Erro Detectado):** Clique em `PQC+CRC`, depois em `FALHA` -> Observar detecção do erro pelo guardião (`DETECTED_GUARD` na timeline).
 7. Fechar com resultados consolidados:
    - Clique em `RESULTADOS`.
-   - Mostre a bateria real: 83 registros, 0 falhas, 27 `MISSION runs`.
+   - Mostre a bateria real: 3.074 registros, 0 falhas, 1.800 `MISSION runs`.
    - Compare `CLASSIC`, `PQC` e `PQC_CRC32` com os números finais.
 
 > [!NOTE]
@@ -184,12 +184,14 @@ chave (`PROTOCOL_REJECT`), não de uma “mágica” automática da decapsulaç�
 
 Clique `RESULTADOS` e feche a narrativa:
 
-- `CLASSIC`: 721 us, 73 bytes;
-- `PQC`: 13.536 us, 841 bytes;
-- `PQC_CRC32`: 13.367 us, 845 bytes;
-- PQC ficou 18,8x mais lento e 11,5x maior em bytes que o baseline;
-- a bateria teve 83 registros, 0 falhas, 27 envios de missão e 2 benchmarks
-  PQC;
+- `CLASSIC`: 511 us, 73 bytes;
+- `PQC`: 13.234 us, 841 bytes;
+- `PQC_CRC32`: 13.130 us, 845 bytes;
+- PQC ficou 25,9x mais lento e 11,5x maior em bytes que o baseline;
+- a bateria teve 3.074 registros, 0 falhas, 1.800 envios de missão e 10
+  benchmarks PQC;
+- falhas de payload: 600/600 silenciosas sem CRC32 e 600/600 detectadas com
+  CRC32;
 - CRC32 não é criptografia, mas é excelente para demonstrar detecção de
   corrupção no payload;
 - energia real ainda exigiria medição elétrica externa.
@@ -232,7 +234,7 @@ Clique `RESULTADOS` e feche a narrativa:
 - `python3 -m compileall -q dashboard.py tools tests`
 - `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -m unittest discover`
 - `python3 -m platformio run -e robocore_wisdom_esp32`
-- Conferir `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`
+- Conferir `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`
 - Projetor/legibilidade: validado em 2026-06-18
 
 Baterias longas de hardware para consolidação final não devem ser iniciadas por
