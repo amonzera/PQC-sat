@@ -119,7 +119,8 @@ Ela deve ser usada como abertura do seminário:
 2. **Ameaça quântica**: explica por que RSA/ECDH ficam em risco com
    computadores quânticos grandes e por que PQC entra no projeto.
 3. **ML-KEM**: mostra que KEM não cifra a mensagem diretamente; ele estabelece
-   um segredo compartilhado que depois alimenta mecanismos como HMAC.
+   um segredo compartilhado que depois deriva a chave de uma cifra autenticada
+   como AES-GCM.
 4. **Experimento**: apresenta os três cenários medidos (`CLASSIC`, `PQC` e
    `PQC_CRC32`) e quais métricas devem ser observadas.
 5. **Como ler a demo**: apresenta os botões, a comparacao CLASSIC/PQC/PQC+CRC,
@@ -139,7 +140,7 @@ real:
 - 1.800 execuções `MISSION`;
 - 10 benchmarks `PQC_BENCH`;
 - comparacao `CLASSIC`, `PQC` e `PQC_CRC32`;
-- resultados de segurança (`PQC_KAT`, `PQC_FAULT`, `FAULT NONE` e `FAULT CRC32`);
+- resultados de segurança (`PQC_KAT`, `MISSION`, `FAULT NONE` e `FAULT CRC32`);
 - conclusões e próximos passos.
 - fechamento opcional `STRESS PQC 500`, que repete ML-KEM 500 vezes para
   mostrar carga extrema controlada.
@@ -181,7 +182,7 @@ Funcionalidades validadas na placa:
 - firmware com ML-KEM-512 real;
 - `PQC_KAT`;
 - `PQC_INFO`;
-- `PQC_FAULT`;
+- `PQC_FAULT` como comando técnico de bancada, fora da demo visual;
 - `PQC_BENCH`;
 - `MISSION CLASSIC`;
 - `MISSION PQC`;
@@ -197,15 +198,17 @@ O que isso significa em linguagem simples:
 
 - ML-KEM é um mecanismo para duas partes chegarem a um mesmo segredo;
 - esse segredo depois poderia ser usado por outras partes de um protocolo;
-- se um ciphertext for alterado, a decapsulacao pode produzir outro segredo;
-- por isso, o projeto testa se as duas pontas chegaram ao mesmo segredo;
-- com confirmação HMAC-SHA256, uma divergência vira rejeição de protocolo.
+- na demonstração principal, esse segredo alimenta AES-GCM, que cifra e
+  autentica o payload;
+- a falha visual da apresentação não corrompe o ciphertext ML-KEM: ela corrompe
+  payload para comparar `NONE` contra `CRC32`.
 
 Resultados importantes:
 
 - `PQC_KAT`: passou;
-- `PQC_FAULT 0 0x01 NONE`: retornou `KEY_MISMATCH`;
-- `PQC_FAULT 0 0x01 CONFIRM`: retornou `PROTOCOL_REJECT`.
+- `MISSION PQC`: ML-KEM + AES-GCM entregou mensagem;
+- `MISSION PQC_CRC32`: ML-KEM + AES-GCM + CRC32 entregou mensagem com checksum
+  protegido.
 
 ### Entrega de mensagem da missao
 
@@ -218,7 +221,8 @@ Ele executa uma entrega de mensagem curta no firmware e retorna métricas:
 - heap/RAM livre;
 - perfil de CPU;
 - resultado da entrega;
-- custo de HMAC;
+- custo de AES-GCM;
+- custo de KDF quando o cenário usa ML-KEM;
 - custo de ML-KEM quando o cenário usa PQC;
 - custo de CRC32 quando o cenário usa checksum.
 
@@ -260,9 +264,9 @@ linhas de teoria. Facilitadores visuais discretos complementam a leitura:
 - **raio cósmico** no passo de bit-flip: emissora pulsante, raio irregular e
   faísca no bit exato invertido.
 
-Nas falhas, o popup mostra `PAYLOAD/CIPHERTEXT → BIT-FLIP → GUARDIÃO →
-VERIFICAÇÃO → RESULTADO` com byte antes/depois, CRC antes/depois e a diferença
-entre `SILENT`, `DETECTED_GUARD`, `KEY_MISMATCH` e `PROTOCOL_REJECT`.
+Nas falhas, o popup mostra `PAYLOAD → BIT-FLIP → GUARDIÃO → VERIFICAÇÃO →
+RESULTADO` com byte antes/depois, CRC antes/depois e a diferença entre
+`SILENT` e `DETECTED_GUARD`.
 
 Leitura para explicar em sala:
 
@@ -374,8 +378,8 @@ Resultados PQC:
 | Teste | Resultado |
 |---|---|
 | `PQC_KAT` | `kat=pass`, `ss_crc32=0xD9DA8D6C` |
-| `PQC_FAULT CONFIRM` | `PROTOCOL_REJECT`, `confirmation=HMAC-SHA256` |
-| `PQC_FAULT NONE` | `KEY_MISMATCH` |
+| `MISSION PQC` | ML-KEM-512 estabelece segredo e AES-GCM cifra/autentica a mensagem |
+| `MISSION PQC_CRC32` | CRC32 entra no plaintext protegido antes da cifragem |
 
 Benchmark ML-KEM-512:
 
@@ -388,7 +392,6 @@ Leitura simples:
 
 - com menos CPU, o algoritmo fica mais lento;
 - mesmo assim, ML-KEM-512 continuou funcionando;
-- a confirmação de chave foi capaz de rejeitar uma sessão divergente;
 - CRC32 detectou todos os bit-flips de payload testados no aceite.
 
 Comparacao MISSION (BASELINE, 240 MHz):
@@ -454,8 +457,6 @@ caixa (chave privada).
 
 - AES-128-GCM usa uma chave **simetrica** para cifrar e autenticar a
   mensagem;
-- HMAC-SHA256 continua como mecanismo técnico de confirmação de chave no
-  comando `PQC_FAULT ... CONFIRM`;
 - ML-KEM gera pares **assimetricos** (chave publica + chave privada).
 
 ### 5.2 Por que a criptografia atual está ameaçada
@@ -563,11 +564,15 @@ Formula simplificada:
 Analogia: e como assinar uma carta com um carimbo secreto. Qualquer pessoa
 pode ler a carta, mas somente quem tem o carimbo consegue forjar a assinatura.
 
-**No nosso projeto:** HMAC-SHA256 é usado para:
+**No nosso projeto:** HMAC-SHA256 não faz parte da demo visual de falha nem da
+autenticação principal de `MISSION`. A autenticação da mensagem vem de
+AES-128-GCM.
+
+Ele ainda pode aparecer como mecanismo técnico legado para:
 
 - derivar material de chave em alguns pontos internos;
-- confirmar que as duas pontas derivaram o mesmo segredo ML-KEM no comando
-  técnico `PQC_FAULT ... CONFIRM`.
+- auditar, pelo terminal, comandos antigos de bancada que não entram no popup
+  da apresentação.
 
 No envio `MISSION`, a autenticação principal da mensagem agora vem do
 AES-128-GCM, que cifra o payload e verifica a tag GCM no recebimento.
@@ -593,7 +598,8 @@ O CRC32 trata os dados como um polinomio e divide por um polinomio fixo
 - Ele **só detecta alterações acidentais**.
 
 Um atacante pode modificar os dados E recalcular o CRC32 para que bata.
-Para segurança contra atacantes, use HMAC.
+Para segurança contra atacantes, use autenticação criptográfica, como
+AES-GCM no fluxo `MISSION` ou HMAC em outros protocolos.
 
 **No nosso projeto:** CRC32 demonstra detecção de integridade com custo
 minimo (~10 microssegundos, +4 bytes).
@@ -660,16 +666,19 @@ etapas em sequência:
 
 ### 5.9 Tabela comparativa: criptografia clássica vs PQC
 
-| Aspecto | Clássica (HMAC-SHA256) | PQC (ML-KEM-512 + HMAC) |
+| Aspecto | Clássica (AES-128-GCM) | PQC (ML-KEM-512 + AES-128-GCM) |
 |---|---|---|
-| O que faz | Autentica mensagem | Estabelece segredo + autentica |
-| Tipo de chave | Simetrica fixa | Assimetrica gerada por sessão |
-| Tamanho de chave | 32 bytes | pk=800, sk=1.632 bytes |
-| Bytes transmitidos | 73 | 841 |
-| Tempo (240 MHz) | ~511 us | ~13.234 us |
-| Tempo (80 MHz) | ~1.139 us | ~38.837 us |
-| Resiste a quântico | Sim (chave simetrica) | Sim (reticulados) |
+| O que faz | Cifra e autentica a mensagem | Estabelece segredo + cifra e autentica |
+| Tipo de chave | Simetrica efêmera | Assimetrica gerada por sessão |
+| Tamanho de chave | 16 bytes (AES-128) | pk=800, sk=1.632 bytes |
+| Bytes transmitidos* | 73 | 841 |
+| Tempo (240 MHz)* | ~511 us | ~13.234 us |
+| Tempo (80 MHz)* | ~1.139 us | ~38.837 us |
+| Resiste a quântico | Parcial: AES-128 cai a ~64 bits sob Grover | Sim (reticulados) |
 | Custo de adicionar CRC32 | N/A | +10 us, +4 bytes |
+
+\* Bytes e tempos vêm da bateria histórica pré-AES-GCM; servem de referência
+até a nova bateria oficial da versão cifrada.
 
 ## 6. Como explicar os termos para uma pessoa leiga
 
@@ -727,7 +736,7 @@ ciphertext e entregue para a outra ponta decapsular e chegar ao segredo.
 ### O que é `KEY_MISMATCH`?
 
 Significa que o harness de teste observou que os segredos das duas pontas não
-bateram.
+batem. Esse rótulo é de bancada técnica, não da demo visual principal.
 
 Fala sugerida:
 
@@ -737,19 +746,20 @@ Fala sugerida:
 
 ### O que é `PROTOCOL_REJECT`?
 
-Significa que uma confirmação autenticada da chave falhou.
+Significa que uma confirmação autenticada da chave falhou em um ensaio técnico
+de protocolo. Esse rótulo não aparece no popup de falha da apresentação.
 
 Fala sugerida:
 
-> Quando adicionamos uma confirmação baseada na chave derivada, a divergência
-> deixa de ser só uma observação do laboratorio e vira uma rejeição operacional
-> da sessão.
+> Esse resultado é útil para bancada de protocolo, mas não é o fluxo que vamos
+> mostrar no seminário. Na tela, a comparação principal é SILENT versus
+> DETECTED_GUARD.
 
 ### O que é HMAC-SHA256?
 
 é um mecanismo para calcular uma etiqueta de autenticação usando uma chave.
 Aqui, ele serve para confirmar se as duas pontas realmente chegaram ao mesmo
-segredo.
+segredo em ensaios técnicos fora da demo visual.
 
 ## 7. O que aparece na tela
 
@@ -886,7 +896,7 @@ O que acontece:
 3. `PQC_CRC32` repete o fluxo PQC e protege CRC32 junto do payload;
 4. o console e o overlay de mensagem entregue mostram tempo e bytes;
 5. cada cenário abre um popup próprio; arraste os cartões pelo topo e mantenha `CLASSIC`, `PQC` e `PQC+CRC` lado a lado até clicar no `X`, permitindo comparar tempo, bytes, heap, keygen, encap, KDF, AES-GCM, decap e verificação na ordem real da mensagem;
-6. quando dois ou mais popups ficam abertos, o comparador ao vivo aparece no centro inferior e separa payload, ML-KEM, nonce, tag GCM e CRC32;
+6. com dois ou mais popups abertos lado a lado, compare em cada cartão payload, ML-KEM, nonce, tag GCM e CRC32;
 7. LEDs/bargraph reforçam visualmente o aumento de custo.
 
 Como explicar:
@@ -903,7 +913,7 @@ Antes de clicar em `ENVIAR MSG`, pergunte:
 > O que vocês acham que vai crescer mais quando sairmos de AES-GCM puro para
 > ML-KEM-512 + AES-GCM: CPU, bytes transmitidos ou RAM?
 
-Depois dos três envios, use os popups e o comparador:
+Depois dos três envios, compare os popups lado a lado:
 
 > A RAM ficou estável, então o gargalo visível não foi memória. O impacto forte
 > apareceu em tempo e tráfego. Na bateria histórica pré-AES, a mesma mensagem
@@ -939,7 +949,7 @@ Pergunte antes de revelar:
 
 Depois da segunda falha:
 
-> Esse é o papel didático do CRC32 aqui. Ele não substitui HMAC e não protege
+> Esse é o papel didático do CRC32 aqui. Ele não substitui AES-GCM nem HMAC
 > contra atacante, mas transforma corrupção acidental em evento observável.
 
 > [!NOTE]
@@ -1017,30 +1027,30 @@ PQC_KAT = kat=pass
 pk=800, sk=1632, ct=768, ss=32
 ```
 
-### Resultado 4: bit-flip em ciphertext causa divergência
+### Resultado 4: bit-flip em payload sem guardião é silencioso
 
 Use a frase:
 
-> Ao corromper um ciphertext ML-KEM, as pontas podem chegar a segredos
-> diferentes. Isso aparece como KEY_MISMATCH no harness.
+> Quando um bit do payload muda e não existe checksum ativo, o sistema não tem
+> uma referência simples para comparar. A corrupção passa como falha silenciosa.
 
 Base:
 
 ```text
-PQC_FAULT NONE -> KEY_MISMATCH
+FAULT NONE -> SILENT
 ```
 
-### Resultado 5: confirmação transforma divergência em rejeição
+### Resultado 5: CRC32 transforma a mesma falha em detecção
 
 Use a frase:
 
-> Com uma confirmação HMAC-SHA256, a divergência da chave passa a ser rejeitada
-> pelo protocolo.
+> Com CRC32, salvamos um resumo do payload antes da falha e recalculamos depois.
+> Quando os valores divergem, o dashboard mostra DETECTED_GUARD.
 
 Base:
 
 ```text
-PQC_FAULT CONFIRM -> PROTOCOL_REJECT
+FAULT CRC32 -> DETECTED_GUARD
 ```
 
 ### Resultado 6: limitar CPU aumenta custo, mas não quebra a demo
@@ -1155,9 +1165,9 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 ### Conectar com PQC
 
 > A parte pós-quântica não é apenas decorativa: a placa executa ML-KEM-512 real.
-> Quando corrompemos um ciphertext ML-KEM, a decapsulacao pode gerar outro
-> segredo. O harness observa KEY_MISMATCH. Com confirmação HMAC-SHA256, essa
-> divergência vira PROTOCOL_REJECT.
+> Na demo visual, porém, a falha fica no payload para comparar exatamente o que
+> muda quando ativamos CRC32: sem guardião, SILENT; com CRC32,
+> DETECTED_GUARD.
 
 ### Interpretar resultados
 
@@ -1218,8 +1228,9 @@ Demo:
 
 PQC:
   ML-KEM-512 real na placa.
-  Ciphertext corrompido -> KEY_MISMATCH.
-  Confirmacao HMAC-SHA256 -> PROTOCOL_REJECT.
+  MISSION PQC usa ML-KEM para estabelecer chave.
+  AES-GCM cifra/autentica o payload.
+  A falha visual corrompe payload e compara NONE vs CRC32.
 
 Resultado:
   3.074 registros, 0 falhas no aceite.

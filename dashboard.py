@@ -28,7 +28,6 @@ from tools.serial_bridge import SerialBridge, SerialBridgeError, SerialBridgeTim
 from tools.serial_commands import (
     DASHBOARD_COMMAND_NAMES,
     FIRMWARE_COMMAND_NAMES,
-    command_help_lines,
     is_demo_firmware_command,
 )
 from tools.serial_protocol import ProtocolError, decode_key_values
@@ -64,11 +63,6 @@ MISSION_FLOW_ANIMATION_SECONDS = 8.0
 FAULT_FLOW_ANIMATION_SECONDS = 7.5
 POPUP_ENTER_SECONDS = 0.20
 POPUP_EXIT_SECONDS = 0.16
-HELP_HINT_LINES = (
-    "Botões: comandos visuais da demo.",
-    "Payload vivo usa sensores no envio.",
-    "Terminal: HELP mostra comandos avançados.",
-)
 COMMAND_BUTTONS = (
     ("ENVIAR MSG", "SEND_MESSAGE"),
     ("CLÁSSICA", "SET_PRESET_CLASSIC"),
@@ -155,6 +149,17 @@ CONSOLIDATED_MISSION_BASELINE = {
 CONSOLIDATED_PQC_BENCH = (
     ("BASELINE 240 MHz", "3.323", "3.878", "5.001"),
     ("LIMITED 80 MHz", "10.079", "11.794", "15.222"),
+)
+RESULTS_REFERENCES = (
+    ("NIST FIPS 203", "ML-KEM como KEM pos-quantico, 2024"),
+    ("NIST FIPS 197", "AES como cifra de bloco padrao, atual. 2023"),
+    ("NIST SP 800-38D", "GCM/GMAC para AEAD com nonce e tag, 2007"),
+    ("Koopman & Chakravarty", "CRC para deteccao em redes embarcadas, DSN 2004"),
+)
+MOTIVATION_REFERENCES = (
+    ("NIST PQC Project", "ameaca quantica e migracao para PQC"),
+    ("NASA SmallSat SoA", "SmallSats exigem escolhas de plataforma"),
+    ("Mikaelian 2009", "radiacao e charging ameacam eletronica espacial"),
 )
 
 # --- Paleta de Cores ----------------------------------------------------------
@@ -499,7 +504,10 @@ def _parse_u8_token(token):
     try:
         value = int(token, 0)
     except ValueError:
-        value = int(token, 16)
+        try:
+            value = int(token, 16)
+        except ValueError:
+            raise ValueError(f"token invalido: {token!r}")
     if not 0 <= value <= 255:
         raise ValueError("valor fora de 0..255")
     return value
@@ -1208,8 +1216,6 @@ class DashboardPanel:
         self.hardware_payload = {}
         self.hardware_state = {}
         self.help_visible = False
-        self.help_topic = "INDEX"
-        self.help_scroll = 0
         self.command_history = []
         self.command_button_rects = []
         self.live_payload_toggle_rect = None
@@ -1294,7 +1300,6 @@ class DashboardPanel:
         self.mission_overlay_drag_rects = {}
         self.mission_flow_control_rects = {}
         self.mission_flow_scrub_rects = {}
-        self.mission_comparison_rect = None
         self.dragging_mission_overlay = None
         self.dragging_mission_flow_scenario = None
         self.mission_drag_offset = (0, 0)
@@ -1385,15 +1390,7 @@ class DashboardPanel:
             if event.button == 1 and self._handle_command_button_click(event.pos):
                 self.input_active = False
                 return
-            if event.button in {4, 5} and self.help_visible:
-                delta = -3 if event.button == 4 else 3
-                self.help_scroll = max(0, self.help_scroll + delta)
-                return
             self.input_active = self.terminal_visible
-
-        if event.type == pygame.MOUSEWHEEL and self.help_visible:
-            self.help_scroll = max(0, self.help_scroll - event.y * 3)
-            return
 
         if event.type == pygame.KEYDOWN and self.terminal_visible:
             if event.key == pygame.K_RETURN:
@@ -1628,7 +1625,6 @@ class DashboardPanel:
         command_name = parts[0] if parts else ""
         if cmd_upper != "HELP":
             self.help_visible = False
-            self.help_scroll = 0
 
         if cmd_upper == "INJECT_FAULT":
             status = self._run_experiment_command(self.guard_mode)
@@ -1678,7 +1674,6 @@ class DashboardPanel:
             if not self.terminal_visible:
                 self.input_text = ""
                 self.help_visible = False
-                self.help_scroll = 0
             status = "TERMINAL ON" if self.terminal_visible else "TERMINAL OFF"
         elif cmd_upper == "PQC_STATUS":
             if self.serial_connected:
@@ -1710,9 +1705,7 @@ class DashboardPanel:
             self.terminal_visible = True
             self.input_active = True
             self.help_visible = True
-            self.help_topic = "INDEX"
-            self.help_scroll = 0
-            status = "HELP AVANÇADO"
+            status = "HELP: digite comandos no terminal"
         elif is_demo_firmware_command(cmd_clean):
             if self.serial_client is None:
                 status = "SERIAL OFF"
@@ -2108,99 +2101,6 @@ class DashboardPanel:
 
     def _run_experiment_command(self, guard, args=None, campaign_trial_id=None):
         args = args or []
-        import sys
-        if not self.satellite_online() and self.pqc_enabled and "unittest" not in sys.modules:
-            try:
-                spec = self._fault_spec_from_args(args)
-                if spec is None:
-                    spec = self.experiment.next_spec()
-                if self.message_preset == "PQC_CRC32":
-                    guard_mode = "KEY_CONFIRM"
-                    result = "PROTOCOL_REJECT"
-                    confirmation = "HMAC"
-                else:
-                    guard_mode = "NONE"
-                    result = "KEY_MISMATCH"
-                    confirmation = "NONE"
-
-                decap_us = 4988
-                confirm_us = 280 if guard_mode == "KEY_CONFIRM" else 0
-                elapsed_us = decap_us + confirm_us + 120
-
-                before_hex = "A" * 1536
-                after_bytes = bytearray(bytes.fromhex("AA" * 768))
-                after_bytes[spec.byte_index % 768] ^= spec.bit_mask
-                after_hex = after_bytes.hex().upper()
-
-                event = ExperimentEvent(
-                    schema_version="pqc-sat-event-v1",
-                    session_id=self.experiment.session_id,
-                    campaign_seed=self.experiment.seed,
-                    trial_id=self.experiment._next_trial_id,
-                    campaign_run_id=getattr(self, "_active_campaign_run_id", "manual"),
-                    campaign_trial_id=campaign_trial_id or self.experiment._next_trial_id,
-                    mode="SIMULATED",
-                    target="CIPHERTEXT",
-                    byte_index=spec.byte_index % 768,
-                    bit_mask=spec.bit_mask,
-                    fault_width=spec.fault_width,
-                    guard=guard_mode,
-                    before_hex=before_hex,
-                    after_hex=after_hex,
-                    crc_before="NA",
-                    crc_after="NA",
-                    guard_prepare_us=0,
-                    guard_verify_us=confirm_us,
-                    guard_overhead_us=confirm_us,
-                    result=result,
-                    elapsed_us=elapsed_us,
-                    uptime_s=self.uptime,
-                )
-                self.experiment._next_trial_id += 1
-                self.experiment.events.append(event)
-
-                fault = {
-                    "source": "SIMULATED",
-                    "target": "CIPHERTEXT",
-                    "guard": guard_mode,
-                    "result": result,
-                    "byte_index": event.byte_index,
-                    "bit_mask": f"0x{event.bit_mask_hex}",
-                    "before_byte": "0xAA",
-                    "after_byte": f"0x{after_bytes[event.byte_index] & 0xFF:02X}",
-                    "before_hex": before_hex,
-                    "after_hex": after_hex,
-                    "crc_before": "NA",
-                    "crc_after": "NA",
-                    "guard_prepare_us": 0,
-                    "guard_verify_us": confirm_us,
-                    "guard_overhead_us": confirm_us,
-                    "elapsed_us": elapsed_us,
-                    "mode": "SIMULATED",
-                    "decap_us": decap_us,
-                    "confirm_us": confirm_us,
-                    "confirmation": confirmation,
-                    "key_match": "false",
-                    "tag_match": "false" if guard_mode == "KEY_CONFIRM" else "NA",
-                }
-
-                self.last_fault_event = event
-                self.session_dirty = True
-                self._refresh_experiment_metrics()
-                self._trigger_fault_effect(event)
-
-                snapshot = self._mission_context_for_send()
-                fault.update(self._fault_context_fields(snapshot, event))
-
-                self._open_fault_overlay(fault)
-
-                self.session_status = f"FALHA {result} (SIM)"
-                self._append_history("INJECT_FAULT", f"{result} (SIM)")
-                return result
-            except ValueError as exc:
-                self._append_history("FAULT_SPEC", str(exc).upper()[:14])
-                return "INVALID_INPUT"
-
         snapshot = None
         try:
             spec = self._fault_spec_from_args(args)
@@ -2300,7 +2200,6 @@ class DashboardPanel:
         self.mission_overlay_drag_rects.clear()
         self.mission_flow_control_rects.clear()
         self.mission_flow_scrub_rects.clear()
-        self.mission_comparison_rect = None
         self.dragging_mission_overlay = None
         self.dragging_mission_flow_scenario = None
         self.mission_drag_offset = (0, 0)
@@ -2710,12 +2609,10 @@ class DashboardPanel:
     def _open_fault_overlay_from_payload(self, command, payload):
         command_name = command.split()[0].upper()
         context = self._pop_pending_fault_context(command)
-        is_pqc_fault = command_name == "PQC_FAULT"
-        target = str(payload.get("target", "CIPHERTEXT" if is_pqc_fault else "PAYLOAD")).upper()
+        target = str(payload.get("target", "PAYLOAD")).upper()
         guard = payload.get("guard")
         if not guard:
-            confirmation = str(payload.get("confirmation", "NONE")).upper()
-            guard = "KEY_CONFIRM" if is_pqc_fault and confirmation != "NONE" else "NONE"
+            guard = "NONE"
         crc_before = payload.get("crc_before") or payload.get("ct_crc_before", "")
         crc_after = payload.get("crc_after") or payload.get("ct_crc_after", "")
         fault = {
@@ -2737,7 +2634,7 @@ class DashboardPanel:
             "key_match": payload.get("key_match"),
             "key_confirmed": payload.get("key_confirmed"),
             "tag_match": payload.get("tag_match"),
-            "confirmation": payload.get("confirmation", ""),
+            "confirmation": "",
             "decap_us": _optional_int(payload.get("decap_us")),
             "confirm_us": _optional_int(payload.get("confirm_us")),
             "elapsed_us": _optional_int(payload.get("elapsed_us")),
@@ -2806,49 +2703,7 @@ class DashboardPanel:
     def _fault_flow_steps(self, fault):
         result = str(fault.get("result", ""))
         guard = str(fault.get("guard", "NONE")).upper()
-        target = str(fault.get("target", "PAYLOAD")).upper()
         crc_changed = bool(fault.get("crc_before") and fault.get("crc_after") and fault.get("crc_before") != fault.get("crc_after"))
-        is_pqc = target == "CIPHERTEXT" or guard == "KEY_CONFIRM"
-
-        if is_pqc:
-            return (
-                {
-                    "label": "CIPHERTEXT",
-                    "detail": "pacote ML-KEM antes da falha",
-                    "explain": "A falha é aplicada no ciphertext ML-KEM. A mensagem ainda depende da decapsulação correta.",
-                    "color": C_ACCENT_PURPLE,
-                },
-                {
-                    "label": "BIT-FLIP",
-                    "detail": f"byte {fault.get('byte_index', '--')} mask {fault.get('bit_mask', '--')}",
-                    "explain": self._fault_selector_explanation(
-                        fault,
-                        "Em PQC isso pode mudar o segredo derivado pelo receptor.",
-                    ),
-                    "color": C_ACCENT_RED,
-                },
-                {
-                    "label": "DECAP",
-                    "detail": "tenta recuperar segredo",
-                    "explain": "A Wisdom decapsula o ciphertext corrompido e compara o segredo esperado.",
-                    "color": C_ACCENT_PURPLE,
-                    "time_us": fault.get("decap_us"),
-                },
-                {
-                    "label": "CONFIRMA",
-                    "detail": str(fault.get("confirmation") or guard),
-                    "explain": "A confirmação HMAC testa se as duas pontas chegaram ao mesmo segredo sem revelar a chave.",
-                    "color": C_ACCENT_ORANGE,
-                    "time_us": fault.get("confirm_us"),
-                },
-                {
-                    "label": "RESULTADO",
-                    "detail": self._fault_result_label(result),
-                    "explain": self._fault_result_explanation(fault),
-                    "color": self._fault_result_color(result),
-                    "time_us": fault.get("elapsed_us"),
-                },
-            )
 
         payload_start = {
             "label": "PAYLOAD",
@@ -2915,7 +2770,7 @@ class DashboardPanel:
     def _fault_result_color(result):
         if result == "SILENT":
             return C_ACCENT_RED
-        if result in {"DETECTED_GUARD", "PROTOCOL_REJECT", "KEY_MISMATCH"}:
+        if result == "DETECTED_GUARD":
             return C_ACCENT_GREEN
         return C_ACCENT_CYAN
 
@@ -2924,8 +2779,6 @@ class DashboardPanel:
         labels = {
             "SILENT": "FALHA SILENCIOSA",
             "DETECTED_GUARD": "DETECTADA",
-            "PROTOCOL_REJECT": "REJEIÇÃO DO PROTOCOLO",
-            "KEY_MISMATCH": "CHAVE DIVERGENTE",
             "OK": "SEM IMPACTO",
         }
         return labels.get(str(result), str(result or "--"))
@@ -2935,8 +2788,6 @@ class DashboardPanel:
         labels = {
             "SILENT": "SILENCIOSA",
             "DETECTED_GUARD": "DETECTADA",
-            "PROTOCOL_REJECT": "REJEITADA",
-            "KEY_MISMATCH": "CHAVE DIF.",
             "OK": "OK",
         }
         return labels.get(str(result), str(result or "--"))
@@ -2948,12 +2799,8 @@ class DashboardPanel:
             return "Sem guardião, o payload mudou e seguiria como se estivesse correto. É a falha didática perigosa."
         if result == "DETECTED_GUARD":
             return "O CRC32 antes/depois divergiu. A corrupção foi detectada antes de aceitar o payload."
-        if result == "PROTOCOL_REJECT":
-            return "A confirmação autenticada falhou. O protocolo rejeita o ciphertext corrompido."
-        if result == "KEY_MISMATCH":
-            return "A decapsulação produziu segredo diferente. Sem confirmação, isso vira divergência de chave."
         if target == "CIPHERTEXT":
-            return "A falha atingiu o material PQC; compare segredo, tag e resultado final."
+            return "Caminho técnico de bancada. A demo visual de falha usa payload com NONE ou CRC32."
         return "A tentativa terminou sem divergência observada."
 
     @staticmethod
@@ -3076,8 +2923,6 @@ class DashboardPanel:
         elif command.startswith("PQC_"):
             self.hardware_payload = payload
             self._update_pqc_label(payload)
-            if command.startswith("PQC_FAULT"):
-                self._open_fault_overlay_from_payload(command, payload)
         elif command.startswith("STRESS"):
             self.hardware_payload = payload
             self.stress_payload = dict(payload)
@@ -4015,7 +3860,7 @@ class DashboardPanel:
                 "nodes": [{"title": "PAYLOAD", "sub": f"{ctx['payload']} B"},
                           {"title": "CRC-32", "sub": "poly 0xEDB88320", "icon": "shield"},
                           {"title": "+ CRC", "sub": f"{ctx['checksum']} B", "color": g, "badge": "check"}],
-                "theory": "O CRC-32 detecta corrupcao acidental (ate 1 bit), mas nao autentica contra um atacante.",
+                "theory": "O CRC-32 detecta corrupcao acidental (todo erro de 1 bit e a maioria das rajadas), mas nao autentica contra um atacante.",
             },
             "keygen": {
                 "title": "GERACAO DO PAR DE CHAVES ML-KEM",
@@ -4036,7 +3881,7 @@ class DashboardPanel:
                 "nodes": [{"title": "ct + sk", "sub": f"{ctx['mlkem']} B"},
                           {"title": "DECAPS", "sub": "+ confere (FO)", "icon": "unlock"},
                           {"title": "SEGREDO", "sub": "identico", "color": g, "badge": "check"}],
-                "theory": "O receptor recupera o segredo e re-encapsula para conferir (Fujisaki-Okamoto): so aceita se bater.",
+                "theory": "O receptor decapsula e re-cifra para conferir (Fujisaki-Okamoto). Ciphertext alterado nao gera erro: ML-KEM devolve um segredo de rejeicao diferente.",
             },
             "kdf": {
                 "title": "DERIVACAO DA CHAVE AES",
@@ -4109,11 +3954,10 @@ class DashboardPanel:
                         "before": ctx["before"], "after": ctx["after"], "mask": ctx["mask"],
                         "byte_index": ctx["byte_index"],
                         "theory": "Um unico bit invertido (XOR com a mascara): o modelo de falha por radiacao (SEU)."}
-            return {"title": "INVERSAO DE UM BIT NO CIPHERTEXT", "theme": "space",
-                    "nodes": [{"title": "ct (CRC)", "sub": ctx["crc_before"]},
-                              {"title": "BIT-FLIP", "sub": "XOR", "color": r, "icon": "alert"},
-                              {"title": "ct' (CRC)", "sub": ctx["crc_after"], "color": r, "badge": "cross"}],
-                    "theory": "Um bit do ciphertext ML-KEM e invertido; o CRC do pacote muda de tx para rx."}
+            return {"title": "INVERSAO DE UM UNICO BIT", "theme": "space", "special": "bits",
+                    "before": ctx["before"], "after": ctx["after"], "mask": ctx["mask"],
+                    "byte_index": ctx["byte_index"],
+                    "theory": "O popup de falha da apresentacao modela corrupcao de payload; o CRC do payload e a referencia observavel."}
         specs = {
             "SEM CRC": {"title": "SEM GUARDIAO DE INTEGRIDADE",
                         "nodes": [{"title": "Payload alterado", "sub": ""},
@@ -4135,21 +3979,10 @@ class DashboardPanel:
                                    {"title": "COMPARA", "sub": "tx != rx", "color": o, "icon": "shield"},
                                    {"title": "CRC rx", "sub": ctx["crc_after"], "color": r, "badge": "cross"}],
                          "theory": "Recalcula o CRC e compara com o salvo. Divergiu -> DETECTED_GUARD; 1 bit sempre e detectado."},
-            "DECAP": {"title": "DECAPSULACAO DIVERGENTE",
-                      "nodes": [{"title": "ct corrompido", "sub": "", "color": r},
-                                {"title": "DECAPS", "sub": "ct' != ct", "icon": "unlock"},
-                                {"title": "Segredo", "sub": "divergente", "color": r, "badge": "cross"}],
-                      "theory": "Com o ciphertext alterado a re-encapsulacao nao bate (FO) e o segredo recuperado diverge."},
-            "CONFIRMA": {"title": "CONFIRMACAO HMAC REJEITA",
-                         "nodes": [{"title": "ss emissor", "sub": "ok", "color": g},
-                                   {"title": "HMAC-SHA256", "sub": "ss tx != ss rx", "icon": "shield"},
-                                   {"title": "REJEITADO", "sub": "PROTOCOL", "color": g, "badge": "check"}],
-                         "theory": "A confirmacao HMAC compara os segredos das duas pontas sem revela-los. Divergiu -> PROTOCOL_REJECT."},
         }
         if label == "RESULTADO":
             silent = ctx["result"] == "SILENT"
-            verdict = {"DETECTED_GUARD": "CRC DETECTOU", "PROTOCOL_REJECT": "PROTOCOLO REJEITOU",
-                       "KEY_MISMATCH": "CHAVE DIVERGENTE"}.get(ctx["result"], "PROTEGIDO")
+            verdict = {"DETECTED_GUARD": "CRC DETECTOU"}.get(ctx["result"], "PROTEGIDO")
             return {"title": "RESULTADO OBSERVADO DA FALHA", "theme": "space",
                     "nodes": [{"title": "FALHA SILENCIOSA" if silent else verdict,
                                "sub": "corrupcao aceita" if silent else "corrupcao barrada",
@@ -4353,6 +4186,29 @@ class DashboardPanel:
                 break
             ly = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, lx, ly, lw, line_spacing=18, max_lines=2)
             ly += 3
+        ref_y = ly + 8
+        if left.bottom - ref_y >= 84:
+            pygame.draw.line(surface, C_PANEL_BORDER, (lx, ref_y), (lx + lw, ref_y), 1)
+            ref_y += 9
+            groups = (
+                ("MOTIVACAO DO PROBLEMA", MOTIVATION_REFERENCES, C_ACCENT_ORANGE),
+                ("BASE TECNICA", RESULTS_REFERENCES, C_ACCENT_GREEN),
+            )
+            for group_index, (heading, refs, heading_color) in enumerate(groups):
+                if group_index and left.bottom - ref_y >= 24:
+                    ref_y += 5
+                if left.bottom - ref_y < 36:
+                    break
+                surface.blit(self._render_clipped(FONT_LABEL, heading, heading_color, lw), (lx, ref_y))
+                ref_y += 18
+                max_refs = max(0, min(len(refs), (left.bottom - ref_y - 4) // 15))
+                for name, detail in refs[:max_refs]:
+                    line = f"{name}: {detail}"
+                    surface.blit(self._render_clipped(FONT_SMALL, line, C_TEXT_DIM, lw), (lx, ref_y))
+                    ref_y += 15
+                if max_refs < len(refs):
+                    break
+            ly = max(ly, ref_y)
 
         # Coluna direita: segurança, campanha e próximos passos.
         rx = right.x + pad
@@ -4402,7 +4258,7 @@ class DashboardPanel:
             f"Falhas payload: {CONSOLIDATED_SUMMARY['demo_none_silent']} silenciosas sem CRC32; {CONSOLIDATED_SUMMARY['demo_crc_detected']} detectadas com CRC32.",
             f"Coleta final: {CONSOLIDATED_SUMMARY['pqc_bench_runs']} PQC_BENCH de 100 rounds, todos OK.",
             "AES-GCM oficial: validado na bateria atual." if aes_ok else "AES-GCM oficial: pendente de nova gravação do firmware.",
-            "PQC_FAULT com confirmação: PROTOCOL_REJECT.",
+            "Demo de falha visual: payload com NONE versus payload com CRC32.",
         )
         for note in security_notes:
             if ry > right.bottom - 188:
@@ -4640,14 +4496,11 @@ class DashboardPanel:
         pygame.draw.line(surface, color, (node_positions[0], timeline_y), (marker_x, timeline_y), 3)
         short_labels = {
             "PAYLOAD": "PAY",
-            "CIPHERTEXT": "CT",
             "BIT-FLIP": "BIT",
             "CRC32": "CRC",
             "SEM CRC": "NO",
             "ENTREGA": "OUT",
             "VERIFICA": "VER",
-            "DECAP": "DEC",
-            "CONFIRMA": "MAC",
             "RESULTADO": "OK" if str(fault.get("result")) != "SILENT" else "SIL",
         }
         for index, step in enumerate(steps):
@@ -4747,17 +4600,10 @@ class DashboardPanel:
         if before is None or after is None:
             before_crc = str(fault.get("crc_before") or "--")
             after_crc = str(fault.get("crc_after") or "--")
-            flags = []
-            if fault.get("key_match") is not None:
-                flags.append(f"key={str(fault.get('key_match')).lower()}")
-            if fault.get("tag_match") is not None:
-                flags.append(f"tag={str(fault.get('tag_match')).lower()}")
-            if fault.get("confirmation"):
-                flags.append(f"confirm={fault.get('confirmation')}")
             lines = (
-                f"ct crc antes: {before_crc[-8:]}",
-                f"ct crc depois: {after_crc[-8:]}",
-                "  ".join(flags) if flags else "byte específico indisponível no resumo",
+                f"crc antes: {before_crc[-8:]}",
+                f"crc depois: {after_crc[-8:]}",
+                "byte específico indisponível no resumo",
             )
             for line in lines:
                 surface.blit(self._render_clipped(FONT_LABEL, line, C_TEXT_DIM, width), (x, y))
@@ -4899,89 +4745,6 @@ class DashboardPanel:
         surface.blit(val, (x + 142, y - 2))
         y += 38
 
-    def _draw_event_timeline(self, surface, x, y, width, panel_rect):
-        lbl = FONT_LABEL.render("TIMELINE", True, C_ACCENT_CYAN)
-        surface.blit(lbl, (x, y))
-        y += 16
-
-        legend = (
-            ("OK", C_ACCENT_GREEN),
-            ("SIL", C_ACCENT_RED),
-            ("DET", C_ACCENT_ORANGE),
-            ("INV", C_TEXT_DIM),
-        )
-        lx = x
-        for label, color in legend:
-            pygame.draw.circle(surface, color, (lx + 4, y + 6), 4)
-            text = FONT_LABEL.render(label, True, C_TEXT_DIM)
-            surface.blit(text, (lx + 12, y))
-            lx += max(46, text.get_width() + 24)
-        y += 18
-
-        if not self.experiment_events:
-            empty = FONT_LABEL.render("sem eventos de campanha", True, C_TEXT_DIM)
-            surface.blit(empty, (x, y))
-            return
-
-        plot_h = min(72, max(48, panel_rect.bottom - y - 66))
-        layout = timeline_layout(self.experiment_events, x, y, width, plot_h)
-        lanes = {"A NONE": y + 16, "B CRC32": y + max(34, plot_h - 14)}
-        for label, lane_y in lanes.items():
-            text = FONT_LABEL.render(label, True, C_TEXT_DIM)
-            surface.blit(text, (x, lane_y - 7))
-            pygame.draw.line(surface, C_PANEL_BORDER, (x + 48, lane_y), (x + width, lane_y), 1)
-
-        for point in layout:
-            event = point["event"]
-            cx = point["x"]
-            cy = point["y"]
-            color = self._result_color(event.result)
-            radius = 5 if event is self.last_fault_event else 4
-            pygame.draw.circle(surface, color, (cx, cy), radius)
-            if event is self.last_fault_event:
-                pygame.draw.circle(surface, color, (cx, cy), radius + 4, 1)
-
-        y += plot_h + 4
-        last = self.last_fault_event
-        if last is not None:
-            detail = (
-                f"#{last.trial_id} {last.result} "
-                f"i={last.byte_index} m={last.bit_mask_hex} {last.guard}"
-            )
-            surface.blit(self._render_clipped(FONT_LABEL, detail, C_TEXT_PRIMARY, width), (x, y))
-            y += 16
-            crc = f"crc {last.crc_before}->{last.crc_after}"
-            surface.blit(self._render_clipped(FONT_LABEL, crc, C_TEXT_DIM, width), (x, y))
-            y += 16
-
-        if y < panel_rect.bottom - 18:
-            summary_data = event_summary(self.experiment_events)
-            summary = (
-                f"A/B total {summary_data['events']}  "
-                f"SIL {summary_data['silent']}  DET {summary_data['detected_guard']}"
-            )
-            surface.blit(FONT_LABEL.render(summary, True, C_TEXT_DIM), (x, y))
-
-    @staticmethod
-    def _result_color(result):
-        if result == "SILENT" or result == "KEY_MISMATCH":
-            return C_ACCENT_RED
-        if result in {"DETECTED_GUARD", "PROTOCOL_REJECT"}:
-            return C_ACCENT_ORANGE
-        if result == "OK":
-            return C_ACCENT_GREEN
-        return C_TEXT_DIM
-
-    @staticmethod
-    def _history_command_label(command):
-        labels = {
-            "SET_PRESET_CLASSIC": "PRESET CLASSIC",
-            "SET_PRESET_PQC": "PRESET PQC",
-            "SET_PRESET_PQC_CRC32": "PRESET PQC+CRC",
-            "SEND_MESSAGE": "ENVIAR MSG",
-        }
-        return labels.get(command, command)
-
     def _draw_right_panel(self, surface, t):
         """Painel direito: Console de comandos."""
         pw = 380
@@ -5093,16 +4856,6 @@ class DashboardPanel:
                 lines.append(current)
                 current = word
         lines.append(current)
-        return lines
-
-    def _console_help_lines(self):
-        lines = [
-            "Terminal avançado do dashboard:",
-            "  Botões acima: comandos centrais da demo visual",
-            "  Campo abaixo: comandos locais e firmware completos",
-            "",
-        ]
-        lines.extend(command_help_lines(include_dashboard=True, demo_only=False))
         return lines
 
     def _mission_flow_active_state(self, animation):
@@ -5298,10 +5051,6 @@ class DashboardPanel:
             return "--"
         return str(value)
 
-    def _draw_metric_pair(self, surface, label, value, x, y, width, color=C_TEXT_PRIMARY):
-        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, width), (x, y))
-        surface.blit(self._render_clipped(FONT_SMALL, value, color, width), (x, y + 15))
-
     def _draw_overlay_metric_box(self, surface, label, value, x, y, width, height, color):
         pygame.draw.rect(surface, (15, 20, 38), (x, y, width, height), border_radius=4)
         pygame.draw.rect(surface, C_PANEL_BORDER, (x, y, width, height), width=1, border_radius=4)
@@ -5311,7 +5060,6 @@ class DashboardPanel:
     def _draw_mission_overlay(self, surface, t):
         if not self.mission_overlay_visible or not self.mission_overlays:
             self.mission_overlay_close_rect = None
-            self.mission_comparison_rect = None
             self.mission_overlay_rects.clear()
             self.mission_overlay_close_rects.clear()
             self.mission_overlay_drag_rects.clear()
@@ -5327,22 +5075,9 @@ class DashboardPanel:
         self.mission_flow_control_rects.clear()
         self.mission_flow_scrub_rects.clear()
         self.mission_overlay_order = [scenario for scenario in self.mission_overlay_order if scenario in self.mission_overlays]
-        self.mission_comparison_rect = None
         for scenario in self.mission_overlay_order:
             self._draw_single_mission_overlay(surface, t, scenario, self.mission_overlays[scenario])
         self._sync_mission_overlay_state()
-
-    def _mission_comparison_geometry(self):
-        left = 340
-        right = WIDTH - 420
-        if right - left < 320:
-            left = 20
-            right = WIDTH - 20
-        width = max(280, min(right - left, WIDTH - 40))
-        x = max(20, min(left, WIDTH - width - 20))
-        height = 166 if HEIGHT >= 760 else 146
-        y = max(96, HEIGHT - height - 58)
-        return pygame.Rect(x, y, width, height)
 
     @staticmethod
     def _mission_int(mission, key, default=0):
@@ -5386,96 +5121,6 @@ class DashboardPanel:
             ("HMAC", hmac, C_ACCENT_ORANGE),
             ("CRC", checksum, C_ACCENT_GREEN),
         )
-
-    def _mission_ratio_line(self, scenarios):
-        classic = self.mission_overlays.get("CLASSIC")
-        pqc = self.mission_overlays.get("PQC")
-        pqc_crc = self.mission_overlays.get("PQC_CRC32")
-        lines = []
-        if classic and pqc:
-            classic_us = self._mission_int(classic, "elapsed_us")
-            pqc_us = self._mission_int(pqc, "elapsed_us")
-            classic_b = self._mission_int(classic, "bytes_total")
-            pqc_b = self._mission_int(pqc, "bytes_total")
-            if classic_us and pqc_us:
-                lines.append(f"PQC: {pqc_us / classic_us:.1f}x tempo")
-            if classic_b and pqc_b:
-                lines.append(f"{pqc_b / classic_b:.1f}x bytes vs CLASSIC")
-        if pqc and pqc_crc:
-            crc_b = self._mission_int(pqc_crc, "bytes_checksum")
-            crc_us = self._mission_int(pqc_crc, "crc_us")
-            if crc_b or crc_us:
-                lines.append(f"CRC32: +{crc_b} B, {_format_elapsed(crc_us)}")
-        if not lines and scenarios:
-            lines.append("Compare tempo, bytes e composição do pacote.")
-        return "  |  ".join(lines)
-
-    def _draw_mission_comparison(self, surface, t):
-        scenarios = [scenario for scenario in MISSION_OVERLAY_SCENARIOS if scenario in self.mission_overlays]
-        if len(scenarios) < 2:
-            self.mission_comparison_rect = None
-            return
-
-        rect = self._mission_comparison_geometry()
-        self.mission_comparison_rect = rect
-        panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(panel, (*C_PANEL_BG, 228), (0, 0, rect.width, rect.height), border_radius=8)
-        pygame.draw.rect(panel, (*C_ACCENT_CYAN, 150), (0, 0, rect.width, rect.height), 1, border_radius=8)
-        pygame.draw.rect(panel, (*C_PANEL_HEADER, 190), (0, 0, rect.width, 34), border_top_left_radius=8, border_top_right_radius=8)
-        surface.blit(panel, rect.topleft)
-
-        title = "COMPARADOR AO VIVO: o que ficou mais caro?"
-        surface.blit(self._render_clipped(FONT_SMALL, title, C_ACCENT_CYAN, rect.width - 28), (rect.x + 14, rect.y + 9))
-        ratio_line = self._mission_ratio_line(scenarios)
-        surface.blit(self._render_clipped(FONT_LABEL, ratio_line, C_ACCENT_ORANGE, rect.width - 28), (rect.x + 14, rect.y + 36))
-
-        gap = 10
-        content_x = rect.x + 14
-        content_y = rect.y + 58
-        content_w = rect.width - 28
-        col_w = (content_w - gap * (len(scenarios) - 1)) // len(scenarios)
-        bar_h = 12
-        for index, scenario in enumerate(scenarios):
-            mission = self.mission_overlays[scenario]
-            x = content_x + index * (col_w + gap)
-            y = content_y
-            color = self._scenario_color(scenario)
-            pygame.draw.rect(surface, (15, 20, 38), (x, y, col_w, rect.bottom - y - 14), border_radius=5)
-            pygame.draw.rect(surface, color, (x, y, col_w, rect.bottom - y - 14), width=1, border_radius=5)
-            surface.blit(self._render_clipped(FONT_LABEL, scenario, color, col_w - 12), (x + 7, y + 6))
-            time_text = _format_elapsed(mission.get("elapsed_us"))
-            bytes_text = f"{self._mission_metric_value(mission, 'bytes_total')} B"
-            surface.blit(self._render_clipped(FONT_SMALL, f"{time_text}  |  {bytes_text}", C_TEXT_PRIMARY, col_w - 12), (x + 7, y + 22))
-
-            parts = self._mission_package_parts(mission)
-            total = max(1, sum(value for _label, value, _part_color in parts))
-            bar_x = x + 7
-            bar_y = y + 48
-            bar_w = col_w - 14
-            pygame.draw.rect(surface, (8, 12, 24), (bar_x, bar_y, bar_w, bar_h), border_radius=3)
-            cursor = bar_x
-            for label, value, part_color in parts:
-                if value <= 0:
-                    continue
-                part_w = max(2, int(bar_w * value / total))
-                if cursor + part_w > bar_x + bar_w:
-                    part_w = bar_x + bar_w - cursor
-                pygame.draw.rect(surface, part_color, (cursor, bar_y, part_w, bar_h), border_radius=3)
-                cursor += part_w
-            pygame.draw.rect(surface, C_PANEL_BORDER, (bar_x, bar_y, bar_w, bar_h), width=1, border_radius=3)
-
-            part_values = {label: value for label, value, _part_color in parts}
-            payload_label = "payload real" if str(mission.get("payload_mode", "")).upper() == "LIVE" else "payload"
-            line1 = (
-                f"{payload_label} {part_values.get('payload', 0)}B  "
-                f"gcm {part_values.get('GCM', part_values.get('HMAC', 0))}B"
-            )
-            line2 = (
-                f"kem {part_values.get('ML-KEM', 0)}B  "
-                f"iv {part_values.get('nonce', 0)}B  crc {part_values.get('CRC', 0)}B"
-            )
-            surface.blit(self._render_clipped(FONT_LABEL, line1, C_TEXT_DIM, col_w - 12), (x + 7, y + 67))
-            surface.blit(self._render_clipped(FONT_LABEL, line2, C_TEXT_DIM, col_w - 12), (x + 7, y + 81))
 
     def _draw_single_mission_overlay(self, surface, t, scenario, mission):
         rect, close_rect = self._mission_overlay_geometry(scenario)
@@ -5952,16 +5597,6 @@ class DashboardPanel:
             total_ram = 327680
             return max(0, min(total_ram, total_ram - heap)) / total_ram
         return 0.0
-
-    def _mission_tile_values(self, mission, *, fallback_value, fallback_detail, ready_color):
-        if not mission:
-            return fallback_value, fallback_detail, C_TEXT_DIM if fallback_value == "--" else ready_color
-        elapsed = _format_elapsed(mission.get("elapsed_us"))
-        bytes_total = mission.get("bytes_total")
-        result = str(mission.get("result", ""))
-        detail = f"{bytes_total}B {result}" if bytes_total is not None else result
-        color = ready_color if result == "DELIVERED" else C_ACCENT_RED
-        return elapsed, detail, color
 
     def _draw_bottom_bar(self, surface, t):
         """Barra inferior com informacoes de sistema."""
@@ -6588,7 +6223,7 @@ class Onboarding:
             "Tempo/CPU: custo para entregar a mensagem.",
             "Bytes: tráfego do protocolo e composição do pacote.",
             "Heap/RAM: margem restante na placa.",
-            "Resultado: DELIVERED, SILENT, DETECTED_GUARD ou PROTOCOL_REJECT.",
+            "Resultado da demo: DELIVERED, SILENT ou DETECTED_GUARD.",
         ]
         for line in metric_lines:
             my = self.draw_wrapped_onboarding(surface, f"- {line}", mx, my, mw, C_TEXT_PRIMARY, line_spacing=18, max_lines=1)

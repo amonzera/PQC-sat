@@ -71,14 +71,20 @@ delivered = aead_match
 bytes_total = len(payload) + len(nonce) + len(tag)
 ```
 
-Na versão AES-GCM, para o payload padrão:
+Na versão AES-GCM, a bateria oficial de 2026-06-26 usou um payload fixo de
+34 bytes:
 
 ```text
-payload: 41 bytes
+payload: 34 bytes
 nonce GCM: 12 bytes
 tag GCM: 16 bytes
-total esperado: 69 bytes
+total medido: 62 bytes
 ```
+
+> Observação: a string didática `PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK` tem
+> 41 bytes, mas a bateria oficial AES-GCM
+> (`logs/20260626T051412Z_aes_gcm_metrics_dev-ttyusb0.json`) usou um payload
+> fixo de 34 bytes; por isso os totais oficiais são 62/830/834.
 
 Esse cenário **não executa ML-KEM**. Ele não mede criptografia assimétrica
 clássica como ECDH. Ele mede um baseline simétrico de cifragem autenticada.
@@ -119,14 +125,14 @@ delivered = key_match AND aead_match
 bytes_total = len(payload) + len(ct) + len(nonce) + len(tag)
 ```
 
-Na versão AES-GCM, para o payload padrão:
+Na versão AES-GCM, com o payload fixo de 34 bytes da bateria oficial:
 
 ```text
-payload: 41 bytes
+payload: 34 bytes
 ciphertext ML-KEM: 768 bytes
 nonce GCM: 12 bytes
 tag GCM: 16 bytes
-total esperado: 837 bytes
+total medido: 830 bytes
 ```
 
 Importante: a chave pública ML-KEM tem 800 bytes, mas **não entra** no
@@ -173,20 +179,22 @@ delivered = key_match AND aead_match AND crc_match
 bytes_total = len(payload) + len(ct) + len(nonce) + len(tag) + 4
 ```
 
-Na versão AES-GCM, para o payload padrão:
+Na versão AES-GCM, com o payload fixo de 34 bytes da bateria oficial:
 
 ```text
-payload: 41 bytes
+payload: 34 bytes
 ciphertext ML-KEM: 768 bytes
 CRC32: 4 bytes
 nonce GCM: 12 bytes
 tag GCM: 16 bytes
-total esperado: 841 bytes
+total medido: 834 bytes
 ```
 
-Os valores consolidados antigos de `511 us`, `13.234 us`, `13.130 us`,
-`73 bytes`, `841 bytes` e `845 bytes` pertencem à bateria pré-AES-GCM. Eles
-servem como histórico até a nova bateria oficial da versão cifrada.
+A bateria oficial AES-GCM de 2026-06-26 mediu 62/830/834 bytes
+(CLASSIC/PQC/PQC_CRC32). Os valores antigos `511 us`, `13.234 us`, `13.130 us`,
+`73 bytes`, `841 bytes` e `845 bytes` pertencem à bateria pré-AES-GCM e servem
+apenas como histórico de tempo (a bateria AES não agrega o tempo total por
+cenário).
 
 O tempo total de `PQC_CRC32` pode aparecer ligeiramente menor que `PQC` em uma
 coleta específica por variação natural de execução. A conclusão correta é:
@@ -205,9 +213,9 @@ HMAC significa Hash-based Message Authentication Code. Ele responde à pergunta:
 HMAC não cifra. A mensagem continua visível. O HMAC gera uma **tag**.
 
 Na versão atual do projeto, `MISSION` usa AES-GCM para autenticar/cifrar a
-mensagem. O HMAC-SHA256 continua relevante no comando técnico
-`PQC_FAULT ... CONFIRM`, onde ele confirma se duas pontas chegaram ao mesmo
-segredo ML-KEM sem revelar esse segredo.
+mensagem. O HMAC-SHA256 continua relevante apenas como conceito técnico e em
+comandos de bancada fora da demo visual. Nos popups de falha da apresentação,
+o caminho correto é payload com `FAULT NONE` versus payload com `FAULT CRC32`.
 
 ```text
 mensagem + chave secreta -> HMAC-SHA256 -> tag de 32 bytes
@@ -261,14 +269,15 @@ apenas fizéssemos `SHA256(chave || mensagem)`.
 
 ### 3.4 Como entra no projeto
 
-Na versão atual, HMAC-SHA256 não é mais a autenticação principal de `MISSION`.
+Na versão atual, HMAC-SHA256 não é mais a autenticação principal de `MISSION`
+nem o mecanismo mostrado nos popups de falha.
 O fluxo de mensagem usa AES-GCM para cifrar e autenticar o payload.
 
-HMAC-SHA256 permanece em dois papéis técnicos:
+HMAC-SHA256 permanece em papéis técnicos fora da superfície visual:
 
 ```text
 KDF: ss_mlkem + contexto -> chave AES-128 da missão
-PQC_FAULT CONFIRM: ss_mlkem + transcript -> tag de confirmação de chave
+PQC_FAULT CONFIRM: ensaio de bancada para confirmar chave derivada
 ```
 
 Assim, a apresentação pode separar corretamente os papéis:
@@ -281,7 +290,8 @@ Isso é importante para a apresentação:
 
 - em `CLASSIC`, a chave já existe de forma didática;
 - em `PQC`, a chave nasce da sessão ML-KEM;
-- nos dois casos, a mensagem é autenticada por HMAC-SHA256.
+- nos dois casos, a mensagem é cifrada e autenticada por AES-128-GCM; o
+  popup de falha usa payload com `NONE` ou `CRC32`.
 
 ## 4. SHA-256 em detalhe suficiente para a apresentação
 
@@ -701,6 +711,10 @@ Para a apresentação, não é necessário explicar a prova formal. Basta dizer:
 
 ## 8. Confirmação de chave com HMAC
 
+Esta seção é uma referência técnica de bancada. Ela não descreve mais o popup
+de falha da apresentação, que foi simplificado para demonstrar CRC32 sobre
+payload real ou fixo.
+
 ### 8.1 Por que ela existe no projeto
 
 Se `Encaps` e `Decaps` chegam a segredos diferentes, a sessão não deve ser
@@ -951,39 +965,39 @@ No firmware:
 bytes_total = bytes_ciphertext + bytes_mlkem + bytes_nonce + bytes_gcm_tag
 ```
 
-Para `CLASSIC`:
+Para `CLASSIC` (bateria oficial, payload 34 B):
 
 ```text
-bytes_payload = 41
-bytes_ciphertext = 41
+bytes_payload = 34
+bytes_ciphertext = 34
 bytes_nonce = 12
 bytes_gcm_tag = 16
 bytes_checksum = 0
-bytes_total = 69
+bytes_total = 62
 ```
 
 Para `PQC`:
 
 ```text
-bytes_payload = 41
-bytes_ciphertext = 41
+bytes_payload = 34
+bytes_ciphertext = 34
 bytes_mlkem = 768
 bytes_nonce = 12
 bytes_gcm_tag = 16
 bytes_checksum = 0
-bytes_total = 837
+bytes_total = 830
 ```
 
 Para `PQC_CRC32`:
 
 ```text
-bytes_payload = 41
-bytes_ciphertext = 45     # payload + CRC32 cifrados
+bytes_payload = 34
+bytes_ciphertext = 38     # payload + CRC32 cifrados
 bytes_mlkem = 768
 bytes_nonce = 12
 bytes_gcm_tag = 16
 bytes_checksum = 4
-bytes_total = 841
+bytes_total = 834
 ```
 
 ### 12.3 Heap/RAM
@@ -1099,11 +1113,14 @@ Use:
 O projeto usa quatro blocos principais:
 
 ```text
-HMAC-SHA256  -> autenticação clássica da mensagem
+AES-128-GCM  -> cifra e autentica a mensagem (clássica e PQC)
 ML-KEM-512   -> estabelecimento de segredo pós-quântico
 CRC32        -> detecção de corrupção acidental de payload
 Bit-flip     -> simulação manual de falha transitória
 ```
+
+O HMAC-SHA256 entra apenas como mecanismo de apoio técnico fora da superfície
+visual, não como autenticação da mensagem nem como processo do popup de falha.
 
 A contribuição didática é mostrar que esses blocos têm papéis e custos
 diferentes. Em hardware limitado, essa diferença vira decisão de arquitetura:

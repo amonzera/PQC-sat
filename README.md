@@ -267,9 +267,8 @@ discreto `PAUSAR`/`PLAY` para o apresentador parar em `KEYGEN`, `ENCAP`, `KDF`,
 final da animação, a mesma janela passa a exibir as métricas detalhadas. Há um
 popup independente por cenário (`CLASSIC`, `PQC`, `PQC+CRC`): o apresentador
 pode arrastar os cartões pelo topo, compará-los lado a lado e fechar cada um
-apenas pelo `X`. Quando dois ou mais cenários estão abertos, o dashboard mostra
-um comparador automático com tempo, bytes e composição do pacote (`payload`,
-ciphertext `ML-KEM`, nonce, tag `GCM` e `CRC32`).
+apenas pelo `X`, observando em cada cartão tempo, bytes e composição do pacote
+(`payload`, ciphertext `ML-KEM`, nonce, tag `GCM` e `CRC32`).
 Respostas `MISSION` e `PQC_*` entram no JSON como métricas estruturadas,
 incluindo tempos, bytes, KAT, `key_match`, `key_confirmed`, `tag_match`,
 tamanhos e CRCs curtos, sem exportar segredos completos.

@@ -15,7 +15,7 @@ representa um CubeSat completo.
 
 **Resposta curta:** O projeto mostra que migrar para criptografia
 pós-quântica em hardware limitado tem custo real. Na Wisdom/ESP32, uma
-mensagem clássica autenticada com HMAC-SHA256 levou em média 511 us e 73 bytes.
+mensagem clássica cifrada/autenticada com AES-GCM levou em média 511 us e 73 bytes.
 Quando usamos ML-KEM-512 no fluxo PQC, a entrega foi para 13.234 us e 841
 bytes. Com PQC mais CRC32, ficou em 13.130 us e 845 bytes. A parte de bit-flip
 mostra que, sem guardião, 600/600 corrupções passaram silenciosamente; com
@@ -181,12 +181,13 @@ Depende do sentido de segurança. Ele não aumenta segurança contra um atacante
 que consegue modificar mensagem e recomputar CRC. Mas aumenta robustez contra
 corrupção acidental, porque transforma falha silenciosa em erro detectado.
 
-### Por que usar CRC32 se HMAC já detecta alteração?
+### Por que usar CRC32 se AES-GCM já autentica a mensagem?
 
-Porque eles respondem a perguntas diferentes no roteiro. HMAC é autenticação
-criptográfica. CRC32 é um guardião simples e visual para mostrar corrupção de
-payload por bit-flip. A demonstração A/B fica didática: sem CRC32 há falha
-silenciosa; com CRC32 há detecção.
+Porque eles respondem a perguntas diferentes no roteiro. AES-GCM autentica o
+ciphertext e protege a entrega criptográfica. CRC32 é um guardião simples e
+visual colocado no payload para demonstrar corrupção acidental por bit-flip. A
+demonstração A/B fica didática: sem CRC32 há falha silenciosa; com CRC32 há
+detecção.
 
 ## 4. Perguntas sobre radiação e bit-flips
 
@@ -208,29 +209,26 @@ pode alterar uma mensagem, chave, ciphertext ou dado de sensor.
 
 ### Como o projeto detecta bit-flip?
 
-Depende do cenário. No payload com CRC32, o CRC antes e depois não bate, então
-o resultado vira `DETECTED_GUARD`. No fluxo ML-KEM com confirmação, se o
-ciphertext for corrompido e os segredos divergirem, a confirmação HMAC-SHA256
-transforma isso em `PROTOCOL_REJECT`.
+Na demonstração visual, o bit-flip é aplicado ao payload. Sem CRC32, a
+alteração é classificada como `SILENT`. Com CRC32, o CRC antes e depois não
+bate, então o resultado vira `DETECTED_GUARD`.
 
 ### ML-KEM detecta automaticamente todo ciphertext corrompido?
 
-Não é correto dizer isso. O que o projeto mostra é que a decapsulação pode
-gerar um segredo diferente. O harness compara os segredos e identifica
-`KEY_MISMATCH`. Quando adicionamos confirmação de chave com HMAC-SHA256, a
-divergência vira `PROTOCOL_REJECT`.
+Não é correto dizer isso. ML-KEM é usado para estabelecer segredo. A demo
+visual de falha não depende de uma detecção automática da decapsulação; ela
+mostra corrupção de payload com e sem CRC32.
 
 ### O que é `KEY_MISMATCH`?
 
-É quando as duas pontas não chegaram ao mesmo segredo compartilhado. No
-projeto, isso aparece quando corrompemos o ciphertext ML-KEM e comparamos os
-segredos derivados.
+É um resultado técnico de bancada quando duas pontas não chegam ao mesmo
+segredo compartilhado. Ele não faz parte da demo visual principal.
 
 ### O que é `PROTOCOL_REJECT`?
 
-É quando o protocolo rejeita a sessão porque a confirmação autenticada falhou.
-No projeto, isso ocorre no `PQC_FAULT ... CONFIRM`, que usa HMAC-SHA256 para
-confirmar se a chave derivada bate.
+É um resultado técnico de bancada para rejeição de protocolo. Ele não faz parte
+da demo visual principal, que foi simplificada para `SILENT` versus
+`DETECTED_GUARD` com CRC32.
 
 ### O que é falha silenciosa?
 
@@ -290,7 +288,7 @@ apresentação é não usar replay para envio ao vivo.
 
 Na faixa superior aparecem CPU e RAM. CPU mostra frequência e porcentagem
 ativa em uma janela móvel. RAM mostra consumo/total e memória livre. No popup
-de mensagem aparecem tempo, bytes, heap, fases ML-KEM/HMAC/CRC e validações.
+de mensagem aparecem tempo, bytes, heap, fases ML-KEM/AES-GCM/CRC e validações.
 
 ### Por que não aparece disco como métrica central?
 
@@ -736,13 +734,13 @@ limitado de 80 MHz.
 
 `kat=pass`, com `ss_crc32=0xD9DA8D6C`.
 
-### Qual foi o resultado do `PQC_FAULT 0 0x01 CONFIRM`?
+### Qual foi o resultado da falha sem CRC32?
 
-`PROTOCOL_REJECT`, com `key_match=0` e confirmação `HMAC-SHA256`.
+`SILENT`: o bit do payload mudou, mas a alteração passou sem bloqueio.
 
-### Qual foi o resultado do `PQC_FAULT 0 0x01 NONE`?
+### Qual foi o resultado da falha com CRC32?
 
-`KEY_MISMATCH`, com `key_match=0`.
+`DETECTED_GUARD`: o CRC recalculado divergiu do CRC de referência.
 
 ### Qual etapa foi mais cara no benchmark ML-KEM?
 
@@ -803,9 +801,10 @@ substitui watts ou joules.
 
 ### O que vocês adicionariam para ficar mais completo?
 
-ECDH P-256 + HMAC como baseline clássico assimétrico, AES-GCM para
-confidencialidade, payloads maiores, múltiplas placas, bursts de bit-flip,
-medição elétrica e testes de side-channel.
+ECDH P-256 + HMAC como baseline clássico assimétrico, payloads maiores,
+múltiplas placas, bursts de bit-flip, medição elétrica e testes de
+side-channel. (AES-GCM para confidencialidade já foi implementado em
+2026-06-25.)
 
 ### Como transformar isso em artigo ou relatório mais forte?
 
@@ -868,7 +867,7 @@ revelar o resultado no dashboard.
 | Antes do primeiro envio | O que vai crescer mais quando sairmos de `CLASSIC` para `PQC`: CPU, bytes ou RAM? | Tempo e bytes cresceram muito; heap ficou estável na coleta. |
 | Depois de `PQC` | Por que uma mensagem pequena virou um pacote muito maior? | O pacote passou a carregar ciphertext ML-KEM de 768 bytes, nonce e tag GCM. |
 | Antes de `PQC+CRC` | CRC32 é criptografia ou detecção de erro? | Detecção de erro acidental; não autenticação contra atacante. |
-| Ao mostrar o comparador | Qual pedaço domina os bytes em `PQC`: payload, AES-GCM, ML-KEM ou CRC? | ML-KEM domina por causa do ciphertext. |
+| Ao comparar os popups | Qual pedaço domina os bytes em `PQC`: payload, AES-GCM, ML-KEM ou CRC? | ML-KEM domina por causa do ciphertext. |
 | Antes de `FALHA` | Se um bit mudar e ninguém conferir, o sistema percebe? | Não necessariamente; pode virar falha silenciosa. |
 | Depois de `PQC+CRC -> FALHA` | O que mudou entre falha silenciosa e falha detectada? | O guardião CRC32 tornou a corrupção observável. |
 | Antes de `RESULTADOS` | O que vocês esperam que tenha ficado estável na bateria longa? | A RAM/heap ficou estável; tempo e bytes foram o impacto forte. |

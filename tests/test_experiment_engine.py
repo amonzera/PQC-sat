@@ -455,15 +455,19 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(panel.command_history[-1]["cmd"], "PQC_KAT")
         self.assertEqual(panel.command_history[-1]["status"], "QUEUED")
 
-    def test_dashboard_help_contains_advanced_firmware_commands(self):
+    def test_help_opens_terminal_for_advanced_commands(self):
         panel = dashboard.DashboardPanel()
 
         panel._execute_command("HELP")
-        rendered = "\n".join(panel._console_help_lines())
 
+        # HELP abre o terminal textual; os comandos avançados continuam
+        # digitáveis ali (a lista completa vive no console serial e em
+        # hardware_command_reference.md).
         self.assertTrue(panel.help_visible)
-        self.assertIn("PQC_INFO", rendered)
-        self.assertIn("I2C_SCAN", rendered)
+        self.assertTrue(panel.terminal_visible)
+        self.assertTrue(panel.input_active)
+        self.assertIn("PQC_INFO", dashboard.FIRMWARE_COMMAND_NAMES)
+        self.assertIn("I2C_SCAN", dashboard.FIRMWARE_COMMAND_NAMES)
 
     def test_terminal_toggle_button_removed_but_command_still_works(self):
         old_size = (dashboard.WIDTH, dashboard.HEIGHT)
@@ -762,6 +766,24 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertIn("potenciômetro", panel.fault_flow_animation["steps"][1]["explain"])
         self.assertTrue(any(command.startswith("FAULT NONE ") for command in fake.sent))
 
+    def test_crc_fault_button_uses_payload_crc_not_pqc_fault(self):
+        fake = FakeSerialClient()
+        fake.responses["ANALOG POT"] = {"pot": "2048"}
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        panel.serial_connected = True
+        panel._execute_command("SET_PRESET_PQC_CRC32")
+        fake.sent.clear()
+
+        panel._execute_command("INJECT_FAULT")
+
+        self.assertTrue(any(command.startswith("FAULT CRC32 ") for command in fake.sent))
+        self.assertFalse(any(command.startswith("PQC_FAULT") for command in fake.sent))
+        self.assertEqual(panel.fault_overlay["guard"], "CRC32")
+        self.assertEqual(
+            [step["label"] for step in panel.fault_flow_animation["steps"]],
+            ["PAYLOAD", "BIT-FLIP", "CRC32", "VERIFICA", "RESULTADO"],
+        )
+
     def test_mission_popup_persists_until_user_closes_it(self):
         panel = dashboard.DashboardPanel()
         panel._apply_hardware_response(
@@ -881,7 +903,6 @@ class DashboardCommandTests(unittest.TestCase):
             satellite = dashboard.Satellite(earth)
             panel.draw(surface, 0.5, satellite)
             self.assertEqual(set(panel.mission_overlay_rects), {"CLASSIC", "PQC", "PQC_CRC32"})
-            self.assertIsNone(panel.mission_comparison_rect)
 
             panel._bring_mission_overlay_to_front("PQC")
             panel.draw(surface, 0.55, satellite)
@@ -1059,6 +1080,17 @@ class DashboardCommandTests(unittest.TestCase):
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
 
+    def test_results_overlay_keeps_short_core_bibliography(self):
+        rendered = " ".join(f"{name} {detail}" for name, detail in dashboard.RESULTS_REFERENCES)
+        motivation = " ".join(f"{name} {detail}" for name, detail in dashboard.MOTIVATION_REFERENCES)
+
+        self.assertLessEqual(len(dashboard.RESULTS_REFERENCES), 4)
+        self.assertLessEqual(len(dashboard.MOTIVATION_REFERENCES), 3)
+        for expected in ("FIPS 203", "FIPS 197", "800-38D", "Koopman"):
+            self.assertIn(expected, rendered)
+        for expected in ("NIST PQC", "NASA SmallSat", "Mikaelian"):
+            self.assertIn(expected, motivation)
+
     def test_onboarding_draws_all_slides_in_projector_target_resolutions(self):
         old_size = (dashboard.WIDTH, dashboard.HEIGHT)
         try:
@@ -1148,7 +1180,7 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(sample["pqc"]["keygen_avg_us"], 10101)
         self.assertNotIn("shared_secret", json.dumps(sample))
 
-    def test_pqc_ciphertext_fault_exports_key_confirmation_result(self):
+    def test_pqc_ciphertext_fault_is_recorded_without_presentation_popup(self):
         panel = dashboard.DashboardPanel()
         panel.serial_connected = True
 
@@ -1189,13 +1221,8 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(sample["pqc"]["ct_crc_after"], "0x22222222")
         self.assertEqual(sample["pqc"]["confirm_us"], 130)
         self.assertNotIn("pqc_ss", json.dumps(sample))
-        self.assertTrue(panel.fault_overlay_visible)
-        self.assertEqual(panel.fault_overlay["target"], "CIPHERTEXT")
-        self.assertEqual(panel.fault_overlay["result"], "PROTOCOL_REJECT")
-        self.assertEqual(
-            [step["label"] for step in panel.fault_flow_animation["steps"]],
-            ["CIPHERTEXT", "BIT-FLIP", "DECAP", "CONFIRMA", "RESULTADO"],
-        )
+        self.assertFalse(panel.fault_overlay_visible)
+        self.assertIsNone(panel.fault_flow_animation)
 
     def test_mission_command_requires_online_satellite(self):
         panel = dashboard.DashboardPanel()

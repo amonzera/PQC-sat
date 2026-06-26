@@ -136,9 +136,11 @@ Campos retornados:
 | `rng_us`, `kdf_us`, `encrypt_us`, `decrypt_us`, `crc_us` | Custo de RNG, derivação, cifragem, decifragem/verificação e checksum. |
 | `heap`, `min_heap`, `cpu_mhz`, `profile` | Métricas do ESP32 no cenário. |
 
-`PQC_FAULT ... CONFIRM` continua usando HMAC-SHA256 como confirmação técnica
-de chave derivada para demonstrar `PROTOCOL_REJECT`. Isso é separado do fluxo
-`MISSION`, onde a autenticação da mensagem vem do AES-GCM.
+`PQC_FAULT ... CONFIRM` permanece apenas como comando técnico de bancada para
+auditar sessões ML-KEM antigas do projeto. Ele não abre popup no dashboard e
+não faz parte da demonstração visual de falha. Na apresentação, a falha correta
+é `FAULT NONE|CRC32`, isto é: bit-flip em payload, sem checksum versus com
+CRC32. No fluxo `MISSION`, a autenticação da mensagem vem do AES-GCM.
 
 ## Comandos PQC de bancada
 
@@ -155,7 +157,7 @@ em build C-only para `MLK_CONFIG_PARAMETER_SET=512`.
 | `PQC_KEYGEN` | `PQC_KEYGEN` | Gera par ML-KEM-512, armazena na RAM e retorna tempo/heap/digest curto da chave pública. |
 | `PQC_ENCAP` | `PQC_ENCAP` | Encapsula usando chave pública armazenada e retorna tempo, digest curto do ciphertext e digest curto do segredo. |
 | `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e retorna `key_match` sem imprimir segredo completo. |
-| `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Aplica bit-flip em ciphertext ML-KEM real e testa confirmação HMAC-SHA256 da chave derivada. |
+| `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Comando técnico de bancada para bit-flip em ciphertext ML-KEM; não é usado nos popups da apresentação. |
 | `PQC_BENCH` | `PQC_BENCH n` | Executa `n` rodadas keygen/encap/decap; `n` aceito de 1 a 100. |
 | `STRESS` | `STRESS PQC_LOOP n CONFIRM` | Executa ML-KEM em loop extremo, de 1 a 500 rodadas, para fechamento visual de limite. Exige `CONFIRM`. |
 
@@ -172,7 +174,8 @@ Medição registrada em 2026-06-17:
 | `OBC-1U-LIMITED` 80 MHz | `PQC_KAT` | `kat=pass`, `key_match=1`, `ss_crc32=0xD9DA8D6C`, `elapsed_us=39270` |
 | `OBC-1U-LIMITED` 80 MHz | `PQC_BENCH 5` | `keygen_avg_us=10101`, `encap_avg_us=11778`, `decap_avg_us=15214`, `elapsed_us=187371`, `heap=202444`, `min_heap=198456` |
 
-Validação pós-upload registrada em 2026-06-18:
+Validação pós-upload registrada em 2026-06-18. As linhas `PQC_FAULT` abaixo
+são registro técnico histórico; a demo visual atual usa `FAULT NONE|CRC32`.
 
 | Perfil | Comando | Resultado |
 |---|---|---|
@@ -197,7 +200,7 @@ Validação pós-upload registrada em 2026-06-18:
 | `PQC_KEYGEN` | `PQC_KEYGEN` | Gera par ML-KEM-512 real e mede tempo/heap. |
 | `PQC_ENCAP` | `PQC_ENCAP` | Encapsula para a chave pública armazenada. |
 | `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e compara segredo compartilhado. |
-| `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Gera sessão ML-KEM, corrompe um byte do ciphertext, decapsula e reporta `KEY_MISMATCH`, `PROTOCOL_REJECT` ou `OK`, com CRCs curtos e tempos. |
+| `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Comando avançado de bancada para corromper ciphertext ML-KEM. Mantido fora da demo visual; use `FAULT NONE|CRC32` para o popup didático. |
 | `PQC_BENCH` | `PQC_BENCH n` | Executa benchmark de bancada para 1 a 100 rodadas. |
 | `STRESS` | `STRESS PQC_LOOP n CONFIRM` | Executa carga extrema de ML-KEM para demonstrar limite operacional; use `n=500` no fechamento visual. |
 | `MISSION` | `MISSION CLASSIC\|PQC\|PQC_CRC32 [payload_hex]` | Entrega mensagem curta e mede custo/bytes/segurança por cenário. |

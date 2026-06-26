@@ -16,9 +16,9 @@ demonstração principal envia uma mensagem curta em três cenários:
 
 A parte de bit-flip continua como apoio visual para consistência: sem
 guardião, a corrupção vira falha silenciosa; com CRC32, a mesma alteração é
-detectada. Quando o bit-flip atinge ciphertext ML-KEM, a decapsulação não
-"detecta" sozinha a falha: o harness observa `KEY_MISMATCH`, e a confirmação
-HMAC-SHA256 transforma divergência de chave em `PROTOCOL_REJECT`.
+detectada. Na demonstração ao vivo, o popup de falha sempre modela corrupção
+de payload, porque esse é o caso didático que queremos comparar visualmente:
+`FAULT NONE` contra `FAULT CRC32`.
 
 Na revisão final, a Wisdom também passou a participar como "satélite vivo":
 antes de cada envio, o dashboard pode ler sensores reais da placa, montar um
@@ -33,8 +33,8 @@ bytes da missão e executa a criptografia sobre esses bytes.
    AES-128-GCM, CRC32 e bit-flip manual.
 3. **Demo visual**: enviar `CLASSIC`, `PQC` e `PQC+CRC`; depois mostrar
    falha silenciosa versus detecção por CRC32.
-4. **Resultados medidos**: tempos, bytes, heap, benchmark PQC, falha ML-KEM
-   com confirmação e campanha de aceite.
+4. **Resultados medidos**: tempos, bytes, heap, benchmark PQC, falhas de
+   payload com/sem CRC32 e campanha de aceite.
 5. **Conclusão e limites**: PQC aumenta custo, checksum soma integridade, e
    energia real exigiria medidor externo.
 
@@ -57,8 +57,6 @@ apresentar números oficiais da versão cifrada.
 | Falhas sem CRC32 | 600/600 `SILENT` |
 | Falhas com CRC32 | 600/600 `DETECTED_GUARD` |
 | `PQC_KAT` | `kat=pass`, `ss_crc32=0xD9DA8D6C` |
-| `PQC_FAULT CONFIRM` | `PROTOCOL_REJECT`, `confirmation=HMAC-SHA256` |
-| `PQC_FAULT NONE` | `KEY_MISMATCH` |
 
 | Perfil | `keygen_avg_us` | `encap_avg_us` | `decap_avg_us` |
 |---|---:|---:|---:|
@@ -150,7 +148,7 @@ O painel de botões do dashboard agora é puramente manual e focado no roteiro i
 Cada cenário de mensagem abre seu próprio popup de métricas. Durante a comparação,
 mantenha `CLASSIC`, `PQC` e `PQC+CRC` abertos, arraste os cartões pelo topo e
 posicione-os lado a lado; feche cada um apenas pelo `X` depois de comparar tempo,
-bytes, heap e etapas ML-KEM/HMAC/CRC.
+bytes, heap e etapas ML-KEM/AES-GCM/CRC.
 
 O toggle `Payload vivo` não é um comando de bancada: ele apenas decide se o
 dashboard monta `MISSION ... payload_hex` a partir dos sensores da Wisdom ou
@@ -169,7 +167,7 @@ Conduza a turma por três ideias:
 
 - **restrição de hardware**: CPU, RAM, tráfego e energia são recursos críticos
   em sistemas inspirados em CubeSat;
-- **mudança criptográfica**: HMAC simétrico é barato, mas acordo de segredo
+- **mudança criptográfica**: AES-GCM simétrico é barato, mas acordo de segredo
   pós-quântico exige operações mais pesadas;
 - **integridade operacional**: bit-flip sem guardião pode virar falha
   silenciosa; com CRC32, a corrupção do payload fica visível.
@@ -196,23 +194,13 @@ Use apenas a placa conectada. Não use `--simulated` para a apresentação final
 5. Clique `PQC+CRC` -> `ENVIAR MSG`.
    Fala: “Agora somamos um guardião simples de integridade no payload. O custo
    em bytes e tempo aparece junto com a validação.”
-   Arraste os três popups lado a lado e use o comparador ao vivo para destacar
+   Arraste os três popups lado a lado e compare os cartões para destacar
    payload, ciphertext ML-KEM, nonce, tag GCM e CRC32.
 6. Gire o potenciômetro e clique `PQC` -> `FALHA`.
    Fala: “A placa escolheu fisicamente o bit da falha. Sem guardião no payload,
    uma mutação pode passar silenciosamente.”
 7. Gire novamente e clique `PQC+CRC` -> `FALHA`.
    Fala: “Com CRC32, o mesmo tipo de corrupção vira evento detectado.”
-
-Opcional para público mais técnico, se houver tempo:
-
-```text
-PQC_FAULT 0 0x01 CONFIRM
-```
-
-Use esse comando apenas no terminal textual para mostrar que, quando o
-ciphertext ML-KEM é corrompido, a detecção operacional vem da confirmação de
-chave (`PROTOCOL_REJECT`), não de uma “mágica” automática da decapsulação.
 
 ### 3. Resultados finais comparados (4-6 min)
 
@@ -239,7 +227,7 @@ Clique `RESULTADOS` e feche a narrativa:
 | 2-5 min | Contexto: COTS, CubeSat, falhas transitórias e ameaça quântica |
 | 5-7 min | Modelo mental: AES-GCM cifra/autentica, ML-KEM estabelece segredo, CRC32 detecta corrupção |
 | 7-8 min | Pergunta para a turma: prever se cresce mais CPU, bytes ou RAM |
-| 8-12 min | Enviar `CLÁSSICA`, `PQC`, `PQC+CRC` com payload vivo; arrastar popups e usar o comparador |
+| 8-12 min | Enviar `CLÁSSICA`, `PQC`, `PQC+CRC` com payload vivo; arrastar popups e comparar lado a lado |
 | 12-15 min | Girar potenciômetro e demonstrar falha silenciosa vs. detecção (`PQC -> FALHA`, `PQC+CRC -> FALHA`) |
 | 15-18 min | Abrir `RESULTADOS`: custo, segurança e limites com a bateria real |
 | 18-19 min | Fechamento opcional `STRESS PQC 500` no overlay `RESULTADOS`, sem substituir a bateria oficial |

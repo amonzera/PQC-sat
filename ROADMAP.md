@@ -18,9 +18,10 @@ O fluxo de apoio muta um payload, registra eventos e compara `NONE` e `CRC32`
 para explicar falha silenciosa versus erro detectado; quando a placa está
 online, o potenciômetro pode selecionar fisicamente o bit-flip. O backend PQC
 real já está instalado na Wisdom com ML-KEM-512 e medição nos perfis
-`BASELINE` e `OBC-1U-LIMITED`. O firmware também executa bit-flip manual em
-ciphertext ML-KEM e classifica o efeito com comparação de segredos ou
-confirmação HMAC-SHA256 da chave derivada.
+`BASELINE` e `OBC-1U-LIMITED`. O firmware mantém `PQC_FAULT` como comando
+técnico avançado para bancada ML-KEM, mas esse caminho não pertence aos popups
+nem ao roteiro principal. A demonstração visual de falha usa payload com
+`FAULT NONE` versus `FAULT CRC32`.
 
 ## 2. Baseline auditado
 
@@ -178,6 +179,10 @@ projeto sem reconstruir decisões antigas:
   `aead_match`, `decrypt_ok`, `tag_match`, variação de `nonce_crc32`,
   `ciphertext_crc32` e `gcm_tag_crc32`, e grava JSON
   `*_aes_gcm_metrics_*.json` pronto para atualização dos resultados.
+- 2026-06-26: os popups de falha foram realinhados ao objetivo didático da
+  apresentação. O dashboard deixou de abrir visualização para `PQC_FAULT` e
+  removeu o caminho HMAC/confirmacao dos textos de falha; o fluxo visual agora
+  demonstra apenas bit-flip em payload com `NONE` versus `CRC32`.
 - 2026-06-26: bateria pós-runner AES concluída em
   `logs/20260626T044359Z_aes_gcm_metrics_dev-ttyusb0.json`: 324,5 s,
   1.038 registros, 0 falhas, 600 `MISSION runs`, 6 `PQC_BENCH` e 400 testes
@@ -200,6 +205,14 @@ projeto sem reconstruir decisões antigas:
   `nonce_crc32_duplicates=0`. O dashboard agora usa essa coleta na aba
   `RESULTADOS`, mostrando `CLASSIC` com AES-128-GCM, `PQC` com ML-KEM-512 +
   AES-GCM e `PQC_CRC32` com ML-KEM-512 + AES-GCM + CRC32.
+- 2026-06-26: aba `RESULTADOS` recebeu bibliografia curta na própria tela,
+  limitada a referências que sustentam as teses centrais da apresentação:
+  NIST FIPS 203 para ML-KEM, NIST FIPS 197 para AES, NIST SP 800-38D para
+  GCM/GMAC e Koopman & Chakravarty para CRC em redes embarcadas.
+- 2026-06-26: a mesma aba recebeu referências curtas de motivação do problema:
+  NIST PQC Project para ameaça quântica e migração, NASA SmallSat SoA para
+  contexto de satélites pequenos e Mikaelian 2009 para radiação/charging como
+  risco físico à eletrônica espacial.
 - 2026-06-25: camada "satélite vivo" adicionada sem alterar firmware. O
   dashboard ganhou toggle `Payload vivo`, coleta curta de `SENSOR_READ
   TEMP_HUM`, `SENSOR_READ ACCEL`, `SENSOR_READ APDS`, `ANALOG POT` e
@@ -234,6 +247,26 @@ projeto sem reconstruir decisões antigas:
   DECAP (rx) → VERIFICA (rx) → RESULTADO`. As microexplicações foram marcadas
   com `(tx)`/`(rx)` para deixar claro quando cada operação ocorre no emissor ou
   no receptor.
+- 2026-06-26: auditoria de dívida técnica em teoria + código. Correções de
+  teoria nos popups e docs: a decapsulação ML-KEM **re-cifra** (FO), não
+  "re-encapsula", e **não acusa erro** em ciphertext alterado (devolve um
+  segredo de rejeição); o CRC-32 detecta "todo erro de 1 bit e a maioria das
+  rajadas" (antes "até 1 bit"); removida a linguagem obsoleta de HMAC como
+  autenticação da mensagem (agora AES-GCM; HMAC só confirma a chave ML-KEM no
+  caminho de falha); adicionada a nuance de Grover (AES-128 ~64 bits). Bug
+  corrigido: `_parse_u8_token` relançava `ValueError` em entrada não-hex.
+  Remoção de funções não utilizadas, a pedido: o **comparador ao vivo** de
+  mensagens (regressão do commit `1b02a9b`, nunca era chamado) e o **overlay de
+  HELP/terminal em aba lateral** (`_console_help_lines`, `help_topic`,
+  `help_scroll` e handlers de scroll — não renderizavam); o terminal de texto
+  para digitar comandos avançados continua funcional. Outros símbolos mortos
+  removidos (`_draw_event_timeline`, `_result_color`, `_history_command_label`,
+  `_draw_metric_pair`, `_mission_tile_values`, `HELP_HINT_LINES`). Bytes
+  canônicos padronizados para a bateria oficial AES-GCM
+  (`logs/20260626T051412Z`): 62/830/834 (CLASSIC/PQC/PQC_CRC32, payload 34 B);
+  removida a estimativa inventada 69/837/841; os números 73/841/845 e os tempos
+  511/13.234/13.130 us ficam como histórico pré-AES. `dashboard.py` reduziu
+  ~211 linhas; 84/84 testes passam.
 
 O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar
