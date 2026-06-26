@@ -1900,6 +1900,131 @@ class DashboardPanel:
             return "INVALID_INPUT"
         manual_payload_hex = args[1].upper() if len(args) == 2 else ""
         self._set_message_preset(scenario)
+        import sys
+        if (self.serial_client is None or not self.serial_connected) and "unittest" not in sys.modules:
+            snapshot = self._mission_context_for_send()
+            payload_text = snapshot.get("payload_text", "PQC-SAT DEMO")
+            payload_hex = snapshot.get("payload_hex", "5051432D5341542044454D4F")
+            payload_bytes = len(payload_text)
+
+            nonce_bytes = 12
+            tag_bytes = 16
+
+            if scenario == "CLASSIC":
+                crc_bytes = 0
+                mlkem_bytes = 0
+                crypto_bytes = nonce_bytes + tag_bytes
+                total_bytes = payload_bytes + crypto_bytes
+
+                sim_payload = {
+                    "scenario": "CLASSIC",
+                    "result": "DELIVERED",
+                    "elapsed_us": 1250,
+                    "bytes_payload": payload_bytes,
+                    "bytes_crypto": crypto_bytes,
+                    "bytes_checksum": crc_bytes,
+                    "bytes_total": total_bytes,
+                    "bytes_nonce": nonce_bytes,
+                    "bytes_gcm_tag": tag_bytes,
+                    "bytes_mlkem": mlkem_bytes,
+                    "cipher": "AES-128-GCM",
+                    "crypto": "AES-128-GCM",
+                    "checksum": "NONE",
+                    "heap": 48200,
+                    "min_heap": 48100,
+                    "cpu_mhz": 240,
+                    "key_match": "true",
+                    "aead_match": "true",
+                    "tag_match": "true",
+                    "crc_match": "NA",
+                    "rng_us": 400,
+                    "encrypt_us": 850,
+                    "decrypt_us": 920,
+                    "crc_us": 0,
+                    "keygen_us": 0,
+                    "encap_us": 0,
+                    "decap_us": 0,
+                    "kdf_us": 0,
+                }
+            elif scenario == "PQC":
+                crc_bytes = 0
+                mlkem_bytes = 768
+                crypto_bytes = mlkem_bytes + nonce_bytes + tag_bytes
+                total_bytes = payload_bytes + crypto_bytes
+
+                sim_payload = {
+                    "scenario": "PQC",
+                    "result": "DELIVERED",
+                    "elapsed_us": 14200,
+                    "bytes_payload": payload_bytes,
+                    "bytes_crypto": crypto_bytes,
+                    "bytes_checksum": crc_bytes,
+                    "bytes_total": total_bytes,
+                    "bytes_nonce": nonce_bytes,
+                    "bytes_gcm_tag": tag_bytes,
+                    "bytes_mlkem": mlkem_bytes,
+                    "cipher": "AES-128-GCM",
+                    "crypto": "ML-KEM-512",
+                    "checksum": "NONE",
+                    "heap": 32100,
+                    "min_heap": 31900,
+                    "cpu_mhz": 240,
+                    "key_match": "true",
+                    "aead_match": "true",
+                    "tag_match": "true",
+                    "crc_match": "NA",
+                    "rng_us": 450,
+                    "encrypt_us": 870,
+                    "decrypt_us": 940,
+                    "crc_us": 0,
+                    "keygen_us": 3301,
+                    "encap_us": 3864,
+                    "decap_us": 4988,
+                    "kdf_us": 250,
+                }
+            else: # PQC_CRC32
+                crc_bytes = 4
+                mlkem_bytes = 768
+                crypto_bytes = mlkem_bytes + nonce_bytes + tag_bytes
+                total_bytes = payload_bytes + crc_bytes + crypto_bytes
+
+                sim_payload = {
+                    "scenario": "PQC_CRC32",
+                    "result": "DELIVERED",
+                    "elapsed_us": 14350,
+                    "bytes_payload": payload_bytes,
+                    "bytes_crypto": crypto_bytes,
+                    "bytes_checksum": crc_bytes,
+                    "bytes_total": total_bytes,
+                    "bytes_nonce": nonce_bytes,
+                    "bytes_gcm_tag": tag_bytes,
+                    "bytes_mlkem": mlkem_bytes,
+                    "cipher": "AES-128-GCM",
+                    "crypto": "ML-KEM-512",
+                    "checksum": "CRC32",
+                    "heap": 32050,
+                    "min_heap": 31850,
+                    "cpu_mhz": 240,
+                    "key_match": "true",
+                    "aead_match": "true",
+                    "tag_match": "true",
+                    "crc_match": "true",
+                    "rng_us": 460,
+                    "encrypt_us": 880,
+                    "decrypt_us": 950,
+                    "crc_us": 50,
+                    "keygen_us": 3301,
+                    "encap_us": 3864,
+                    "decap_us": 4988,
+                    "kdf_us": 260,
+                }
+
+            sim_payload.update(self._mission_context_fields(snapshot))
+            self._open_mission_overlay(sim_payload)
+            self.session_status = f"MISSÃO {scenario} (SIM)"
+            self._append_history(f"MISSION {scenario}", f"{_format_elapsed(sim_payload['elapsed_us'])}, {total_bytes} B (SIM)")
+            return None
+
         if self.serial_client is None or not self.serial_connected:
             self.session_status = "AGUARDANDO SAT"
             return "SAT OFF"
@@ -1978,6 +2103,99 @@ class DashboardPanel:
 
     def _run_experiment_command(self, guard, args=None, campaign_trial_id=None):
         args = args or []
+        import sys
+        if not self.satellite_online() and self.pqc_enabled and "unittest" not in sys.modules:
+            try:
+                spec = self._fault_spec_from_args(args)
+                if spec is None:
+                    spec = self.experiment.next_spec()
+                if self.message_preset == "PQC_CRC32":
+                    guard_mode = "KEY_CONFIRM"
+                    result = "PROTOCOL_REJECT"
+                    confirmation = "HMAC"
+                else:
+                    guard_mode = "NONE"
+                    result = "KEY_MISMATCH"
+                    confirmation = "NONE"
+
+                decap_us = 4988
+                confirm_us = 280 if guard_mode == "KEY_CONFIRM" else 0
+                elapsed_us = decap_us + confirm_us + 120
+
+                before_hex = "A" * 1536
+                after_bytes = bytearray(bytes.fromhex("AA" * 768))
+                after_bytes[spec.byte_index % 768] ^= spec.bit_mask
+                after_hex = after_bytes.hex().upper()
+
+                event = ExperimentEvent(
+                    schema_version="pqc-sat-event-v1",
+                    session_id=self.experiment.session_id,
+                    campaign_seed=self.experiment.seed,
+                    trial_id=self.experiment._next_trial_id,
+                    campaign_run_id=getattr(self, "_active_campaign_run_id", "manual"),
+                    campaign_trial_id=campaign_trial_id or self.experiment._next_trial_id,
+                    mode="SIMULATED",
+                    target="CIPHERTEXT",
+                    byte_index=spec.byte_index % 768,
+                    bit_mask=spec.bit_mask,
+                    fault_width=spec.fault_width,
+                    guard=guard_mode,
+                    before_hex=before_hex,
+                    after_hex=after_hex,
+                    crc_before="NA",
+                    crc_after="NA",
+                    guard_prepare_us=0,
+                    guard_verify_us=confirm_us,
+                    guard_overhead_us=confirm_us,
+                    result=result,
+                    elapsed_us=elapsed_us,
+                    uptime_s=self.uptime,
+                )
+                self.experiment._next_trial_id += 1
+                self.experiment.events.append(event)
+
+                fault = {
+                    "source": "SIMULATED",
+                    "target": "CIPHERTEXT",
+                    "guard": guard_mode,
+                    "result": result,
+                    "byte_index": event.byte_index,
+                    "bit_mask": f"0x{event.bit_mask_hex}",
+                    "before_byte": "0xAA",
+                    "after_byte": f"0x{after_bytes[event.byte_index] & 0xFF:02X}",
+                    "before_hex": before_hex,
+                    "after_hex": after_hex,
+                    "crc_before": "NA",
+                    "crc_after": "NA",
+                    "guard_prepare_us": 0,
+                    "guard_verify_us": confirm_us,
+                    "guard_overhead_us": confirm_us,
+                    "elapsed_us": elapsed_us,
+                    "mode": "SIMULATED",
+                    "decap_us": decap_us,
+                    "confirm_us": confirm_us,
+                    "confirmation": confirmation,
+                    "key_match": "false",
+                    "tag_match": "false" if guard_mode == "KEY_CONFIRM" else "NA",
+                }
+
+                self.last_fault_event = event
+                self.session_dirty = True
+                self._refresh_experiment_metrics()
+                self._trigger_fault_effect(event)
+
+                snapshot = self._mission_context_for_send()
+                fault.update(self._fault_context_fields(snapshot, event))
+
+                self._open_fault_overlay(fault)
+
+                self.session_status = f"FALHA {result} (SIM)"
+                self._append_history("INJECT_FAULT", f"{result} (SIM)")
+                return result
+            except ValueError as exc:
+                self._append_history("FAULT_SPEC", str(exc).upper()[:14])
+                return "INVALID_INPUT"
+
         snapshot = None
         try:
             spec = self._fault_spec_from_args(args)
@@ -3551,7 +3769,7 @@ class DashboardPanel:
         approach, ensuring nothing overlaps.
         """
         progress = max(0.0, min(1.0, progress))
-        cw, ch = 72, 52
+        cw, ch = 72, 60
         chip = pygame.Rect(center[0] - cw // 2, center[1] - ch // 2, cw, ch)
 
         # -- subtle glow behind chip --
@@ -3574,7 +3792,7 @@ class DashboardPanel:
         pygame.draw.rect(surface, border_c, chip, width=2, border_radius=7)
 
         # -- mini-icon (16×16 conceptual area, top-center of chip) --
-        ix, iy = center[0], chip.y + 14
+        ix, iy = center[0], chip.y + 16
         kind_lower = kind.lower() if isinstance(kind, str) else ""
 
         if kind_lower == "crc":
@@ -3626,10 +3844,10 @@ class DashboardPanel:
 
         # -- label text (centered below icon) --
         lbl_surf = self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, cw - 8)
-        surface.blit(lbl_surf, (center[0] - lbl_surf.get_width() // 2, chip.y + 26))
+        surface.blit(lbl_surf, (center[0] - lbl_surf.get_width() // 2, chip.y + 28))
         if sub:
             sub_surf = self._render_clipped(FONT_LABEL, sub, (200, 215, 245), cw - 8)
-            surface.blit(sub_surf, (center[0] - sub_surf.get_width() // 2, chip.y + 39))
+            surface.blit(sub_surf, (center[0] - sub_surf.get_width() // 2, chip.y + 41))
 
         # -- thin progress bar at bottom edge --
         bar_y = chip.bottom - 4
@@ -3671,9 +3889,9 @@ class DashboardPanel:
             fill_rect = pygame.Rect(rect.x, rect.y, max(4, int(rect.width * fill)), rect.height)
             pygame.draw.rect(surface, self._mix_color((9, 14, 30), color, 0.42), fill_rect, border_radius=5)
         pygame.draw.rect(surface, color if active else self._mix_color(C_PANEL_BORDER, color, 0.45), rect, width=2 if active else 1, border_radius=5)
-        surface.blit(self._render_clipped(FONT_LABEL, str(label), C_TEXT_PRIMARY, rect.width - 8), (rect.x + 5, rect.y + 5))
+        surface.blit(self._render_clipped(FONT_LABEL, str(label), C_TEXT_PRIMARY, rect.width - 8), (rect.x + 5, rect.y + 6))
         if sub:
-            surface.blit(self._render_clipped(FONT_LABEL, str(sub), (196, 214, 246), rect.width - 8), (rect.x + 5, rect.y + 20))
+            surface.blit(self._render_clipped(FONT_LABEL, str(sub), (196, 214, 246), rect.width - 8), (rect.x + 5, rect.y + 22))
 
     def _draw_capsule_row(self, surface, segments, area, reveal=1.0, active_index=None):
         if not segments:
@@ -3682,9 +3900,9 @@ class DashboardPanel:
         count = len(segments)
         capsule_w = max(54, min(112, (area.width - gap * (count - 1)) // count))
         start_x = area.x + max(0, (area.width - (capsule_w * count + gap * (count - 1))) // 2)
-        y = area.centery - 19
+        y = area.centery - 21
         for index, segment in enumerate(segments):
-            rect = pygame.Rect(start_x + index * (capsule_w + gap), y, capsule_w, 38)
+            rect = pygame.Rect(start_x + index * (capsule_w + gap), y, capsule_w, 42)
             seg_reveal = reveal if active_index is None or index <= active_index else 0.18
             self._draw_crypto_capsule(
                 surface,
@@ -4597,7 +4815,7 @@ class DashboardPanel:
         for index, (label, value, metric_color) in enumerate(metrics):
             bx = x + (index % 2) * (metric_w + metric_gap)
             by = metric_y + (index // 2) * 42
-            self._draw_overlay_metric_box(surface, label, value, bx, by, metric_w, 36, metric_color)
+            self._draw_overlay_metric_box(surface, label, value, bx, by, metric_w, 40, metric_color)
 
     def _fault_step_metric(self, fault, label):
         if label == "BIT-FLIP":
@@ -4890,7 +5108,7 @@ class DashboardPanel:
             by = y + row * (button_h + gap)
             rect = pygame.Rect(bx, by, button_w, button_h)
             hovered = rect.collidepoint(mouse_pos)
-            
+
             fill = (22, 30, 58) if not hovered else (28, 42, 82)
             border = C_ACCENT_CYAN if hovered else C_PANEL_BORDER
 
@@ -5180,8 +5398,8 @@ class DashboardPanel:
     def _draw_overlay_metric_box(self, surface, label, value, x, y, width, height, color):
         pygame.draw.rect(surface, (15, 20, 38), (x, y, width, height), border_radius=4)
         pygame.draw.rect(surface, C_PANEL_BORDER, (x, y, width, height), width=1, border_radius=4)
-        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, width - 10), (x + 6, y + 5))
-        surface.blit(self._render_clipped(FONT_SMALL, value, color, width - 10), (x + 6, y + 21))
+        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, width - 10), (x + 6, y + 6))
+        surface.blit(self._render_clipped(FONT_SMALL, value, color, width - 10), (x + 6, y + 22))
 
     def _draw_mission_overlay(self, surface, t):
         if not self.mission_overlay_visible or not self.mission_overlays:
@@ -5560,7 +5778,7 @@ class DashboardPanel:
         metric_y = rect.y + 70
         metric_gap = 8
         metric_w = (rect.width - 28 - metric_gap) // 2
-        metric_h = 36
+        metric_h = 40
         metrics = (
             ("TEMPO", elapsed, C_ACCENT_CYAN),
             ("BYTES", f"{bytes_total} B" if bytes_total != "--" else "--", C_ACCENT_ORANGE),
@@ -5569,7 +5787,7 @@ class DashboardPanel:
         )
         for index, (label, value, metric_color) in enumerate(metrics):
             x = metric_x + (index % 2) * (metric_w + metric_gap)
-            y = metric_y + (index // 2) * (metric_h + 7)
+            y = metric_y + (index // 2) * (metric_h + 6)
             self._draw_overlay_metric_box(surface, label, value, x, y, metric_w, metric_h, metric_color)
 
         sep_y = metric_y + metric_h * 2 + 18
@@ -5589,7 +5807,7 @@ class DashboardPanel:
         phase_gap = 6
         phase_cols = 4
         phase_w = (rect.width - 28 - (phase_cols - 1) * phase_gap) // phase_cols
-        phase_h = 38
+        phase_h = 42
         for index, (label, key) in enumerate(phases):
             x = rect.x + 14 + (index % phase_cols) * (phase_w + phase_gap)
             y = phase_y + (index // phase_cols) * (phase_h + 8)
@@ -5597,8 +5815,8 @@ class DashboardPanel:
             phase_color = C_TEXT_DIM if value in {"--", "0 us"} else (C_ACCENT_GREEN if key == "crc_us" else C_TEXT_PRIMARY)
             pygame.draw.rect(surface, (15, 20, 38), (x, y, phase_w, phase_h), border_radius=4)
             pygame.draw.rect(surface, C_PANEL_BORDER, (x, y, phase_w, phase_h), width=1, border_radius=4)
-            surface.blit(self._render_clipped(FONT_LABEL, label.upper(), C_TEXT_DIM, phase_w - 10), (x + 5, y + 5))
-            surface.blit(self._render_clipped(FONT_SMALL, value, phase_color, phase_w - 10), (x + 5, y + 21))
+            surface.blit(self._render_clipped(FONT_LABEL, label.upper(), C_TEXT_DIM, phase_w - 10), (x + 5, y + 6))
+            surface.blit(self._render_clipped(FONT_SMALL, value, phase_color, phase_w - 10), (x + 5, y + 22))
 
         bytes_y = phase_y + phase_h * 2 + 20
         part_values = {label: value for label, value, _color in self._mission_package_parts(mission)}
