@@ -1362,6 +1362,80 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertIsNone(panel.mission_flow_animation)
         self.assertFalse(panel._mission_overlay_is_animating("PQC_CRC32"))
 
+    def test_opening_second_mission_keeps_first_popup_waiting_for_own_confirmation(self):
+        panel = dashboard.DashboardPanel()
+        classic = {
+            "scenario": "CLASSIC",
+            "result": "DELIVERED",
+            "crypto": "CLASSIC",
+            "cipher": "AES-128-GCM",
+            "checksum": "NONE",
+            "payload_len": "41",
+            "bytes_payload": "41",
+            "bytes_nonce": "12",
+            "bytes_gcm_tag": "16",
+            "bytes_crypto": "28",
+            "bytes_checksum": "0",
+            "bytes_total": "69",
+            "rng_us": "5",
+            "encrypt_us": "210",
+            "decrypt_us": "180",
+            "elapsed_us": "520",
+            "heap": "201412",
+        }
+        pqc = {
+            "scenario": "PQC",
+            "result": "DELIVERED",
+            "crypto": "ML-KEM-512",
+            "cipher": "AES-128-GCM",
+            "checksum": "NONE",
+            "payload_len": "41",
+            "bytes_payload": "41",
+            "bytes_mlkem": "768",
+            "bytes_nonce": "12",
+            "bytes_gcm_tag": "16",
+            "bytes_crypto": "796",
+            "bytes_checksum": "0",
+            "bytes_total": "837",
+            "keygen_us": "3600",
+            "encap_us": "3900",
+            "decap_us": "5000",
+            "kdf_us": "40",
+            "encrypt_us": "230",
+            "decrypt_us": "190",
+            "elapsed_us": "13200",
+            "heap": "201412",
+        }
+
+        panel._apply_hardware_response("MISSION CLASSIC", classic)
+        self.assertTrue(panel._mission_overlay_is_animating("CLASSIC"))
+        panel.mission_flow_animations["CLASSIC"]["age"] = dashboard.MISSION_FLOW_ANIMATION_SECONDS
+        panel.mission_flow_animations["CLASSIC"]["awaiting_confirm"] = True
+
+        panel._apply_hardware_response("MISSION PQC", pqc)
+
+        self.assertTrue(panel._mission_overlay_is_animating("CLASSIC"))
+        self.assertTrue(panel._mission_overlay_is_animating("PQC"))
+        self.assertIn("CLASSIC", panel.mission_flow_animations)
+        self.assertIn("PQC", panel.mission_flow_animations)
+
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            dashboard.WIDTH, dashboard.HEIGHT = 1366, 768
+            surface = pygame.Surface((dashboard.WIDTH, dashboard.HEIGHT), pygame.SRCALPHA)
+            earth = dashboard.Earth()
+            satellite = dashboard.Satellite(earth)
+            panel.draw(surface, 0.5, satellite)
+            self.assertIn("CLASSIC", panel.mission_flow_control_rects)
+            self.assertIn("PQC", panel.mission_flow_control_rects)
+            self.assertTrue(panel.mission_flow_animations["CLASSIC"]["awaiting_confirm"])
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
+        panel._confirm_mission_flow("CLASSIC")
+        self.assertFalse(panel._mission_overlay_is_animating("CLASSIC"))
+        self.assertTrue(panel._mission_overlay_is_animating("PQC"))
+
     def test_run_battery_pairs_none_and_crc32_with_same_fault_ids(self):
         panel = dashboard.DashboardPanel()
         panel.export_session = lambda log_dir=dashboard.DEFAULT_LOG_DIR: Path("battery.json")

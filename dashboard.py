@@ -1286,6 +1286,7 @@ class DashboardPanel:
         self.dragging_mission_overlay = None
         self.dragging_mission_flow_scenario = None
         self.mission_drag_offset = (0, 0)
+        self.mission_flow_animations = {}
         self.mission_flow_animation = None
         self.effect_timer = 0.0
         self.effect_result = ""
@@ -1419,7 +1420,7 @@ class DashboardPanel:
                 if scrub_rect is not None and scrub_rect.collidepoint(event.pos):
                     self._bring_mission_overlay_to_front(scenario)
                     self.dragging_mission_flow_scenario = scenario
-                    self._scrub_mission_flow_to_x(event.pos[0], scrub_rect)
+                    self._scrub_mission_flow_to_x(event.pos[0], scrub_rect, scenario)
                     return True
 
             for scenario in reversed(self.mission_overlay_order):
@@ -1439,7 +1440,7 @@ class DashboardPanel:
             scenario = self.dragging_mission_flow_scenario
             scrub_rect = self.mission_flow_scrub_rects.get(scenario)
             if scrub_rect is not None:
-                self._scrub_mission_flow_to_x(event.pos[0], scrub_rect)
+                self._scrub_mission_flow_to_x(event.pos[0], scrub_rect, scenario)
             return True
 
         if event.type == pygame.MOUSEMOTION and self.dragging_mission_overlay:
@@ -1543,18 +1544,21 @@ class DashboardPanel:
     def _confirm_mission_flow(self, scenario):
         if not self._mission_overlay_is_animating(scenario):
             return
-        animation = self.mission_flow_animation
+        animation = self._mission_flow_animation_for(scenario)
+        if animation is None:
+            return
         duration = max(0.001, animation.get("duration", MISSION_FLOW_ANIMATION_SECONDS))
         if not animation.get("awaiting_confirm") and animation.get("age", 0.0) < duration:
             return
-        self.mission_flow_animation = None
+        self.mission_flow_animations.pop(scenario, None)
+        self._sync_active_mission_flow_animation()
         self.mission_flow_control_rects.pop(scenario, None)
         self.mission_flow_scrub_rects.pop(scenario, None)
         if self.dragging_mission_flow_scenario == scenario:
             self.dragging_mission_flow_scenario = None
 
-    def _scrub_mission_flow_to_x(self, mouse_x, scrub_rect):
-        animation = self.mission_flow_animation
+    def _scrub_mission_flow_to_x(self, mouse_x, scrub_rect, scenario=None):
+        animation = self._mission_flow_animation_for(scenario)
         if animation is None:
             return
         duration = max(0.001, animation.get("duration", MISSION_FLOW_ANIMATION_SECONDS))
@@ -1563,6 +1567,35 @@ class DashboardPanel:
         animation["age"] = duration * ratio
         if ratio >= 1.0:
             animation["awaiting_confirm"] = True
+        self._sync_active_mission_flow_animation()
+
+    def _mission_flow_animation_for(self, scenario=None):
+        animations = getattr(self, "mission_flow_animations", {})
+        if scenario is not None:
+            return animations.get(scenario)
+        if self.dragging_mission_flow_scenario:
+            return animations.get(self.dragging_mission_flow_scenario)
+        if self.mission_flow_animation is not None:
+            scenario = self.mission_flow_animation.get("scenario")
+            if scenario in animations:
+                return animations[scenario]
+        if self.mission_overlay_order:
+            for candidate in reversed(self.mission_overlay_order):
+                if candidate in animations:
+                    return animations[candidate]
+        return None
+
+    def _sync_active_mission_flow_animation(self):
+        animations = getattr(self, "mission_flow_animations", {})
+        self.mission_flow_animation = None
+        if self.mission_overlay_order:
+            for scenario in reversed(self.mission_overlay_order):
+                animation = animations.get(scenario)
+                if animation is not None:
+                    self.mission_flow_animation = animation
+                    return
+        if animations:
+            self.mission_flow_animation = next(reversed(animations.values()))
 
     def _execute_command(self, cmd):
         """Processa um comando digitado."""
@@ -2017,6 +2050,7 @@ class DashboardPanel:
         self.dragging_mission_overlay = None
         self.dragging_mission_flow_scenario = None
         self.mission_drag_offset = (0, 0)
+        self.mission_flow_animations.clear()
         self.mission_flow_animation = None
         self.pending_mission_contexts.clear()
         self.pending_fault_contexts.clear()
@@ -2692,11 +2726,13 @@ class DashboardPanel:
             elapsed = self.uptime - self.stress_started_at
             if elapsed >= STRESS_DIDACTIC_TIMEOUT_SECONDS:
                 self.stress_status = "TIMEOUT DIDÁTICO"
-        if self.mission_flow_animation is not None and not self.mission_flow_animation.get("awaiting_confirm"):
-            self.mission_flow_animation["age"] += dt
-            if self.mission_flow_animation["age"] >= self.mission_flow_animation["duration"]:
-                self.mission_flow_animation["age"] = self.mission_flow_animation["duration"]
-                self.mission_flow_animation["awaiting_confirm"] = True
+        for animation in list(getattr(self, "mission_flow_animations", {}).values()):
+            if not animation.get("awaiting_confirm"):
+                animation["age"] += dt
+                if animation["age"] >= animation["duration"]:
+                    animation["age"] = animation["duration"]
+                    animation["awaiting_confirm"] = True
+        self._sync_active_mission_flow_animation()
         if self.fault_flow_animation is not None and not self.fault_flow_animation.get("awaiting_confirm"):
             self.fault_flow_animation["age"] += dt
             if self.fault_flow_animation["age"] >= self.fault_flow_animation["duration"]:
@@ -2865,17 +2901,21 @@ class DashboardPanel:
 
     def _start_mission_flow_animation(self, mission):
         steps = self._mission_flow_steps(mission)
+        scenario = self._normalize_mission_scenario(mission.get("scenario", "MISSION"))
         if not steps:
-            self.mission_flow_animation = None
+            self.mission_flow_animations.pop(scenario, None)
+            self._sync_active_mission_flow_animation()
             return
-        self.mission_flow_animation = {
-            "scenario": self._normalize_mission_scenario(mission.get("scenario", "MISSION")),
+        animation = {
+            "scenario": scenario,
             "mission": dict(mission),
             "steps": steps,
             "age": 0.0,
             "duration": MISSION_FLOW_ANIMATION_SECONDS,
             "awaiting_confirm": False,
         }
+        self.mission_flow_animations[scenario] = animation
+        self.mission_flow_animation = animation
 
     def _mission_flow_steps(self, mission):
         scenario = self._normalize_mission_scenario(mission.get("scenario", "MISSION"))
@@ -3047,8 +3087,8 @@ class DashboardPanel:
             self.dragging_mission_overlay = None
         if self.dragging_mission_flow_scenario == scenario:
             self.dragging_mission_flow_scenario = None
-        if self.mission_flow_animation and self.mission_flow_animation.get("scenario") == scenario:
-            self.mission_flow_animation = None
+        self.mission_flow_animations.pop(scenario, None)
+        self._sync_active_mission_flow_animation()
         self._sync_mission_overlay_state()
 
     def _sync_mission_overlay_state(self):
@@ -3397,206 +3437,491 @@ class DashboardPanel:
             return C_ACCENT_ORANGE
         return C_TEXT_PRIMARY
 
-    @staticmethod
-    def _active_trace_line(lines, local_progress):
-        if not lines:
-            return 0
-        return min(len(lines) - 1, max(0, int(local_progress * len(lines))))
+    def _draw_transform_shell(self, surface, rect, title, accent):
+        pygame.draw.rect(surface, (4, 8, 18), rect, border_radius=6)
+        pygame.draw.rect(surface, (18, 26, 52), rect.inflate(-4, -4), border_radius=5)
+        pygame.draw.rect(surface, accent, rect, width=2, border_radius=6)
+        header = pygame.Rect(rect.x, rect.y, rect.width, 24)
+        pygame.draw.rect(surface, (24, 34, 64), header, border_top_left_radius=6, border_top_right_radius=6)
+        pygame.draw.line(surface, accent, (rect.x, rect.y + 24), (rect.right, rect.y + 24), 1)
+        surface.blit(self._render_clipped(FONT_LABEL, title, C_TEXT_PRIMARY, rect.width - 16), (rect.x + 8, rect.y + 5))
 
-    def _draw_function_trace_panel(self, surface, rect, title, lines, active_index, accent):
-        trace_bg = (5, 8, 18)
-        trace_header = (24, 34, 64)
-        trace_active = (34, 48, 92)
-        trace_muted = (176, 194, 230)
-        pygame.draw.rect(surface, trace_bg, rect, border_radius=5)
-        pygame.draw.rect(surface, accent, rect, width=2, border_radius=5)
-        pygame.draw.rect(surface, trace_header, (rect.x, rect.y, rect.width, 21), border_top_left_radius=5, border_top_right_radius=5)
-        pygame.draw.line(surface, accent, (rect.x, rect.y + 21), (rect.right, rect.y + 21), 1)
-        surface.blit(self._render_clipped(FONT_LABEL, title, C_TEXT_PRIMARY, rect.width - 12), (rect.x + 7, rect.y + 4))
+    def _draw_transform_segments(self, surface, segments, area, reveal=1.0, active=None):
+        if not segments:
+            return
+        gap = 5
+        count = len(segments)
+        seg_w = max(38, (area.width - gap * (count - 1)) // count)
+        for index, segment in enumerate(segments):
+            x = area.x + index * (seg_w + gap)
+            width = seg_w if index < count - 1 else max(30, area.right - x)
+            rect = pygame.Rect(x, area.y, width, area.height)
+            color = segment.get("color", C_ACCENT_CYAN)
+            fill_w = max(4, int(rect.width * max(0.08, min(1.0, reveal))))
+            pygame.draw.rect(surface, (8, 12, 26), rect, border_radius=5)
+            pygame.draw.rect(surface, color, (rect.x, rect.y, fill_w, rect.height), border_radius=5)
+            border_w = 2 if segment.get("label") == active else 1
+            pygame.draw.rect(surface, C_TEXT_PRIMARY if border_w == 2 else color, rect, width=border_w, border_radius=5)
+            label = str(segment.get("label", ""))
+            sub = str(segment.get("sub", ""))
+            surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, rect.width - 8), (rect.x + 5, rect.y + 7))
+            if sub:
+                surface.blit(self._render_clipped(FONT_LABEL, sub, (230, 238, 255), rect.width - 8), (rect.x + 5, rect.y + 23))
 
-        y = rect.y + 25
-        line_h = 14
-        max_lines = max(1, (rect.height - 29) // line_h)
-        for index, line in enumerate(lines[:max_lines]):
-            line_rect = pygame.Rect(rect.x + 5, y - 1, rect.width - 10, line_h)
-            if index == active_index:
-                pygame.draw.rect(surface, trace_active, line_rect, border_radius=3)
-                pygame.draw.rect(surface, accent, (line_rect.x, line_rect.y, 3, line_rect.height), border_radius=2)
-            prefix = ">" if index == active_index else " "
-            color = C_TEXT_PRIMARY if index == active_index else trace_muted
-            surface.blit(self._render_clipped(FONT_LABEL, f"{prefix} {line}", color, rect.width - 14), (rect.x + 7, y))
-            y += line_h
+    def _draw_transform_beam(self, surface, start, end, color, progress, t):
+        pygame.draw.line(surface, (54, 74, 128), start, end, 3)
+        active_x = start[0] + int((end[0] - start[0]) * max(0.0, min(1.0, progress)))
+        active_y = start[1] + int((end[1] - start[1]) * max(0.0, min(1.0, progress)))
+        pygame.draw.line(surface, color, start, (active_x, active_y), 4)
+        for index in range(4):
+            phase = (progress + index * 0.22 + t * 0.08) % 1.0
+            px = start[0] + int((end[0] - start[0]) * phase)
+            py = start[1] + int((end[1] - start[1]) * phase)
+            pygame.draw.circle(surface, color, (px, py), 3)
+        arrow = ((end[0] - 8, end[1] - 5), (end[0], end[1]), (end[0] - 8, end[1] + 5))
+        pygame.draw.polygon(surface, color, arrow)
 
-    def _mission_step_trace(self, scenario, mission, step):
+    def _draw_operation_core(self, surface, center, label, sub, color, progress, t):
+        progress = max(0.0, min(1.0, progress))
+        self._draw_soft_glow(surface, center, 34, color, 58)
+        pulse = int(4 * math.sin(t * 6 + progress * math.pi))
+        for radius, alpha in ((36 + pulse, 110), (26, 180), (17, 230)):
+            pygame.draw.circle(surface, self._mix_color((5, 8, 18), color, alpha / 255.0), center, radius, 2)
+        pygame.draw.circle(surface, (5, 8, 18), center, 25)
+        pygame.draw.circle(surface, color, center, 25, 2)
+        for index in range(7):
+            angle = t * 1.8 + progress * math.pi * 2 + index * math.tau / 7
+            radius = 32 + 3 * math.sin(t * 2.3 + index)
+            dot = (center[0] + int(math.cos(angle) * radius), center[1] + int(math.sin(angle) * radius))
+            pygame.draw.circle(surface, color, dot, 2)
+        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, 82), (center[0] - 41, center[1] - 12))
+        if sub:
+            surface.blit(self._render_clipped(FONT_LABEL, sub, (210, 225, 255), 82), (center[0] - 41, center[1] + 6))
+
+    def _mix_color(self, base, color, amount):
+        amount = max(0.0, min(1.0, amount))
+        return tuple(int(base[i] * (1.0 - amount) + color[i] * amount) for i in range(3))
+
+    def _draw_soft_glow(self, surface, center, radius, color, alpha=70):
+        size = max(8, radius * 4)
+        glow = pygame.Surface((size, size), pygame.SRCALPHA)
+        origin = (size // 2, size // 2)
+        for layer in range(4, 0, -1):
+            layer_radius = int(radius * (0.58 + layer * 0.34))
+            layer_alpha = max(8, int(alpha / (layer * 0.85)))
+            pygame.draw.circle(glow, (*color, layer_alpha), origin, layer_radius)
+        surface.blit(glow, (center[0] - size // 2, center[1] - size // 2))
+
+    def _draw_circuit_background(self, surface, rect, color, t):
+        pygame.draw.rect(surface, (4, 8, 18), rect, border_radius=5)
+        step = 24
+        for x in range(rect.x + 8, rect.right, step):
+            pygame.draw.line(surface, (14, 22, 48), (x, rect.y + 4), (x, rect.bottom - 4), 1)
+        for y in range(rect.y + 8, rect.bottom, step):
+            pygame.draw.line(surface, (14, 22, 48), (rect.x + 4, y), (rect.right - 4, y), 1)
+        for index in range(8):
+            px = rect.x + 16 + ((index * 73 + int(t * 34)) % max(1, rect.width - 32))
+            py = rect.y + 10 + ((index * 29) % max(1, rect.height - 20))
+            pygame.draw.circle(surface, self._mix_color((18, 24, 48), color, 0.45), (px, py), 1)
+
+    def _draw_crypto_capsule(self, surface, rect, label, sub, color, fill=1.0, active=False):
+        fill = max(0.0, min(1.0, fill))
+        pygame.draw.rect(surface, (8, 13, 28), rect, border_radius=5)
+        if fill > 0:
+            fill_rect = pygame.Rect(rect.x, rect.y, max(4, int(rect.width * fill)), rect.height)
+            pygame.draw.rect(surface, self._mix_color((9, 14, 30), color, 0.42), fill_rect, border_radius=5)
+        pygame.draw.rect(surface, color if active else self._mix_color(C_PANEL_BORDER, color, 0.45), rect, width=2 if active else 1, border_radius=5)
+        surface.blit(self._render_clipped(FONT_LABEL, str(label), C_TEXT_PRIMARY, rect.width - 8), (rect.x + 5, rect.y + 5))
+        if sub:
+            surface.blit(self._render_clipped(FONT_LABEL, str(sub), (196, 214, 246), rect.width - 8), (rect.x + 5, rect.y + 20))
+
+    def _draw_capsule_row(self, surface, segments, area, reveal=1.0, active_index=None):
+        if not segments:
+            return
+        gap = 6
+        count = len(segments)
+        capsule_w = max(54, min(112, (area.width - gap * (count - 1)) // count))
+        start_x = area.x + max(0, (area.width - (capsule_w * count + gap * (count - 1))) // 2)
+        y = area.centery - 19
+        for index, segment in enumerate(segments):
+            rect = pygame.Rect(start_x + index * (capsule_w + gap), y, capsule_w, 38)
+            seg_reveal = reveal if active_index is None or index <= active_index else 0.18
+            self._draw_crypto_capsule(
+                surface,
+                rect,
+                segment.get("label", ""),
+                segment.get("sub", ""),
+                segment.get("color", C_ACCENT_CYAN),
+                fill=seg_reveal,
+                active=index == active_index,
+            )
+
+    def _draw_byte_stream(self, surface, start, end, color, progress, t, labels=None):
+        progress = max(0.0, min(1.0, progress))
+        sx, sy = start
+        ex, ey = end
+        dx = ex - sx
+        dy = ey - sy
+        distance = math.hypot(dx, dy) or 1.0
+        nx = -dy / distance
+        ny = dx / distance
+        labels = labels or ("7A", "C3", "01", "AF", "42", "E8")
+        pygame.draw.line(surface, (34, 48, 92), start, end, 2)
+        pygame.draw.line(surface, color, start, (sx + int(dx * progress), sy + int(dy * progress)), 3)
+        for index, label in enumerate(labels):
+            phase = progress * 1.25 - index * 0.13
+            if phase < -0.2 or phase > 1.05:
+                continue
+            phase = max(0.0, min(1.0, phase))
+            px = sx + dx * phase + nx * math.sin(t * 5 + index) * 5
+            py = sy + dy * phase + ny * math.sin(t * 5 + index) * 5
+            tile = pygame.Rect(int(px) - 13, int(py) - 10, 26, 20)
+            pygame.draw.rect(surface, (7, 13, 28), tile, border_radius=4)
+            pygame.draw.rect(surface, color, tile, width=1, border_radius=4)
+            txt = FONT_LABEL.render(str(label), True, C_TEXT_PRIMARY)
+            surface.blit(txt, (tile.centerx - txt.get_width() // 2, tile.centery - txt.get_height() // 2))
+        arrow = ((ex - 8, ey - 5), (ex, ey), (ex - 8, ey + 5))
+        if abs(dy) > abs(dx):
+            arrow = ((ex - 5, ey - 8), (ex, ey), (ex + 5, ey - 8))
+        pygame.draw.polygon(surface, color, arrow)
+
+    def _draw_sensor_nodes(self, surface, area, progress, t, live):
+        labels = ("TEMP", "ACCEL", "POT") if live else ("ASCII", "SEQ", "MSG")
+        colors = (C_ACCENT_CYAN, C_ACCENT_PURPLE, C_ACCENT_ORANGE)
+        output = (area.right - 12, area.centery)
+        for index, label in enumerate(labels):
+            y = area.y + 14 + int(index * max(1, area.height - 28) / max(1, len(labels) - 1))
+            center = (area.x + 38, y)
+            pulse = 3 + int(2 * math.sin(t * 4 + index))
+            pygame.draw.line(surface, (34, 48, 92), center, output, 1)
+            pygame.draw.line(surface, colors[index], center, (center[0] + int((output[0] - center[0]) * progress), center[1] + int((output[1] - center[1]) * progress)), 2)
+            self._draw_soft_glow(surface, center, 12 + pulse, colors[index], 30)
+            pygame.draw.circle(surface, (8, 14, 30), center, 13 + pulse)
+            pygame.draw.circle(surface, colors[index], center, 13 + pulse, 2)
+            surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, 64), (center[0] + 18, center[1] - 8))
+        pygame.draw.rect(surface, (8, 13, 28), (output[0] - 28, output[1] - 16, 56, 32), border_radius=5)
+        pygame.draw.rect(surface, C_ACCENT_BLUE, (output[0] - 28, output[1] - 16, 56, 32), 1, border_radius=5)
+        surface.blit(self._render_clipped(FONT_LABEL, "PAY", C_TEXT_PRIMARY, 48), (output[0] - 20, output[1] - 7))
+
+    def _draw_lattice_effect(self, surface, area, color, progress, t):
+        cols = 5
+        rows = 3
+        points = []
+        for row in range(rows):
+            for col in range(cols):
+                jitter = math.sin(t * 3.0 + row * 1.4 + col) * 2
+                x = area.x + 12 + int(col * (area.width - 24) / max(1, cols - 1))
+                y = area.y + 12 + int(row * (area.height - 24) / max(1, rows - 1) + jitter)
+                points.append((x, y))
+                pygame.draw.circle(surface, color, (x, y), 2)
+        limit = int(len(points) * max(0.15, progress))
+        for index in range(max(0, limit - 1)):
+            pygame.draw.line(surface, self._mix_color((24, 30, 60), color, 0.52), points[index], points[index + 1], 1)
+        pygame.draw.rect(surface, color, area, width=1, border_radius=4)
+
+    def _draw_lock_symbol(self, surface, center, color, progress, open_lock=False):
+        progress = max(0.0, min(1.0, progress))
+        body = pygame.Rect(center[0] - 24, center[1] - 2, 48, 32)
+        shackle = pygame.Rect(center[0] - 18, center[1] - 28, 36, 38)
+        pygame.draw.arc(surface, color, shackle, math.pi, math.tau, 4)
+        if open_lock:
+            offset = int(14 * progress)
+            pygame.draw.line(surface, color, (center[0] + 18, center[1] - 10), (center[0] + 18 + offset, center[1] - 18), 3)
+        pygame.draw.rect(surface, (7, 13, 28), body, border_radius=5)
+        pygame.draw.rect(surface, color, body, width=2, border_radius=5)
+        pygame.draw.circle(surface, color, center, 4)
+        pygame.draw.line(surface, color, (center[0], center[1] + 4), (center[0], center[1] + 14), 2)
+
+    def _draw_shield_symbol(self, surface, center, color, progress, breached=False):
+        progress = max(0.0, min(1.0, progress))
+        points = [
+            (center[0], center[1] - 31),
+            (center[0] + 28, center[1] - 18),
+            (center[0] + 21, center[1] + 22),
+            (center[0], center[1] + 35),
+            (center[0] - 21, center[1] + 22),
+            (center[0] - 28, center[1] - 18),
+        ]
+        pygame.draw.polygon(surface, (7, 13, 28), points)
+        pygame.draw.polygon(surface, color, points, width=2)
+        if breached:
+            crack = [(center[0] - 2, center[1] - 22), (center[0] + 6, center[1] - 4), (center[0] - 4, center[1] + 10), (center[0] + 4, center[1] + 28)]
+            pygame.draw.lines(surface, C_ACCENT_RED, False, crack, 3)
+            return
+        check_end = int(1 + 2 * progress)
+        check = [(center[0] - 13, center[1] + 2), (center[0] - 3, center[1] + 14), (center[0] + 16, center[1] - 10)]
+        if check_end >= 2:
+            pygame.draw.line(surface, color, check[0], check[1], 3)
+        if check_end >= 3:
+            pygame.draw.line(surface, color, check[1], check[2], 3)
+
+    def _draw_radiation_strike(self, surface, rect, target, color, progress, t):
+        progress = max(0.0, min(1.0, progress))
+        source = (rect.x + 26, rect.y + 12)
+        hit = (source[0] + int((target[0] - source[0]) * progress), source[1] + int((target[1] - source[1]) * progress))
+        for index in range(3):
+            offset = math.sin(t * 7 + index) * 5
+            pygame.draw.line(surface, color, (source[0], source[1] + int(offset)), hit, 2)
+        pygame.draw.circle(surface, color, hit, 5 + int(4 * math.sin(t * 8) ** 2))
+        for index in range(10):
+            angle = t * 3 + index * math.tau / 10
+            radius = 10 + 18 * progress
+            point = (target[0] + int(math.cos(angle) * radius), target[1] + int(math.sin(angle) * radius))
+            pygame.draw.circle(surface, color, point, 2)
+
+    def _mission_visual_scene(self, scenario, mission, step):
         kind = str(step.get("kind", "")).lower()
-        payload_len = self._mission_int(mission, "bytes_payload")
+        payload = self._mission_int(mission, "bytes_payload")
         checksum = self._mission_int(mission, "bytes_checksum")
         mlkem = self._mission_int(mission, "bytes_mlkem")
         nonce = self._mission_int(mission, "bytes_nonce", self._mission_int(mission, "nonce_bytes"))
         gcm = self._mission_int(mission, "bytes_gcm_tag", self._mission_int(mission, "gcm_tag_bytes"))
         total = self._mission_int(mission, "bytes_total")
+        protected = payload + checksum
         live = str(mission.get("payload_mode", "")).upper() == "LIVE"
 
         if kind == "payload":
-            if live:
-                return "build_live_payload()", (
-                    "temp, hum = SENSOR_READ(TEMP_HUM)",
-                    "accel = SENSOR_READ(ACCEL)",
-                    "light = SENSOR_READ(APDS); pot = ANALOG(POT)",
-                    "payload = format('PQC-SAT|SEQ|TEMP|POT')",
-                    f"payload_len = {payload_len} bytes",
-                    "payload_hex = payload.encode('ascii').hex()",
-                )
-            return "parse_mission_payload()", (
-                "payload = payload_hex or MISSION_DEFAULT_PAYLOAD",
-                "payload_len = min(len(payload), MAX_PAYLOAD)",
-                f"payload_crc32 = crc32(payload)  # {payload_len} B",
-                "protected_payload = payload",
-                "nenhuma cifra aplicada ainda",
-            )
+            return {
+                "title": "COLETA E SERIALIZAÇÃO DO PAYLOAD",
+                "left": ({"label": "TEMP", "sub": "sensor", "color": C_ACCENT_CYAN}, {"label": "ACCEL", "sub": "sensor", "color": C_ACCENT_PURPLE}, {"label": "POT", "sub": "analógico", "color": C_ACCENT_ORANGE}) if live else ({"label": "ASCII", "sub": "mensagem", "color": C_ACCENT_BLUE},),
+                "op": ("FORMATA", "payload"),
+                "right": ({"label": "PAYLOAD", "sub": f"{payload} B", "color": C_ACCENT_BLUE},),
+                "note": "Bytes de telemetria ainda estão em claro; nada foi cifrado.",
+            }
         if kind == "crc":
-            return "protect_with_crc32()", (
-                "crc_tx = crc32_bytes(payload)",
-                "write_u32_be(protected_payload + payload_len, crc_tx)",
-                f"checksum_bytes = {checksum}",
-                "protected_payload = payload || crc_tx",
-                "CRC detecta corrupção acidental; não cifra",
-            )
+            return {
+                "title": "CRC32 É ANEXADO ANTES DA CIFRAGEM",
+                "left": ({"label": "PAYLOAD", "sub": f"{payload} B", "color": C_ACCENT_BLUE},),
+                "op": ("CRC32", "detecta"),
+                "right": ({"label": "PAYLOAD", "sub": f"{payload} B", "color": C_ACCENT_BLUE}, {"label": "CRC", "sub": f"+{checksum} B", "color": C_ACCENT_GREEN}),
+                "note": "O checksum vira parte do material protegido por AES-GCM.",
+            }
         if kind == "keygen":
-            return "mlkem_keygen()", (
-                "op_started = micros()",
-                "pk, sk = crypto_kem_keypair()",
-                "keygen_us = micros() - op_started",
-                "pk fica local; sk fica local",
-                "payload ainda não foi cifrado",
-            )
+            return {
+                "title": "ML-KEM GERA O PAR DE CHAVES LOCAL",
+                "left": ({"label": "RNG", "sub": "entropia", "color": C_ACCENT_CYAN}, {"label": "CPU", "sub": "lattice", "color": C_ACCENT_PURPLE}),
+                "op": ("KEYGEN", "ML-KEM"),
+                "right": ({"label": "pk", "sub": "pública", "color": C_ACCENT_PURPLE}, {"label": "sk", "sub": "local", "color": C_ACCENT_RED}),
+                "note": "Custo de CPU/RAM aparece aqui; o payload ainda não cresceu.",
+            }
         if kind == "mlkem":
-            return "mlkem_encapsulate()", (
-                "ct, ss_enc = crypto_kem_enc(pk)",
-                f"bytes_mlkem = {mlkem}",
-                "packet += ct  # ciphertext ML-KEM",
-                "ss_enc será usado para derivar chave AES",
-                "ML-KEM não cifra o payload diretamente",
-            )
+            return {
+                "title": "ENCAPSULAMENTO ADICIONA O CIPHERTEXT ML-KEM",
+                "left": ({"label": "pk", "sub": "800 B", "color": C_ACCENT_PURPLE}, {"label": "RNG", "sub": "secreto", "color": C_ACCENT_CYAN}),
+                "op": ("ENCAP", "ss"),
+                "right": ({"label": "CT-KEM", "sub": f"+{mlkem} B", "color": C_ACCENT_PURPLE}, {"label": "ss", "sub": "32 B", "color": C_ACCENT_GREEN}),
+                "note": "ML-KEM cria segredo compartilhado; ele não cifra a mensagem.",
+            }
         if kind == "decap":
-            return "mlkem_decap_and_compare()", (
-                "ss_dec = crypto_kem_dec(ct, sk)",
-                "key_match = consttime_eq(ss_enc, ss_dec)",
-                "pqc_shared_secret_ready = key_match",
-                "se ct corromper, segredo pode divergir",
-            )
+            return {
+                "title": "RECEPTOR RECUPERA O MESMO SEGREDO",
+                "left": ({"label": "CT-KEM", "sub": f"{mlkem} B", "color": C_ACCENT_PURPLE}, {"label": "sk", "sub": "local", "color": C_ACCENT_RED}),
+                "op": ("DECAP", "ss_rx"),
+                "right": ({"label": "ss_tx", "sub": "32 B", "color": C_ACCENT_GREEN}, {"label": "ss_rx", "sub": "match", "color": C_ACCENT_GREEN}),
+                "note": "Se o ciphertext PQC muda, o segredo recuperado pode divergir.",
+            }
         if kind == "kdf":
-            return "derive_mission_aes128_key()", (
-                f"context = 'PQC-SAT|MISSION|{scenario}|AES-128-GCM|v1'",
-                "digest = HMAC_SHA256(ss, context)",
-                "aes_key = digest[0:16]",
-                "secure_wipe(digest)",
-                "mesmo segredo -> mesma chave AES",
-            )
+            return {
+                "title": "SEGREDO ML-KEM VIRA CHAVE AES-128",
+                "left": ({"label": "ss", "sub": "32 B", "color": C_ACCENT_GREEN}, {"label": "contexto", "sub": scenario, "color": C_TEXT_PRIMARY}),
+                "op": ("KDF", "HMAC"),
+                "right": ({"label": "AES-128", "sub": "16 B", "color": C_ACCENT_CYAN},),
+                "note": "A chave de sessão é derivada e o digest temporário é apagado.",
+            }
         if kind == "rng":
-            return "classic_ephemeral_key()", (
-                "aes_key = fill_random_bytes(16)",
-                "aes_key_rx = aes_key_tx",
-                "nonce = fill_random_bytes(12)",
-                "key_policy = ephemeral_per_message",
-                "baseline simétrico barato",
-            )
+            return {
+                "title": "BASELINE CLÁSSICO GERA CHAVE EFÊMERA",
+                "left": ({"label": "RNG", "sub": "placa", "color": C_ACCENT_CYAN},),
+                "op": ("KEY", "AES"),
+                "right": ({"label": "AES-128", "sub": "16 B", "color": C_ACCENT_CYAN}, {"label": "NONCE", "sub": f"{nonce} B", "color": C_TEXT_PRIMARY}),
+                "note": "Sem troca assimétrica: é o caminho simétrico barato da comparação.",
+            }
         if kind == "aead":
-            return "aes128_gcm_encrypt()", (
-                f"nonce = random({nonce} B)",
-                f"aad = 'PQC-SAT|MISSION|{scenario}|v1'",
-                "ciphertext, tag = GCM.encrypt(key, nonce, aad, protected)",
-                f"tag = {gcm} B; ciphertext = payload + crc",
-                "encrypt_us mede custo real na Wisdom",
-            )
+            return {
+                "title": "AES-GCM CIFRA E AUTENTICA O MATERIAL PROTEGIDO",
+                "left": ({"label": "PLAIN", "sub": f"{protected} B", "color": C_ACCENT_BLUE}, {"label": "AESKEY", "sub": "128 bit", "color": C_ACCENT_CYAN}),
+                "op": ("AES-GCM", "cifra"),
+                "right": ({"label": "CIPHER", "sub": f"{protected} B", "color": C_ACCENT_BLUE}, {"label": "NONCE", "sub": f"+{nonce} B", "color": C_TEXT_PRIMARY}, {"label": "TAG", "sub": f"+{gcm} B", "color": C_ACCENT_ORANGE}),
+                "note": "A tag GCM autentica AAD, nonce e ciphertext na verificação.",
+            }
         if kind == "verify":
-            crc_line = "crc_match = crc32(plaintext_payload) == crc_field" if checksum else "crc_match = NA  # sem CRC neste cenário"
-            return "aes128_gcm_decrypt_and_verify()", (
-                "plaintext = GCM.auth_decrypt(key, nonce, aad, ciphertext, tag)",
-                "decrypt_ok = tag GCM válida",
-                "aead_match = plaintext == protected_payload",
-                crc_line,
-                "plaintext só é aceito se a tag bater",
-            )
-        return "mission_result()", (
-            "delivered = key_match and aead_match and crc_match",
-            f"bytes_total = {total}",
-            "return cipher, timings, heap, flags",
-            "dashboard exibe resposta real da placa",
-        )
+            return {
+                "title": "DECIFRAGEM SÓ LIBERA PLAINTEXT SE A TAG BATER",
+                "left": ({"label": "CIPHER", "sub": f"{protected} B", "color": C_ACCENT_BLUE}, {"label": "TAG", "sub": "GCM", "color": C_ACCENT_ORANGE}),
+                "op": ("AUTH", "DEC"),
+                "right": ({"label": "PLAIN", "sub": "ok", "color": C_ACCENT_GREEN}, {"label": "CRC", "sub": "ok" if checksum else "NA", "color": C_ACCENT_GREEN if checksum else C_TEXT_PRIMARY}),
+                "note": "Sem tag válida, a mensagem não deveria ser aceita.",
+            }
+        return {
+            "title": "RESULTADO DA MISSÃO",
+            "left": ({"label": "FLAGS", "sub": "key/aead/crc", "color": C_ACCENT_GREEN},),
+            "op": ("DECIDE", "OK"),
+            "right": ({"label": "DELIVERED", "sub": f"{total} B", "color": self._scenario_color(scenario)},),
+            "note": "Resumo final: tempo, bytes, heap e confirmações reais da placa.",
+        }
 
-    def _fault_step_trace(self, fault, step):
+    def _draw_mission_transformation_panel(self, surface, rect, scenario, mission, step, local_progress, t):
+        scene = self._mission_visual_scene(scenario, mission, step)
+        kind = str(step.get("kind", "")).lower()
+        color = step.get("color", self._scenario_color(scenario))
+        self._draw_transform_shell(surface, rect, scene["title"], color)
+        progress = max(0.0, min(1.0, local_progress))
+        content = pygame.Rect(rect.x + 9, rect.y + 31, rect.width - 18, rect.height - 58)
+        self._draw_circuit_background(surface, content, color, t)
+
+        lane_h = min(126, max(78, content.height - 26))
+        lane_y = content.centery - lane_h // 2
+        left_rect = pygame.Rect(content.x + 8, lane_y, max(160, int(content.width * 0.30)), lane_h)
+        center = (content.centerx, content.centery)
+        right_rect = pygame.Rect(center[0] + 58, lane_y, max(160, content.right - center[0] - 66), lane_h)
+        input_anchor = (left_rect.right + 10, center[1])
+        output_anchor = (right_rect.x - 12, center[1])
+
+        live = str(mission.get("payload_mode", "")).upper() == "LIVE"
+        if kind == "payload":
+            self._draw_sensor_nodes(surface, left_rect, progress, t, live)
+        elif kind in {"keygen", "mlkem", "decap"}:
+            self._draw_lattice_effect(surface, left_rect.inflate(-6, -6), C_ACCENT_PURPLE, progress, t)
+            self._draw_capsule_row(surface, scene["left"], left_rect, reveal=1.0)
+        else:
+            self._draw_capsule_row(surface, scene["left"], left_rect, reveal=1.0)
+
+        stream_color = C_ACCENT_PURPLE if kind in {"keygen", "mlkem", "decap"} else color
+        if kind == "aead":
+            stream_labels = ("P1", "4F", "A7", "09", "D2", "8C")
+        elif kind in {"mlkem", "decap"}:
+            stream_labels = ("pk", "r", "A", "u", "v", "ss")
+        elif kind == "crc":
+            stream_labels = ("P", "A", "Y", "+", "C", "R")
+        else:
+            stream_labels = None
+        self._draw_byte_stream(surface, input_anchor, (center[0] - 38, center[1]), stream_color, progress, t, stream_labels)
+
+        self._draw_operation_core(surface, center, scene["op"][0], scene["op"][1], color, progress, t)
+        if kind == "crc":
+            self._draw_shield_symbol(surface, (center[0], center[1] + 2), C_ACCENT_GREEN, progress)
+        elif kind in {"aead", "verify", "rng"}:
+            self._draw_lock_symbol(surface, (center[0], center[1] + 2), C_ACCENT_CYAN if kind != "verify" else C_ACCENT_GREEN, progress, open_lock=kind == "verify")
+        elif kind == "kdf":
+            key_rect = pygame.Rect(center[0] - 30, center[1] + 28, 60, 11)
+            pygame.draw.rect(surface, (8, 13, 28), key_rect, border_radius=5)
+            pygame.draw.rect(surface, C_ACCENT_CYAN, key_rect, width=1, border_radius=5)
+            pygame.draw.rect(surface, C_ACCENT_CYAN, (key_rect.x, key_rect.y, int(key_rect.width * progress), key_rect.height), border_radius=5)
+        elif kind in {"keygen", "mlkem", "decap"}:
+            self._draw_lattice_effect(surface, pygame.Rect(center[0] - 31, center[1] - 31, 62, 62), C_ACCENT_PURPLE, progress, t)
+
+        self._draw_byte_stream(surface, (center[0] + 38, center[1]), output_anchor, color, progress, t, ("CT", "N", "TAG", "OK") if kind == "aead" else None)
+        reveal = 0.18 + progress * 0.82
+        active_right = len(scene["right"]) - 1 if progress > 0.85 else None
+        self._draw_capsule_row(surface, scene["right"], right_rect, reveal=reveal, active_index=active_right)
+
+        if kind == "aead":
+            tag_center = (right_rect.x + 44, right_rect.y + 13)
+            pygame.draw.circle(surface, C_ACCENT_ORANGE, tag_center, 8)
+            surface.blit(self._render_clipped(FONT_LABEL, "TAG", C_TEXT_PRIMARY, 44), (tag_center[0] + 11, tag_center[1] - 7))
+        elif kind == "verify":
+            pygame.draw.line(surface, C_ACCENT_GREEN, (right_rect.x + 12, right_rect.bottom - 16), (right_rect.x + 26, right_rect.bottom - 4), 3)
+            pygame.draw.line(surface, C_ACCENT_GREEN, (right_rect.x + 26, right_rect.bottom - 4), (right_rect.x + 52, right_rect.bottom - 32), 3)
+
+        note_y = rect.bottom - 24
+        surface.blit(self._render_clipped(FONT_LABEL, scene["note"], (232, 238, 255), rect.width - 18), (rect.x + 9, note_y))
+
+    def _draw_bit_strip(self, surface, x, y, width, label, byte_value, mask, color):
+        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, 60), (x, y + 5))
+        bit_gap = 3
+        bit_size = min(22, max(14, (width - 64 - bit_gap * 7) // 8))
+        start_x = x + 64
+        for bit_index in range(8):
+            bit_mask = 1 << (7 - bit_index)
+            changed = bool(mask and (mask & bit_mask))
+            bit = (byte_value >> (7 - bit_index)) & 1
+            bx = start_x + bit_index * (bit_size + bit_gap)
+            fill = (72, 18, 34) if changed else (10, 16, 34)
+            border = C_ACCENT_RED if changed else color
+            pygame.draw.rect(surface, fill, (bx, y, bit_size, bit_size), border_radius=4)
+            pygame.draw.rect(surface, border, (bx, y, bit_size, bit_size), width=2 if changed else 1, border_radius=4)
+            txt = FONT_LABEL.render(str(bit), True, C_TEXT_PRIMARY if not changed else C_ACCENT_RED)
+            surface.blit(txt, (bx + (bit_size - txt.get_width()) // 2, y + (bit_size - txt.get_height()) // 2))
+
+    def _fault_visual_scene(self, fault, step):
         label = str(step.get("label", "")).upper()
-        target = str(fault.get("target", "PAYLOAD")).upper()
+        result = str(fault.get("result", ""))
         guard = str(fault.get("guard", "NONE")).upper()
-        byte_index = fault.get("byte_index", "--")
-        bit_mask = fault.get("bit_mask", "--")
-
-        if label in {"PAYLOAD", "CIPHERTEXT"}:
-            source = "pqc_ct" if target == "CIPHERTEXT" else "payload"
-            return "prepare_fault_target()", (
-                f"target = {source}",
-                "before = copy(target)",
-                "crc_before = crc32_bytes(before)",
-                f"guard = {guard}",
-                "nenhum byte foi alterado ainda",
-            )
         if label == "BIT-FLIP":
-            return "inject_single_bit_flip()", (
-                f"byte_index = {byte_index}",
-                f"bit_mask = {bit_mask}",
-                "after = before.copy()",
-                "after[byte_index] ^= bit_mask",
-                "um único bit mudou no material observado",
-            )
+            return "INVERSÃO DE UM ÚNICO BIT", "XOR", str(fault.get("bit_mask", "--")), "Um bit muda; todo o comportamento seguinte depende da proteção disponível."
         if label == "SEM CRC":
-            return "guard_none_path()", (
-                "guard == NONE",
-                "não existe crc_tx salvo no pacote",
-                "não há comparação simples antes da entrega",
-                "payload alterado pode passar silenciosamente",
-            )
+            return "NÃO HÁ GUARDIÃO DE INTEGRIDADE", "SEM", "CRC", "Sem checksum salvo, o receptor não tem referência simples para comparar."
         if label == "ENTREGA":
-            return "silent_delivery_decision()", (
-                "if after != before and guard == NONE:",
-                "    result = SILENT",
-                "session_status = DEGRADADO",
-                "este é o caso didático perigoso",
-            )
+            return "CORRUPÇÃO PASSA COMO SE FOSSE VÁLIDA", "SILENT", "FAIL", "Falha silenciosa é perigosa porque parece entrega normal."
         if label == "CRC32":
-            return "crc_guard_prepare()", (
-                "crc_before = crc32_bytes(before)",
-                "crc_tx foi anexado antes da falha",
-                "guard_verify_us começa na verificação",
-                "CRC cobre single-bit flip da demo",
-            )
+            return "CHECKSUM SERVE COMO REFERÊNCIA", "CRC32", "tx", "O CRC guardado antes da falha será comparado com o CRC recalculado."
         if label == "VERIFICA":
-            return "crc_guard_verify()", (
-                "crc_after = crc32_bytes(after)",
-                "crc_changed = crc_after != crc_before",
-                "if crc_changed: result = DETECTED_GUARD",
-                "payload não é aceito como íntegro",
-            )
+            return "COMPARAÇÃO REVELA A CORRUPÇÃO", "CHECK", "crc", "Single-bit flip da demo muda o CRC e bloqueia aceitação íntegra."
         if label == "DECAP":
-            return "pqc_fault_decap()", (
-                "ct_corrompido = after",
-                "ss_dec = crypto_kem_dec(ct_corrompido, sk)",
-                "key_match = consttime_eq(ss_enc, ss_dec)",
-                "falha em ct afeta acordo de chave",
-            )
+            return "CIPHERTEXT PQC CORROMPIDO AFETA O SEGREDO", "DECAP", "ss", "A decapsulação tenta recuperar segredo a partir de material alterado."
         if label == "CONFIRMA":
-            return "key_confirmation_check()", (
-                "tag_expected = HMAC_SHA256(ss_enc, contexto)",
-                "tag_rx = HMAC_SHA256(ss_dec, contexto)",
-                "tag_match = consttime_eq(tag_expected, tag_rx)",
-                "se falhar: PROTOCOL_REJECT",
+            return "CONFIRMAÇÃO AUTENTICADA REJEITA DIVERGÊNCIA", "HMAC", "tag", "Se os segredos divergem, a confirmação de chave falha."
+        if label == "RESULTADO":
+            return "RESULTADO OBSERVADO DA FALHA", result or "RESULT", guard, "O dashboard registra o evento e exporta as métricas da campanha."
+        target = str(fault.get("target", "PAYLOAD")).upper()
+        return "MATERIAL ANTES DA RADIAÇÃO SIMULADA", target, guard, "Antes do bit-flip, payload ou ciphertext ainda estão íntegros."
+
+    def _draw_fault_transformation_panel(self, surface, rect, fault, step, local_progress, t):
+        color = step.get("color", self._fault_result_color(str(fault.get("result", ""))))
+        title, op_label, op_sub, note = self._fault_visual_scene(fault, step)
+        self._draw_transform_shell(surface, rect, title, color)
+        before = self._parse_int_auto(fault.get("before_byte"))
+        after = self._parse_int_auto(fault.get("after_byte"))
+        mask = self._parse_int_auto(fault.get("bit_mask"))
+        label = str(step.get("label", "")).upper()
+        progress = max(0.0, min(1.0, local_progress))
+        content = pygame.Rect(rect.x + 9, rect.y + 31, rect.width - 18, rect.height - 58)
+        self._draw_circuit_background(surface, content, color, t)
+        if before is not None and after is not None:
+            center = (content.centerx, content.centery)
+            row_y = center[1] - 20
+            left_rect = pygame.Rect(content.x + 8, row_y, max(190, int(content.width * 0.36)), 42)
+            right_rect = pygame.Rect(center[0] + 62, row_y, max(190, content.right - center[0] - 70), 42)
+            self._draw_bit_strip(surface, left_rect.x, left_rect.y + 4, left_rect.width, "ANTES", before, 0, C_ACCENT_CYAN)
+            self._draw_byte_stream(surface, (left_rect.right + 8, center[1]), (center[0] - 38, center[1]), C_ACCENT_CYAN, min(1.0, progress * 1.15), t, ("10", "01", "00"))
+            self._draw_operation_core(surface, center, op_label, op_sub, color, progress, t)
+            self._draw_radiation_strike(surface, content, center, C_ACCENT_RED, progress, t)
+            self._draw_byte_stream(surface, (center[0] + 38, center[1]), (right_rect.x - 10, center[1]), color, progress, t, ("10", "11", "00"))
+            self._draw_bit_strip(surface, right_rect.x, right_rect.y + 4, right_rect.width, "DEPOIS", after, mask, color)
+            if mask:
+                pygame.draw.rect(surface, C_ACCENT_RED, right_rect.inflate(6, 18), width=2, border_radius=7)
+        else:
+            key_ok = str(fault.get("key_match")) in {"1", "true", "True"}
+            left = ({"label": "CT/CRC", "sub": str(fault.get("crc_before", "--"))[-8:], "color": C_ACCENT_PURPLE},)
+            right = (
+                {"label": "CT/CRC", "sub": str(fault.get("crc_after", "--"))[-8:], "color": color},
+                {"label": "KEY", "sub": "match" if key_ok else "reject", "color": C_ACCENT_GREEN if key_ok else C_ACCENT_RED},
             )
-        return "fault_result_event()", (
-            "elapsed_us = micros() - started",
-            "recorda before/after/guard/result",
-            "exporta amostra para métricas",
-            "popup mostra o efeito do bit-flip",
-        )
+            center = (content.centerx, content.centery)
+            lane_h = min(116, max(76, content.height - 28))
+            lane_y = center[1] - lane_h // 2
+            left_rect = pygame.Rect(content.x + 8, lane_y, max(160, int(content.width * 0.28)), lane_h)
+            right_rect = pygame.Rect(center[0] + 66, lane_y, max(190, content.right - center[0] - 74), lane_h)
+            self._draw_capsule_row(surface, left, left_rect, 1.0)
+            self._draw_byte_stream(surface, (left_rect.right + 9, center[1]), (center[0] - 40, center[1]), C_ACCENT_PURPLE, progress, t, ("CT", "7F", "E2", "??"))
+            self._draw_operation_core(surface, center, op_label, op_sub, color, progress, t)
+            if label in {"CRC32", "VERIFICA"}:
+                self._draw_shield_symbol(surface, center, C_ACCENT_GREEN, progress, breached=False)
+            elif label in {"SEM CRC", "ENTREGA"}:
+                self._draw_shield_symbol(surface, center, C_ACCENT_RED, progress, breached=True)
+            elif label in {"DECAP", "CONFIRMA"}:
+                self._draw_lattice_effect(surface, pygame.Rect(center[0] - 32, center[1] - 32, 64, 64), C_ACCENT_PURPLE, progress, t)
+                pygame.draw.line(surface, C_ACCENT_RED, (center[0] - 19, center[1] - 24), (center[0] + 18, center[1] + 24), 3)
+            else:
+                self._draw_radiation_strike(surface, content, center, C_ACCENT_RED, progress, t)
+            self._draw_byte_stream(surface, (center[0] + 40, center[1]), (right_rect.x - 10, center[1]), color, progress, t, ("OK", "NO", "TAG") if label in {"CONFIRMA", "VERIFICA"} else None)
+            self._draw_capsule_row(surface, right, right_rect, 0.18 + progress * 0.82, active_index=1 if progress > 0.82 else None)
+            if label in {"ENTREGA", "RESULTADO"} and str(fault.get("result", "")).upper() == "SILENT":
+                stamp = pygame.Rect(center[0] - 38, center[1] + 28, 76, 18)
+                pygame.draw.rect(surface, (70, 12, 24), stamp, border_radius=4)
+                pygame.draw.rect(surface, C_ACCENT_RED, stamp, 1, border_radius=4)
+                surface.blit(self._render_clipped(FONT_LABEL, "SILENT", C_ACCENT_RED, 68), (stamp.x + 7, stamp.y + 2))
+        surface.blit(self._render_clipped(FONT_LABEL, note, (232, 238, 255), rect.width - 18), (rect.x + 9, rect.bottom - 24))
 
     def _draw_stress_results_control(self, surface, x, y, width, mouse_pos):
         card_h = 86
@@ -3856,10 +4181,10 @@ class DashboardPanel:
         return self._fault_overlay_surface
 
     def _fault_overlay_size(self):
-        width = 500 if WIDTH >= 1600 else 456
+        width = 600 if WIDTH >= 1600 else 560 if WIDTH >= 1200 else 456
         width = min(width, max(340, WIDTH - 40))
-        target_height = 540 if HEIGHT >= 900 else 512
-        height = min(target_height, max(460, HEIGHT - 96))
+        target_height = 660 if HEIGHT >= 900 else 600 if HEIGHT >= 720 else 520
+        height = min(target_height, max(500, HEIGHT - 94))
         return width, height
 
     def _default_fault_overlay_position(self):
@@ -3976,7 +4301,8 @@ class DashboardPanel:
         )
         y += 18
 
-        step_rect = pygame.Rect(x, y, width, 96)
+        step_h = 86 if rect.height >= 580 else 78
+        step_rect = pygame.Rect(x, y, width, step_h)
         pygame.draw.rect(surface, (8, 12, 26), step_rect, border_radius=5)
         pygame.draw.rect(surface, color, step_rect, width=2, border_radius=5)
         step_title = f"{active_step['label']} - {active_step['detail']}"
@@ -3993,24 +4319,15 @@ class DashboardPanel:
             step_rect.y + 46,
             width - 14,
             line_spacing=14,
-            max_lines=3,
+            max_lines=2,
         )
 
-        trace_title, trace_lines = self._fault_step_trace(fault, active_step)
-        trace_rect = pygame.Rect(x, step_rect.bottom + 8, width, 108)
-        self._draw_function_trace_panel(
-            surface,
-            trace_rect,
-            trace_title,
-            trace_lines,
-            self._active_trace_line(trace_lines, local_progress),
-            color,
-        )
+        timeline_y = rect.bottom - 54
+        visual_top = step_rect.bottom + 8
+        visual_h = max(176, timeline_y - visual_top - 24)
+        visual_rect = pygame.Rect(x, visual_top, width, visual_h)
+        self._draw_fault_transformation_panel(surface, visual_rect, fault, active_step, local_progress, t)
 
-        bits_y = trace_rect.bottom + 10
-        self._draw_fault_byte_rows(surface, x, bits_y, width, fault)
-
-        timeline_y = bits_y + 74
         timeline_x = x + 10
         timeline_w = width - 20
         node_positions = [timeline_x + int(round(index * timeline_w / max(1, len(steps) - 1))) for index in range(len(steps))]
@@ -4262,124 +4579,6 @@ class DashboardPanel:
         guard_text = "CRC32 ON" if self.checksum_enabled else "NONE"
         val = FONT_BODY.render(guard_text, True, guard_color)
         surface.blit(val, (x + 142, y - 2))
-        y += 22
-
-        # --- Separador ---
-        pygame.draw.line(surface, C_PANEL_BORDER, (x, y), (x + cw, y), 1)
-        y += 12
-
-        # --- Secao falhas ---
-        lbl = FONT_LABEL.render("INJEÇÃO DE FALHAS", True, C_ACCENT_ORANGE)
-        surface.blit(lbl, (x, y))
-        y += 20
-
-        # 3 metricas lado a lado
-        col_w = cw // 3
-        for i, (label, value, color) in enumerate([
-            ("INJ", str(self.fault_injections), C_ACCENT_ORANGE),
-            ("DET", str(self.detected_errors), C_ACCENT_GREEN),
-            ("SIL", str(self.silent_failures), C_ACCENT_RED if self.silent_failures > 0 else C_TEXT_DIM),
-        ]):
-            col_x = x + i * col_w
-            l = FONT_LABEL.render(label, True, C_TEXT_DIM)
-            surface.blit(l, (col_x, y))
-            v = FONT_BODY.render(value, True, color)
-            surface.blit(v, (col_x, y + 16))
-        y += 44
-
-        # --- Separador ---
-        pygame.draw.line(surface, C_PANEL_BORDER, (x, y), (x + cw, y), 1)
-        y += 12
-
-        # --- Barra de integridade ---
-        lbl = FONT_LABEL.render("INTEGRIDADE OBSERVADA", True, C_ACCENT_GREEN)
-        surface.blit(lbl, (x, y))
-        y += 20
-
-        total = max(1, self.fault_injections)
-        integrity = 1.0 - (self.silent_failures / total)
-        bar_w = cw - 55
-        bar_h = 14
-
-        pygame.draw.rect(surface, (30, 30, 50), (x, y, bar_w, bar_h), border_radius=4)
-        fill_w = int(bar_w * integrity)
-        bar_color = C_ACCENT_GREEN if integrity > 0.7 else (C_ACCENT_ORANGE if integrity > 0.4 else C_ACCENT_RED)
-        if fill_w > 0:
-            pygame.draw.rect(surface, bar_color, (x, y, fill_w, bar_h), border_radius=4)
-        pct = FONT_BODY.render(f"{integrity * 100:.0f}%", True, C_TEXT_PRIMARY)
-        surface.blit(pct, (x + bar_w + 8, y - 2))
-        y += 32
-
-        # --- Separador ---
-        pygame.draw.line(surface, C_PANEL_BORDER, (x, y), (x + cw, y), 1)
-        y += 12
-
-        # --- Uptime ---
-        lbl = FONT_LABEL.render("UPTIME", True, C_TEXT_DIM)
-        surface.blit(lbl, (x, y))
-        uptime_str = time.strftime("%H:%M:%S", time.gmtime(self.uptime))
-        val = FONT_BODY.render(uptime_str, True, C_TEXT_PRIMARY)
-        surface.blit(val, (x + 80, y))
-        y += 28
-
-        # --- Orbita ---
-        lbl = FONT_LABEL.render("ÓRBITA", True, C_TEXT_DIM)
-        surface.blit(lbl, (x, y))
-        if self.satellite_online():
-            ang_str = f"{math.degrees(satellite.angle):.0f} graus"
-            orbit_color = C_TEXT_PRIMARY
-        else:
-            ang_str = "travada"
-            orbit_color = C_ACCENT_ORANGE
-        val = FONT_BODY.render(ang_str, True, orbit_color)
-        surface.blit(val, (x + 80, y))
-
-        if self.serial_client is not None:
-            y += 28
-            pygame.draw.line(surface, C_PANEL_BORDER, (x, y), (x + cw, y), 1)
-            y += 12
-            lbl = FONT_LABEL.render("SATÉLITE WISDOM", True, C_ACCENT_CYAN)
-            surface.blit(lbl, (x, y))
-            y += 18
-            status_color = C_ACCENT_GREEN if self.serial_connected else C_ACCENT_ORANGE
-            status = self.serial_status[:28]
-            val = FONT_LABEL.render(status, True, status_color)
-            surface.blit(val, (x, y))
-            y += 20
-
-            hardware_keys = (
-                "profile",
-                "cpu_mhz",
-                "heap",
-                "min_heap",
-                "elapsed_us",
-                "pqc_status",
-                "kat",
-                "result",
-                "key_match",
-                "key_confirmed",
-                "tag_match",
-                "scenario",
-                "crypto",
-                "checksum",
-                "bytes_total",
-                "tag_us",
-                "verify_us",
-                "crc_us",
-                "keygen_avg_us",
-                "encap_avg_us",
-                "decap_avg_us",
-                "radio",
-            )
-            for key in hardware_keys:
-                if key in self.hardware_payload and y < panel_rect.bottom - 18:
-                    line = f"{key}: {self.hardware_payload[key]}"
-                    surface.blit(self._render_clipped(FONT_LABEL, line, C_TEXT_DIM, cw), (x, y))
-                    y += 16
-
-        y += 28
-        if y < panel_rect.bottom - 88:
-            self._draw_event_timeline(surface, x, y, cw, panel_rect)
 
     def _draw_event_timeline(self, surface, x, y, width, panel_rect):
         lbl = FONT_LABEL.render("TIMELINE", True, C_ACCENT_CYAN)
@@ -4468,114 +4667,13 @@ class DashboardPanel:
         """Painel direito: Console de comandos."""
         pw = 380
         panel_rect = pygame.Rect(WIDTH - pw - 20, 55, pw, HEIGHT - 110)
-        self._draw_panel_bg(surface, panel_rect, "[CONSOLE]", t)
+        self._draw_panel_bg(surface, panel_rect, "[DEMO AO VIVO]", t)
 
         y = panel_rect.y + 42
         x = panel_rect.x + 14
         cw = pw - 28
-        y = self._draw_command_buttons(surface, x, y, cw, t) + 10
-        y = self._draw_live_payload_toggle(surface, x, y, cw) + 10
-        pygame.draw.line(surface, C_PANEL_BORDER, (x, y), (x + cw, y), 1)
-        y += 10
-
-        # Espaco: do y atual ate o input (reservar 100px para hints + input)
-        sep_y = panel_rect.y + panel_rect.height - 115
-        available_h = max(80, sep_y - y - 4)
-
-        if self.help_visible:
-            help_lines = self._console_help_lines()
-            log_line_h = 16
-            help_font = FONT_SMALL if log_line_h < 18 else FONT_LABEL
-            max_lines = max(1, available_h // log_line_h)
-            max_scroll = max(0, len(help_lines) - max_lines)
-            self.help_scroll = max(0, min(self.help_scroll, max_scroll))
-            visible_lines = help_lines[self.help_scroll:self.help_scroll + max_lines]
-            for line in visible_lines:
-                color = C_ACCENT_CYAN if line.endswith(":") else C_TEXT_DIM
-                if line.startswith("  "):
-                    color = C_TEXT_PRIMARY
-                text = self._render_clipped(help_font, line, color, cw)
-                surface.blit(text, (x, y + 3))
-                y += log_line_h
-            if max_scroll > 0:
-                scroll_text = f"{self.help_scroll + 1}-{self.help_scroll + len(visible_lines)}/{len(help_lines)}"
-                surface.blit(
-                    FONT_LABEL.render(scroll_text, True, C_ACCENT_ORANGE),
-                    (x + cw - FONT_LABEL.size(scroll_text)[0], sep_y - 18),
-                )
-        else:
-            log_line_h = 24
-            max_lines = max(3, available_h // log_line_h)
-            for entry in self.command_history[-max_lines:]:
-                # Timestamp
-                ts = FONT_LABEL.render(entry["time"], True, C_TEXT_DIM)
-                surface.blit(ts, (x, y + 2))
-
-                cmd_text = self._history_command_label(entry["cmd"])
-                surface.blit(self._render_clipped(FONT_SMALL, cmd_text, C_TEXT_PRIMARY, 140), (x + 75, y))
-
-                # Status com cor
-                status = entry["status"]
-                if "FAIL" in status or "SILENT" in status or "SILENCIOSO" in status:
-                    s_color = C_ACCENT_RED
-                elif "DETECT" in status or "OK" in status or "ONLINE" in status or "ENVIADO" in status or "us" in status or "ms" in status:
-                    s_color = C_ACCENT_GREEN
-                elif (
-                    "DESCONHECIDO" in status
-                    or "NÃO IMPLEMENTADO" in status
-                    or "OFFLINE" in status
-                    or "SERIAL OFF" in status
-                ):
-                    s_color = C_ACCENT_ORANGE
-                else:
-                    s_color = C_ACCENT_CYAN
-
-                surface.blit(self._render_clipped(FONT_SMALL, status, s_color, max(70, cw - 225)), (x + 225, y))
-                y += log_line_h
-
-        # --- Separador antes do input ---
-        pygame.draw.line(surface, C_PANEL_BORDER, (x, sep_y), (x + cw, sep_y), 1)
-
-        # --- Hints ---
-        hint_y = sep_y + 8
-        if self.help_visible:
-            hint_lines = (
-                "Scroll para navegar no HELP completo.",
-                "Digite comando ou HELP LED para bancada.",
-                "Ctrl+Q encerra o dashboard.",
-            )
-        else:
-            hint_lines = HELP_HINT_LINES
-
-        h1 = FONT_LABEL.render(hint_lines[0], True, C_TEXT_DIM)
-        surface.blit(h1, (x, hint_y))
-        h2 = FONT_LABEL.render(hint_lines[1], True, C_TEXT_DIM)
-        surface.blit(h2, (x, hint_y + 18))
-        h3 = FONT_LABEL.render(hint_lines[2], True, C_TEXT_DIM)
-        surface.blit(h3, (x, hint_y + 36))
-
-        # --- Campo de input ---
-        input_y = panel_rect.y + panel_rect.height - 48
-        input_rect = pygame.Rect(x, input_y, cw, 34)
-
-        input_bg = (25, 30, 55) if self.input_active else (18, 20, 40)
-        pygame.draw.rect(surface, input_bg, input_rect, border_radius=5)
-        brd = C_ACCENT_CYAN if self.input_active else C_PANEL_BORDER
-        pygame.draw.rect(surface, brd, input_rect, 1, border_radius=5)
-
-        # Prompt
-        prompt = FONT_CMD.render("> ", True, C_ACCENT_CYAN)
-        surface.blit(prompt, (x + 8, input_y + 8))
-
-        # Texto digitado
-        text_surf = FONT_CMD.render(self.input_text, True, C_TEXT_PRIMARY)
-        surface.blit(text_surf, (x + 28, input_y + 8))
-
-        # Cursor piscante
-        if self.input_active and int(self.cursor_blink * 2) % 2 == 0:
-            cx_cursor = x + 28 + text_surf.get_width() + 2
-            pygame.draw.line(surface, C_ACCENT_CYAN, (cx_cursor, input_y + 6),
-                             (cx_cursor, input_y + 26), 2)
+        y = self._draw_live_payload_toggle(surface, x, y, cw) + 14
+        self._draw_command_buttons(surface, x, y, cw, t)
 
     def _draw_command_buttons(self, surface, x, y, width, t):
         self.command_button_rects = []
@@ -4825,10 +4923,10 @@ class DashboardPanel:
             surface.blit(self._render_clipped(FONT_LABEL, f"JSON: {name}", C_ACCENT_GREEN, rect.width - 28), (rect.x + 250, rect.y + 88))
 
     def _mission_overlay_size(self):
-        width = 540 if WIDTH >= 1600 else 488
+        width = 620 if WIDTH >= 1600 else 560 if WIDTH >= 1200 else 488
         width = min(width, max(360, WIDTH - 40))
-        target_height = 600 if HEIGHT >= 900 else 552
-        height = min(target_height, max(500, HEIGHT - 92))
+        target_height = 680 if HEIGHT >= 900 else 600 if HEIGHT >= 720 else 540
+        height = min(target_height, max(520, HEIGHT - 94))
         return width, height
 
     def _mission_overlay_geometry(self, scenario=None):
@@ -4899,6 +4997,8 @@ class DashboardPanel:
             self.mission_overlay_drag_rects.clear()
             self.mission_flow_control_rects.clear()
             self.mission_flow_scrub_rects.clear()
+            self.mission_flow_animations.clear()
+            self.mission_flow_animation = None
             return
 
         self.mission_overlay_rects.clear()
@@ -5111,13 +5211,10 @@ class DashboardPanel:
         self._draw_mission_overlay_metrics(surface, rect, mission, elapsed, bytes_total)
 
     def _mission_overlay_is_animating(self, scenario):
-        return (
-            self.mission_flow_animation is not None
-            and self.mission_flow_animation.get("scenario") == scenario
-        )
+        return scenario in getattr(self, "mission_flow_animations", {})
 
     def _draw_mission_overlay_flow(self, surface, rect, scenario, mission, t):
-        animation = self.mission_flow_animation
+        animation = self._mission_flow_animation_for(scenario)
         if animation is None:
             return
         steps = animation.get("steps", [])
@@ -5155,7 +5252,8 @@ class DashboardPanel:
         )
         y += 18
 
-        step_rect = pygame.Rect(x, y, width, 104)
+        step_h = 90 if rect.height >= 580 else 82
+        step_rect = pygame.Rect(x, y, width, step_h)
         pygame.draw.rect(surface, (8, 12, 26), step_rect, border_radius=5)
         pygame.draw.rect(surface, color, step_rect, width=2, border_radius=5)
 
@@ -5179,21 +5277,18 @@ class DashboardPanel:
             step_rect.y + 45,
             width - 14,
             line_spacing=14,
-            max_lines=3,
+            max_lines=2,
         )
 
-        trace_title, trace_lines = self._mission_step_trace(scenario, mission, active_step)
-        trace_rect = pygame.Rect(x, step_rect.bottom + 8, width, 118)
-        self._draw_function_trace_panel(
-            surface,
-            trace_rect,
-            trace_title,
-            trace_lines,
-            self._active_trace_line(trace_lines, local_progress),
-            color,
-        )
+        hint_y = rect.bottom - 20
+        bar_h = 58
+        bar_y = hint_y - bar_h - 4
+        timeline_y = bar_y - 18
+        visual_top = step_rect.bottom + 8
+        visual_h = max(190, timeline_y - visual_top - 22)
+        visual_rect = pygame.Rect(x, visual_top, width, visual_h)
+        self._draw_mission_transformation_panel(surface, visual_rect, scenario, mission, active_step, local_progress, t)
 
-        timeline_y = trace_rect.bottom + 24
         timeline_x = x + 10
         timeline_w = width - 20
         if len(steps) == 1:
@@ -5249,14 +5344,14 @@ class DashboardPanel:
         pygame.draw.rect(surface, C_TEXT_PRIMARY, packet_rect, width=1, border_radius=4)
         pygame.draw.circle(surface, C_TEXT_PRIMARY, (packet_x, timeline_y), 12, 1)
 
-        bar_rect = pygame.Rect(rect.x, timeline_y + 34, rect.width, 68)
+        bar_rect = pygame.Rect(rect.x, bar_y, rect.width, bar_h)
         self._draw_mission_flow_packet_bar(surface, bar_rect, mission, current_bytes, total_bytes)
         hint = (
             "Arraste a linha para revisar; clique VER DADOS para abrir as métricas."
             if awaiting_confirm
             else "Arraste a linha do tempo para avançar ou voltar durante a explicação."
         )
-        surface.blit(self._render_clipped(FONT_LABEL, hint, C_TEXT_DIM, width), (x, rect.bottom - 20))
+        surface.blit(self._render_clipped(FONT_LABEL, hint, C_TEXT_DIM, width), (x, hint_y))
 
     def _draw_mission_overlay_metrics(self, surface, rect, mission, elapsed, bytes_total):
         metric_x = rect.x + 14
@@ -5561,17 +5656,22 @@ class DashboardPanel:
         if len(pqc_label) > 28:
             pqc_label = pqc_label[:25] + "..."
 
+        fault_color = C_ACCENT_RED if self.silent_failures > 0 else (C_ACCENT_GREEN if self.detected_errors > 0 else C_TEXT_DIM)
+        payload_label = "VIVO" if self.live_payload_enabled else "FIXO"
+        payload_color = C_ACCENT_GREEN if self.live_payload_enabled else C_TEXT_DIM
         items = [
-            f"FPS: {int(clock.get_fps())}",
-            f"HOST RAM: {_format_bytes(_process_rss_bytes())}",
-            esp32_item,
-            f"PQC: {pqc_label}",
-            f"GUARD: {self.guard_mode}",
-            f"SEED: {SIMULATION_SEED}",
+            (esp32_item, None),
+            (f"PQC: {pqc_label}", None),
+            (f"GUARD: {self.guard_mode}", None),
+            (f"FALHAS: I{self.fault_injections} D{self.detected_errors} S{self.silent_failures}", fault_color),
+            (f"PAYLOAD: {payload_label}", payload_color),
         ]
+        show_prompt = bool(self.input_text or self.help_visible)
+        prompt_w = min(360, max(220, WIDTH // 3)) if show_prompt else 0
+        item_limit_x = WIDTH - prompt_w - 40 if show_prompt else WIDTH - 100
         ix = 25
-        for item in items:
-            color = C_ACCENT_CYAN if "SIMULADO" in item else C_TEXT_DIM
+        for item, override_color in items:
+            color = override_color or (C_ACCENT_CYAN if "SIMULADO" in item else C_TEXT_DIM)
             if "CONECTADO" in item:
                 color = C_ACCENT_GREEN
             elif "AGUARDANDO" in item:
@@ -5583,8 +5683,18 @@ class DashboardPanel:
             surf = FONT_LABEL.render(item, True, color)
             surface.blit(surf, (ix, bar_y + 8))
             ix += surf.get_width() + 30
-            if ix < WIDTH - 100:
+            if ix >= item_limit_x:
+                break
+            if ix < item_limit_x:
                 pygame.draw.line(surface, C_PANEL_BORDER, (ix - 15, bar_y + 6), (ix - 15, bar_y + 24), 1)
+
+        if show_prompt:
+            prompt_rect = pygame.Rect(WIDTH - prompt_w - 20, bar_y + 5, prompt_w, 22)
+            pygame.draw.rect(surface, (18, 22, 42), prompt_rect, border_radius=4)
+            pygame.draw.rect(surface, C_PANEL_BORDER, prompt_rect, width=1, border_radius=4)
+            prompt_text = "HELP ativo: ENTER executa comando" if self.help_visible and not self.input_text else f"> {self.input_text}"
+            prompt_color = C_ACCENT_CYAN if self.input_active else C_TEXT_DIM
+            surface.blit(self._render_clipped(FONT_LABEL, prompt_text, prompt_color, prompt_rect.width - 14), (prompt_rect.x + 7, prompt_rect.y + 4))
 
 
 # --- Particulas de poeira cosmica --------------------------------------------
