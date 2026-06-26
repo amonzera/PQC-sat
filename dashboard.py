@@ -3542,17 +3542,104 @@ class DashboardPanel:
         arrow = ((end[0] - 8, end[1] - 5), (end[0], end[1]), (end[0] - 8, end[1] + 5))
         pygame.draw.polygon(surface, color, arrow)
 
-    def _draw_operation_core(self, surface, center, label, sub, color, progress, t):
+    def _draw_process_node(self, surface, center, kind, label, sub, color, progress, t):
+        """Single self-explanatory element for the processing zone.
+
+        Draws a compact chip (72×52) with an integrated mini-icon specific to
+        the ``kind``, the operation label/sub text, and a thin progress bar at
+        the bottom.  Replaces the old ``_draw_operation_core`` + separate icon
+        approach, ensuring nothing overlaps.
+        """
         progress = max(0.0, min(1.0, progress))
-        self._draw_soft_glow(surface, center, 28, color, 38)
-        pulse = int(3 * math.sin(t * 5 + progress * math.pi))
-        for radius, alpha in ((31 + pulse, 100), (21, 210)):
-            pygame.draw.circle(surface, self._mix_color((5, 8, 18), color, alpha / 255.0), center, radius, 2)
-        pygame.draw.circle(surface, (5, 8, 18), center, 24)
-        pygame.draw.circle(surface, color, center, 24, 2)
-        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, 82), (center[0] - 41, center[1] - 12))
+        cw, ch = 72, 52
+        chip = pygame.Rect(center[0] - cw // 2, center[1] - ch // 2, cw, ch)
+
+        # -- subtle glow behind chip --
+        self._draw_soft_glow(surface, center, 14, color, 22)
+
+        # -- chip background --
+        pygame.draw.rect(surface, (5, 8, 18), chip, border_radius=7)
+
+        # -- progress fill (left→right wipe) --
+        if progress > 0.01:
+            fill_w = max(4, int(cw * progress))
+            fill_surf = pygame.Surface((fill_w, ch), pygame.SRCALPHA)
+            pygame.draw.rect(fill_surf, (*self._mix_color((12, 18, 38), color, 0.45), 60),
+                             (0, 0, fill_w, ch), border_radius=7)
+            surface.blit(fill_surf, chip.topleft)
+
+        # -- animated border --
+        pulse = 0.65 + 0.35 * math.sin(t * 4 + progress * math.pi)
+        border_c = self._mix_color((30, 42, 78), color, max(0.0, min(1.0, pulse)))
+        pygame.draw.rect(surface, border_c, chip, width=2, border_radius=7)
+
+        # -- mini-icon (16×16 conceptual area, top-center of chip) --
+        ix, iy = center[0], chip.y + 14
+        kind_lower = kind.lower() if isinstance(kind, str) else ""
+
+        if kind_lower == "crc":
+            # small shield outline
+            sh_pts = [
+                (ix, iy - 7), (ix + 7, iy - 4), (ix + 5, iy + 5),
+                (ix, iy + 8), (ix - 5, iy + 5), (ix - 7, iy - 4),
+            ]
+            pygame.draw.polygon(surface, color, sh_pts, 2)
+            pygame.draw.line(surface, color, (ix - 3, iy + 1), (ix, iy + 4), 2)
+            pygame.draw.line(surface, color, (ix, iy + 4), (ix + 4, iy - 3), 2)
+        elif kind_lower in {"aead", "rng"}:
+            # small padlock
+            pygame.draw.arc(surface, color,
+                            (ix - 5, iy - 8, 10, 12), math.pi, math.tau, 2)
+            pygame.draw.rect(surface, color, (ix - 6, iy, 12, 8), width=2,
+                             border_radius=2)
+            pygame.draw.circle(surface, color, (ix, iy + 3), 1)
+        elif kind_lower == "verify":
+            # small open padlock with checkmark
+            pygame.draw.arc(surface, color,
+                            (ix - 5, iy - 8, 10, 12), math.pi, math.tau, 2)
+            pygame.draw.line(surface, color, (ix + 5, iy - 3), (ix + 8, iy - 6), 2)
+            pygame.draw.rect(surface, color, (ix - 6, iy, 12, 8), width=2,
+                             border_radius=2)
+            pygame.draw.line(surface, C_ACCENT_GREEN, (ix - 2, iy + 3), (ix, iy + 5), 2)
+            pygame.draw.line(surface, C_ACCENT_GREEN, (ix, iy + 5), (ix + 4, iy - 1), 2)
+        elif kind_lower in {"keygen", "mlkem", "decap"}:
+            # small diamond (crystal lattice)
+            diamond = [(ix, iy - 7), (ix + 7, iy), (ix, iy + 7), (ix - 7, iy)]
+            pygame.draw.polygon(surface, color, diamond, 2)
+            # inner lattice dots
+            for dx, dy in ((-3, 0), (3, 0), (0, -3), (0, 3)):
+                pygame.draw.circle(surface, color, (ix + dx, iy + dy), 1)
+        elif kind_lower == "kdf":
+            # small key
+            pygame.draw.circle(surface, color, (ix - 3, iy), 4, 2)
+            pygame.draw.line(surface, color, (ix + 1, iy), (ix + 8, iy), 2)
+            pygame.draw.line(surface, color, (ix + 6, iy), (ix + 6, iy + 3), 2)
+        elif kind_lower == "payload":
+            # three horizontal lines (data/list)
+            for dy in (-4, 0, 4):
+                pygame.draw.line(surface, color, (ix - 6, iy + dy), (ix + 6, iy + dy), 2)
+        else:
+            # default: checkmark in circle
+            pygame.draw.circle(surface, color, (ix, iy), 7, 2)
+            pygame.draw.line(surface, color, (ix - 3, iy), (ix - 1, iy + 3), 2)
+            pygame.draw.line(surface, color, (ix - 1, iy + 3), (ix + 4, iy - 3), 2)
+
+        # -- label text (centered below icon) --
+        lbl_surf = self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, cw - 8)
+        surface.blit(lbl_surf, (center[0] - lbl_surf.get_width() // 2, chip.y + 26))
         if sub:
-            surface.blit(self._render_clipped(FONT_LABEL, sub, (210, 225, 255), 82), (center[0] - 41, center[1] + 6))
+            sub_surf = self._render_clipped(FONT_LABEL, sub, (200, 215, 245), cw - 8)
+            surface.blit(sub_surf, (center[0] - sub_surf.get_width() // 2, chip.y + 39))
+
+        # -- thin progress bar at bottom edge --
+        bar_y = chip.bottom - 4
+        bar_w = cw - 8
+        pygame.draw.rect(surface, (14, 20, 38), (chip.x + 4, bar_y, bar_w, 3),
+                         border_radius=1)
+        if progress > 0.01:
+            pygame.draw.rect(surface, color,
+                             (chip.x + 4, bar_y, max(2, int(bar_w * progress)), 3),
+                             border_radius=1)
 
     def _mix_color(self, base, color, amount):
         amount = max(0.0, min(1.0, amount))
@@ -3697,41 +3784,57 @@ class DashboardPanel:
             pygame.draw.line(surface, self._mix_color((24, 30, 60), color, 0.52), points[index], points[index + 1], 1)
         pygame.draw.rect(surface, color, area, width=1, border_radius=4)
 
-    def _draw_lock_symbol(self, surface, center, color, progress, open_lock=False):
+    def _draw_lock_symbol(self, surface, center, color, progress, open_lock=False, scale=1.0):
         progress = max(0.0, min(1.0, progress))
-        body = pygame.Rect(center[0] - 24, center[1] - 2, 48, 32)
-        shackle = pygame.Rect(center[0] - 18, center[1] - 28, 36, 38)
-        pygame.draw.arc(surface, color, shackle, math.pi, math.tau, 4)
+        s = max(0.3, min(1.0, scale))
+        bw = int(48 * s)
+        bh = int(32 * s)
+        body = pygame.Rect(center[0] - bw // 2, center[1] - int(2 * s), bw, bh)
+        sw = int(36 * s)
+        sh = int(38 * s)
+        shackle = pygame.Rect(center[0] - sw // 2, center[1] - int(28 * s), sw, sh)
+        pygame.draw.arc(surface, color, shackle, math.pi, math.tau, max(2, int(4 * s)))
         if open_lock:
-            offset = int(14 * progress)
-            pygame.draw.line(surface, color, (center[0] + 18, center[1] - 10), (center[0] + 18 + offset, center[1] - 18), 3)
-        pygame.draw.rect(surface, (7, 13, 28), body, border_radius=5)
-        pygame.draw.rect(surface, color, body, width=2, border_radius=5)
-        pygame.draw.circle(surface, color, center, 4)
-        pygame.draw.line(surface, color, (center[0], center[1] + 4), (center[0], center[1] + 14), 2)
+            offset = int(14 * s * progress)
+            arm_x = center[0] + sw // 2
+            pygame.draw.line(surface, color, (arm_x, center[1] - int(10 * s)), (arm_x + offset, center[1] - int(18 * s)), max(2, int(3 * s)))
+        pygame.draw.rect(surface, (7, 13, 28), body, border_radius=max(3, int(5 * s)))
+        pygame.draw.rect(surface, color, body, width=max(1, int(2 * s)), border_radius=max(3, int(5 * s)))
+        pygame.draw.circle(surface, color, center, max(2, int(4 * s)))
+        pygame.draw.line(surface, color, (center[0], center[1] + int(4 * s)), (center[0], center[1] + int(14 * s)), max(1, int(2 * s)))
 
-    def _draw_shield_symbol(self, surface, center, color, progress, breached=False):
+    def _draw_shield_symbol(self, surface, center, color, progress, breached=False, scale=1.0):
         progress = max(0.0, min(1.0, progress))
+        s = max(0.3, min(1.0, scale))
         points = [
-            (center[0], center[1] - 31),
-            (center[0] + 28, center[1] - 18),
-            (center[0] + 21, center[1] + 22),
-            (center[0], center[1] + 35),
-            (center[0] - 21, center[1] + 22),
-            (center[0] - 28, center[1] - 18),
+            (center[0], center[1] - int(31 * s)),
+            (center[0] + int(28 * s), center[1] - int(18 * s)),
+            (center[0] + int(21 * s), center[1] + int(22 * s)),
+            (center[0], center[1] + int(35 * s)),
+            (center[0] - int(21 * s), center[1] + int(22 * s)),
+            (center[0] - int(28 * s), center[1] - int(18 * s)),
         ]
         pygame.draw.polygon(surface, (7, 13, 28), points)
-        pygame.draw.polygon(surface, color, points, width=2)
+        pygame.draw.polygon(surface, color, points, width=max(1, int(2 * s)))
         if breached:
-            crack = [(center[0] - 2, center[1] - 22), (center[0] + 6, center[1] - 4), (center[0] - 4, center[1] + 10), (center[0] + 4, center[1] + 28)]
-            pygame.draw.lines(surface, C_ACCENT_RED, False, crack, 3)
+            crack = [
+                (center[0] - int(2 * s), center[1] - int(22 * s)),
+                (center[0] + int(6 * s), center[1] - int(4 * s)),
+                (center[0] - int(4 * s), center[1] + int(10 * s)),
+                (center[0] + int(4 * s), center[1] + int(28 * s)),
+            ]
+            pygame.draw.lines(surface, C_ACCENT_RED, False, crack, max(2, int(3 * s)))
             return
         check_end = int(1 + 2 * progress)
-        check = [(center[0] - 13, center[1] + 2), (center[0] - 3, center[1] + 14), (center[0] + 16, center[1] - 10)]
+        check = [
+            (center[0] - int(13 * s), center[1] + int(2 * s)),
+            (center[0] - int(3 * s), center[1] + int(14 * s)),
+            (center[0] + int(16 * s), center[1] - int(10 * s)),
+        ]
         if check_end >= 2:
-            pygame.draw.line(surface, color, check[0], check[1], 3)
+            pygame.draw.line(surface, color, check[0], check[1], max(2, int(3 * s)))
         if check_end >= 3:
-            pygame.draw.line(surface, color, check[1], check[2], 3)
+            pygame.draw.line(surface, color, check[1], check[2], max(2, int(3 * s)))
 
     def _draw_radiation_strike(self, surface, rect, target, color, progress, t):
         progress = max(0.0, min(1.0, progress))
@@ -3739,7 +3842,7 @@ class DashboardPanel:
         hit = (source[0] + int((target[0] - source[0]) * progress), source[1] + int((target[1] - source[1]) * progress))
         pygame.draw.line(surface, color, source, hit, 2)
         pygame.draw.circle(surface, color, hit, 4 + int(2 * math.sin(t * 8) ** 2))
-        pygame.draw.circle(surface, color, target, int(10 + 14 * progress), 1)
+        pygame.draw.circle(surface, color, target, int(8 + 10 * progress), 1)
 
     def _mission_visual_scene(self, scenario, mission, step):
         kind = str(step.get("kind", "")).lower()
@@ -3860,18 +3963,7 @@ class DashboardPanel:
         stream_color = C_ACCENT_PURPLE if kind in {"keygen", "mlkem", "decap"} else color
         self._draw_clean_arrow(surface, input_anchor, (center[0] - 38, center[1]), stream_color, progress)
 
-        self._draw_operation_core(surface, center, scene["op"][0], scene["op"][1], color, progress, t)
-        if kind == "crc":
-            self._draw_shield_symbol(surface, (center[0], center[1] + 2), C_ACCENT_GREEN, progress)
-        elif kind in {"aead", "verify", "rng"}:
-            self._draw_lock_symbol(surface, (center[0], center[1] + 2), C_ACCENT_CYAN if kind != "verify" else C_ACCENT_GREEN, progress, open_lock=kind == "verify")
-        elif kind == "kdf":
-            key_rect = pygame.Rect(center[0] - 30, center[1] + 28, 60, 11)
-            pygame.draw.rect(surface, (8, 13, 28), key_rect, border_radius=5)
-            pygame.draw.rect(surface, C_ACCENT_CYAN, key_rect, width=1, border_radius=5)
-            pygame.draw.rect(surface, C_ACCENT_CYAN, (key_rect.x, key_rect.y, int(key_rect.width * progress), key_rect.height), border_radius=5)
-        elif kind in {"keygen", "mlkem", "decap"}:
-            self._draw_lattice_effect(surface, pygame.Rect(center[0] - 31, center[1] - 31, 62, 62), C_ACCENT_PURPLE, progress, t)
+        self._draw_process_node(surface, center, kind, scene["op"][0], scene["op"][1], color, progress, t)
 
         self._draw_clean_arrow(surface, (center[0] + 38, center[1]), output_anchor, color, progress)
         reveal = 0.18 + progress * 0.82
@@ -3948,7 +4040,8 @@ class DashboardPanel:
             right_rect = pygame.Rect(center[0] + 62, row_y, max(190, content.right - center[0] - 70), 42)
             self._draw_bit_strip(surface, left_rect.x, left_rect.y + 4, left_rect.width, "ANTES", before, 0, C_ACCENT_CYAN)
             self._draw_clean_arrow(surface, (left_rect.right + 8, center[1]), (center[0] - 38, center[1]), C_ACCENT_CYAN, min(1.0, progress * 1.15))
-            self._draw_operation_core(surface, center, op_label, op_sub, color, progress, t)
+            fault_kind = "payload"  # bit-flip / radiation steps
+            self._draw_process_node(surface, center, fault_kind, op_label, op_sub, color, progress, t)
             self._draw_radiation_strike(surface, content, center, C_ACCENT_RED, progress, t)
             self._draw_clean_arrow(surface, (center[0] + 38, center[1]), (right_rect.x - 10, center[1]), color, progress)
             self._draw_bit_strip(surface, right_rect.x, right_rect.y + 4, right_rect.width, "DEPOIS", after, mask, color)
@@ -3968,20 +4061,20 @@ class DashboardPanel:
             right_rect = pygame.Rect(center[0] + 66, lane_y, max(190, content.right - center[0] - 74), lane_h)
             self._draw_capsule_row(surface, left, left_rect, 1.0)
             self._draw_clean_arrow(surface, (left_rect.right + 9, center[1]), (center[0] - 40, center[1]), C_ACCENT_PURPLE, progress)
-            self._draw_operation_core(surface, center, op_label, op_sub, color, progress, t)
-            if label in {"CRC32", "VERIFICA"}:
-                self._draw_shield_symbol(surface, center, C_ACCENT_GREEN, progress, breached=False)
-            elif label in {"SEM CRC", "ENTREGA"}:
-                self._draw_shield_symbol(surface, center, C_ACCENT_RED, progress, breached=True)
-            elif label in {"DECAP", "CONFIRMA"}:
-                self._draw_lattice_effect(surface, pygame.Rect(center[0] - 32, center[1] - 32, 64, 64), C_ACCENT_PURPLE, progress, t)
-                pygame.draw.line(surface, C_ACCENT_RED, (center[0] - 19, center[1] - 24), (center[0] + 18, center[1] + 24), 3)
-            else:
+            # Map fault labels to process node kinds
+            fault_kind_map = {
+                "CRC32": "crc", "VERIFICA": "verify",
+                "DECAP": "decap", "CONFIRMA": "decap",
+                "SEM CRC": "payload", "ENTREGA": "payload",
+            }
+            fault_kind = fault_kind_map.get(label, "")
+            self._draw_process_node(surface, center, fault_kind, op_label, op_sub, color, progress, t)
+            if label not in fault_kind_map:
                 self._draw_radiation_strike(surface, content, center, C_ACCENT_RED, progress, t)
             self._draw_clean_arrow(surface, (center[0] + 40, center[1]), (right_rect.x - 10, center[1]), color, progress)
             self._draw_capsule_row(surface, right, right_rect, 0.18 + progress * 0.82, active_index=1 if progress > 0.82 else None)
             if label in {"ENTREGA", "RESULTADO"} and str(fault.get("result", "")).upper() == "SILENT":
-                stamp = pygame.Rect(center[0] - 38, center[1] + 28, 76, 18)
+                stamp = pygame.Rect(center[0] - 38, center[1] + 32, 76, 18)
                 pygame.draw.rect(surface, (70, 12, 24), stamp, border_radius=4)
                 pygame.draw.rect(surface, C_ACCENT_RED, stamp, 1, border_radius=4)
                 surface.blit(self._render_clipped(FONT_LABEL, "SILENT", C_ACCENT_RED, 68), (stamp.x + 7, stamp.y + 2))
