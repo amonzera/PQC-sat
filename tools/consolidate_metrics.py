@@ -307,7 +307,7 @@ CONSOLIDATED_PQC_BENCH = {formatted_pqc_bench}
             "A 80 MHz (limited), PQC subiu para {limited_pqc_ms:.1f} ms ({limited_pqc_vs_classic_elapsed:.1f}x o clássico).",
         )"""
 
-    pattern_notes = re.compile(r'\bnotes\s*=\s*\([^)]*?\)', re.DOTALL)
+    pattern_notes = re.compile(r'\bnotes\s*=\s*\(.*?\n\s*\)', re.DOTALL)
     content, count_notes = pattern_notes.subn(new_notes, content)
     if count_notes == 0:
         print("Warning: Could not replace notes block automatically in dashboard.py", file=sys.stderr)
