@@ -3228,12 +3228,14 @@ class DashboardPanel:
             )
 
         if scenario in {"PQC", "PQC_CRC32"}:
+            # Lado emissor: prepara o par, encapsula o segredo e deriva a chave AES
+            # antes de cifrar. O DECAP só acontece depois, no receptor.
             steps.extend(
                 (
                     {
                         "label": "KEYGEN",
-                        "detail": "gera chaves ML-KEM",
-                        "explain": "A Wisdom cria o par ML-KEM-512. É custo local de CPU/RAM; ainda não cifra o payload.",
+                        "detail": "par ML-KEM (rx)",
+                        "explain": "O receptor cria o par ML-KEM-512 e publica a chave pública. É custo local de CPU/RAM; o pacote ainda não cresce.",
                         "kind": "keygen",
                         "packet_bytes": payload + checksum,
                         "added_bytes": 0,
@@ -3242,8 +3244,8 @@ class DashboardPanel:
                     },
                     {
                         "label": "ENCAP",
-                        "detail": "encapsula segredo",
-                        "explain": "O emissor encapsula um segredo compartilhado. O ciphertext ML-KEM entra no pacote para o receptor recuperar a chave.",
+                        "detail": "encapsula (tx)",
+                        "explain": "O emissor usa a chave pública para encapsular um segredo compartilhado. O ciphertext ML-KEM entra no pacote para o receptor depois recuperar a chave.",
                         "kind": "mlkem",
                         "packet_bytes": payload + checksum + mlkem,
                         "added_bytes": mlkem,
@@ -3251,19 +3253,9 @@ class DashboardPanel:
                         "color": C_ACCENT_PURPLE,
                     },
                     {
-                        "label": "DECAP",
-                        "detail": "recupera segredo",
-                        "explain": "O receptor decapsula o ciphertext ML-KEM e chega ao mesmo segredo compartilhado sem expor esse segredo.",
-                        "kind": "decap",
-                        "packet_bytes": payload + checksum + mlkem,
-                        "added_bytes": 0,
-                        "time_us": self._mission_int(mission, "decap_us"),
-                        "color": C_ACCENT_PURPLE,
-                    },
-                    {
                         "label": "KDF",
-                        "detail": "deriva chave AES",
-                        "explain": "O segredo ML-KEM vira uma chave AES-128 de sessão. O ML-KEM estabelece a chave; quem cifra o payload é o AES-GCM.",
+                        "detail": "deriva chave AES (tx)",
+                        "explain": "Ainda no emissor: o segredo ML-KEM vira uma chave AES-128 de sessão. O ML-KEM estabelece a chave; quem cifra o payload é o AES-GCM.",
                         "kind": "kdf",
                         "packet_bytes": payload + checksum + mlkem,
                         "added_bytes": 0,
@@ -3289,8 +3281,8 @@ class DashboardPanel:
         steps.append(
             {
                 "label": "AES-GCM",
-                "detail": "cifra e tag",
-                "explain": "AES-128-GCM cifra o payload e gera uma tag de autenticação. O nonce acompanha o pacote e não deve repetir com a mesma chave.",
+                "detail": "cifra e tag (tx)",
+                "explain": "O emissor cifra o payload com AES-128-GCM e gera a tag de autenticação. O pacote (ciphertext ML-KEM + nonce + ciphertext + tag) é então transmitido. O nonce não pode repetir com a mesma chave.",
                 "kind": "aead",
                 "packet_bytes": payload + checksum + mlkem + nonce + gcm + hmac,
                 "added_bytes": nonce + gcm + hmac,
@@ -3298,6 +3290,22 @@ class DashboardPanel:
                 "color": C_ACCENT_ORANGE,
             }
         )
+
+        if scenario in {"PQC", "PQC_CRC32"}:
+            # Lado receptor: só agora, com o pacote recebido, decapsula o
+            # ciphertext ML-KEM para chegar ao mesmo segredo compartilhado.
+            steps.append(
+                {
+                    "label": "DECAP",
+                    "detail": "recupera segredo (rx)",
+                    "explain": "Já no receptor: ele decapsula o ciphertext ML-KEM recebido com a chave privada e chega ao mesmo segredo compartilhado, sem expô-lo, derivando de novo a chave AES.",
+                    "kind": "decap",
+                    "packet_bytes": payload + checksum + mlkem + nonce + gcm + hmac,
+                    "added_bytes": 0,
+                    "time_us": self._mission_int(mission, "decap_us"),
+                    "color": C_ACCENT_PURPLE,
+                }
+            )
 
         verify_detail = "decifra, tag e CRC" if checksum > 0 else "decifra e tag GCM"
         verify_time = self._mission_int(mission, "decrypt_us", self._mission_int(mission, "verify_us"))
@@ -3307,7 +3315,7 @@ class DashboardPanel:
             {
             "label": "VERIFICA",
             "detail": verify_detail,
-            "explain": "No recebimento, AES-GCM só libera plaintext se a tag for válida. Com CRC32, a demo ainda checa corrupção acidental do payload.",
+            "explain": "No receptor, AES-GCM só libera o plaintext se a tag for válida. Com CRC32, a demo ainda checa corrupção acidental do payload.",
                 "kind": "verify",
                 "packet_bytes": payload + checksum + mlkem + nonce + gcm + hmac,
                 "added_bytes": 0,

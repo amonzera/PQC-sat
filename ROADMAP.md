@@ -225,6 +225,15 @@ projeto sem reconstruir decisões antigas:
   payload; raio cósmico (emissora pulsante + raio irregular + faísca) atingindo
   o bit invertido no passo de bit-flip. Código morto removido: constantes de
   sprite PIX_*, primitivas de esquema e pintores de cena antigos.
+- 2026-06-26: ordem das etapas do popup de mensagem corrigida para ser fiel à
+  sequência real de uma mensagem. Antes o fluxo PQC mostrava
+  `KEYGEN → ENCAP → DECAP → KDF → AES-GCM → VERIFICA`, com o DECAP (receptor)
+  acontecendo antes de a chave ser derivada e antes de a mensagem ser cifrada.
+  Agora segue lado emissor depois lado receptor:
+  `payload → [CRC32] → KEYGEN (rx) → ENCAP (tx) → KDF (tx) → AES-GCM (tx) →
+  DECAP (rx) → VERIFICA (rx) → RESULTADO`. As microexplicações foram marcadas
+  com `(tx)`/`(rx)` para deixar claro quando cada operação ocorre no emissor ou
+  no receptor.
 
 O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar

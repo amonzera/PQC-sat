@@ -885,7 +885,7 @@ O que acontece:
 2. `PQC` executa ML-KEM-512, deriva chave AES e cifra a mensagem;
 3. `PQC_CRC32` repete o fluxo PQC e protege CRC32 junto do payload;
 4. o console e o overlay de mensagem entregue mostram tempo e bytes;
-5. cada cenário abre um popup próprio; arraste os cartões pelo topo e mantenha `CLASSIC`, `PQC` e `PQC+CRC` lado a lado até clicar no `X`, permitindo comparar tempo, bytes, heap, keygen, encap, decap, AES-GCM e CRC;
+5. cada cenário abre um popup próprio; arraste os cartões pelo topo e mantenha `CLASSIC`, `PQC` e `PQC+CRC` lado a lado até clicar no `X`, permitindo comparar tempo, bytes, heap, keygen, encap, KDF, AES-GCM, decap e verificação na ordem real da mensagem;
 6. quando dois ou mais popups ficam abertos, o comparador ao vivo aparece no centro inferior e separa payload, ML-KEM, nonce, tag GCM e CRC32;
 7. LEDs/bargraph reforçam visualmente o aumento de custo.
 

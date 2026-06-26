@@ -257,17 +257,19 @@ avançados são acionados manualmente pelo botão ou pelo terminal textual. Os c
 individuais de tempo/tráfego de cada cenário (`CLÁSSICA`, `PQC`, `PQC+CRC`) são exibidos
 diretamente no log do console do painel lateral assim que a mensagem é enviada/recebida.
 Cada resposta `MISSION` abre um popup persistente. Primeiro, a própria janela do
-popup anima o fluxo real do firmware: `payload`, `KEYGEN`, `ENCAP`, `DECAP`,
-`HMAC`, `CRC32`, verificação e resultado, mostrando microexplicações e o tamanho
-acumulado do pacote com os bytes reais da Wisdom. A animação é deliberadamente
-mais lenta e possui um botão discreto `PAUSAR`/`PLAY` para o apresentador parar
-em `KEYGEN`, `ENCAP`, `DECAP`, `HMAC` ou `CRC32` e explicar o custo técnico. Ao
+popup anima o fluxo real do firmware na ordem sequencial fiel da mensagem:
+`payload`, `CRC32` (quando aplicável), e então o lado emissor (`KEYGEN`, `ENCAP`,
+`KDF`, `AES-GCM`), seguido do lado receptor (`DECAP`, `VERIFICA`) e do
+`RESULTADO`, mostrando microexplicações e o tamanho acumulado do pacote com os
+bytes reais da Wisdom. A animação é deliberadamente mais lenta e possui um botão
+discreto `PAUSAR`/`PLAY` para o apresentador parar em `KEYGEN`, `ENCAP`, `KDF`,
+`AES-GCM` ou `DECAP` e explicar o custo técnico. Ao
 final da animação, a mesma janela passa a exibir as métricas detalhadas. Há um
 popup independente por cenário (`CLASSIC`, `PQC`, `PQC+CRC`): o apresentador
 pode arrastar os cartões pelo topo, compará-los lado a lado e fechar cada um
 apenas pelo `X`. Quando dois ou mais cenários estão abertos, o dashboard mostra
 um comparador automático com tempo, bytes e composição do pacote (`payload`,
-`HMAC`, ciphertext `ML-KEM` e `CRC32`).
+ciphertext `ML-KEM`, nonce, tag `GCM` e `CRC32`).
 Respostas `MISSION` e `PQC_*` entram no JSON como métricas estruturadas,
 incluindo tempos, bytes, KAT, `key_match`, `key_confirmed`, `tag_match`,
 tamanhos e CRCs curtos, sem exportar segredos completos.

@@ -121,7 +121,7 @@ respondendo pela serial. Sem `SAT CONECTADO`, o painel deve recusar o envio.
 4. Enviar mensagem em modo pós-quântico (PQC) sem integridade:
    - Clique em `PQC` (o botão fica roxo).
    - Clique em `ENVIAR MSG`.
-   - Mantenha o popup aberto e destaque `keygen`, `encap`, `decap`, bytes e heap.
+   - Mantenha o popup aberto e destaque a ordem real: `keygen`/`encap`/`KDF`/`AES-GCM` no emissor e depois `decap`/`verifica` no receptor, além de bytes e heap.
    - Feche no `X`.
 5. Enviar mensagem em modo pós-quântico (PQC) com integridade:
    - Clique em `PQC+CRC` (o botão fica verde).
@@ -190,7 +190,9 @@ Use apenas a placa conectada. Não use `--simulated` para a apresentação final
    real coletado agora.”
 4. Clique `PQC` -> `ENVIAR MSG`.
    Fala: “Agora o mesmo envio usa ML-KEM-512 para estabelecer a chave AES.
-   Observem `keygen`, `encap`, `decap` e depois AES-GCM cifrando o payload.”
+   Observem a ordem real: no emissor, `keygen`, `encap`, deriva a chave (KDF) e
+   o AES-GCM cifra o payload; só depois, no receptor, vem o `decap` e a
+   verificação.”
 5. Clique `PQC+CRC` -> `ENVIAR MSG`.
    Fala: “Agora somamos um guardião simples de integridade no payload. O custo
    em bytes e tempo aparece junto com a validação.”

@@ -1329,14 +1329,17 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertFalse(panel.mission_flow_animation["awaiting_confirm"])
         self.assertNotIn("paused", panel.mission_flow_animation)
         steps = panel.mission_flow_animation["steps"]
+        # Ordem fiel da mensagem: lado emissor (KEYGEN->ENCAP->KDF->AES-GCM)
+        # e depois lado receptor (DECAP->VERIFICA). O DECAP só ocorre apos a
+        # cifragem, pois depende do pacote ja transmitido.
         self.assertEqual(
             [step["label"] for step in steps],
-            ["PAYLOAD", "CRC32", "KEYGEN", "ENCAP", "DECAP", "KDF", "AES-GCM", "VERIFICA", "RESULTADO"],
+            ["PAYLOAD", "CRC32", "KEYGEN", "ENCAP", "KDF", "AES-GCM", "DECAP", "VERIFICA", "RESULTADO"],
         )
         self.assertEqual(steps[-1]["packet_bytes"], 841)
         self.assertEqual(steps[1]["added_bytes"], 4)
         self.assertEqual(steps[3]["added_bytes"], 768)
-        self.assertEqual(steps[6]["added_bytes"], 28)
+        self.assertEqual(steps[5]["added_bytes"], 28)
         self.assertIn("ciphertext ML-KEM", steps[3]["explain"])
         self.assertTrue(panel._mission_overlay_is_animating("PQC_CRC32"))
 
