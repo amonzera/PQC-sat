@@ -25,6 +25,9 @@ O repositório contém hoje:
 - splash inicial opcional, autosave no encerramento, métricas superiores
   essenciais de CPU/RAM, onboarding, botão `RESULTADOS` e testes headless para
   1920x1080 e 1366x768;
+- animação dos popups de missão e falha em diagrama limpo de três blocos
+  `[ENTRADA] → [OPERAÇÃO] → [SAÍDA]` com ícones line-art, selos de resultado
+  check/cross, partículas de dados e efeito de raio cósmico no bit-flip;
 - roteiro de apresentação orientado ao dashboard, sequência de demo e limites
   científicos;
 - guia didático completo para conduzir a apresentação com público leigo em

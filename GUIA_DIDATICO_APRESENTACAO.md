@@ -218,7 +218,7 @@ Ele executa uma entrega de mensagem curta no firmware e retorna métricas:
 - heap/RAM livre;
 - perfil de CPU;
 - resultado da entrega;
-- custo de HMAC;faça uma ultima verificaçao por bugs e funcionalidades quebradas no codigo inteiro
+- custo de HMAC;
 - custo de ML-KEM quando o cenário usa PQC;
 - custo de CRC32 quando o cenário usa checksum.
 
@@ -238,8 +238,31 @@ MISSION PQC_CRC32 5051432D5341547C533D...
 
 Esse hexadecimal é apenas a forma serial dos bytes do payload. O popup traduz
 a ideia visualmente mostrando `PAYLOAD REAL DA PLACA`, os sensores usados, o
-tamanho do payload e depois as etapas `KEYGEN`, `ENCAP`, `DECAP`, `HMAC`,
-`CRC32` e verificação.
+tamanho do payload e depois as etapas de cifra e verificação.
+
+#### Formato da animação de missão e falha
+
+Cada etapa do popup usa um diagrama limpo de três blocos:
+
+```
+[ ENTRADA ]  →  [ OPERAÇÃO ]  →  [ SAÍDA ]
+```
+
+Os blocos mostram título curto, detalhe técnico e, abaixo do diagrama, duas
+linhas de teoria. Facilitadores visuais discretos complementam a leitura:
+
+- **ícones line-art** no bloco de operação: escudo (CRC32/verificação), cadeado
+  fechado (cifra AES-GCM ou encapsulamento ML-KEM), cadeado aberto (decaps),
+  chave (keygen/KDF), `#` (hash SHA-256), antena (sensor/RNG), satélite (downlink);
+- **selos de resultado** no bloco de saída: `✓` verde quando a operação
+  protege ou confirma algo, `✗` vermelho quando uma falha passa ou é detectada;
+- **partículas de dados** fluindo pelas setas nos passos de payload e coleta;
+- **raio cósmico** no passo de bit-flip: emissora pulsante, raio irregular e
+  faísca no bit exato invertido.
+
+Nas falhas, o popup mostra `PAYLOAD/CIPHERTEXT → BIT-FLIP → GUARDIÃO →
+VERIFICAÇÃO → RESULTADO` com byte antes/depois, CRC antes/depois e a diferença
+entre `SILENT`, `DETECTED_GUARD`, `KEY_MISMATCH` e `PROTOCOL_REJECT`.
 
 Leitura para explicar em sala:
 

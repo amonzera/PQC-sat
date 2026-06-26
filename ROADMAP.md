@@ -215,6 +215,16 @@ projeto sem reconstruir decisões antigas:
   dashboard expõe a função apenas dentro de `RESULTADOS`, com confirmação em
   dois cliques e aviso de timeout didático após 8 s; não entra nos botões
   laterais nem substitui as métricas oficiais.
+- 2026-06-26: animação dos popups de missão e falha refatorada para um
+  diagrama limpo de três blocos `[ENTRADA] → [OPERAÇÃO] → [SAÍDA]` por etapa,
+  com layout uniforme e sem texto cortado. Cada bloco mostra título, sub-título
+  técnico e, abaixo, duas linhas de teoria. Facilitadores visuais discretos foram
+  adicionados: ícones em line-art (escudo, cadeado, chave, hash, sensor, DRBG,
+  satélite, lista, alerta) nos blocos de operação; selos `✓` verde/`✗` vermelho
+  nos blocos de saída; partículas de dados fluindo pelas setas nos passos de
+  payload; raio cósmico (emissora pulsante + raio irregular + faísca) atingindo
+  o bit invertido no passo de bit-flip. Código morto removido: constantes de
+  sprite PIX_*, primitivas de esquema e pintores de cena antigos.
 
 O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar
