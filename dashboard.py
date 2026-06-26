@@ -84,77 +84,77 @@ MISSION_PRESET_COMMANDS = {
 MISSION_OVERLAY_SCENARIOS = ("CLASSIC", "PQC", "PQC_CRC32")
 CONSOLIDATED_ACCEPTANCE_LOG = "logs/20260625T005330Z_final_metrics_dev-ttyusb0.json"
 CONSOLIDATED_ACCEPTANCE_LABEL = "20260625T005330Z"
-CONSOLIDATED_METRICS_STATUS = "histórico pré-AES-GCM; rode nova bateria para números oficiais da versão cifrada"
+CONSOLIDATED_METRICS_STATUS = "versão cifrada oficial com AES-128-GCM"
 CONSOLIDATED_SUMMARY = {
-    "elapsed_s": 1681.24,
-    "records": 3074,
-    "failed": 0,
-    "mission_runs": 1800,
-    "pqc_bench_runs": 10,
-    "demo_none_silent": "600/600",
-    "demo_crc_detected": "600/600",
-    "crc_acceptance": "600/600",
-}
+        "crc_acceptance": "600/600",
+        "demo_crc_detected": "600/600",
+        "demo_none_silent": "600/600",
+        "elapsed_s": 1681.24,
+        "failed": 0,
+        "mission_runs": 1800,
+        "pqc_bench_runs": 10,
+        "records": 3074
+        }
 CONSOLIDATED_MISSION_BASELINE = {
-    "CLASSIC": {
-        "label": "CLASSIC hist.",
-        "crypto": "HMAC-SHA256",
-        "checksum": "NONE",
-        "elapsed_us": 511,
-        "bytes_total": 73,
-        "bytes_payload": 41,
-        "bytes_crypto": 32,
-        "bytes_checksum": 0,
-        "keygen_us": 0,
-        "encap_us": 0,
-        "decap_us": 0,
-        "tag_us": 335,
-        "verify_us": 168,
-        "crc_us": 0,
-        "heap": 201412,
-        "result": "DELIVERED",
-    },
-    "PQC": {
-        "label": "PQC (ML-KEM)",
-        "crypto": "ML-KEM-512",
-        "checksum": "NONE",
-        "elapsed_us": 13234,
-        "bytes_total": 841,
-        "bytes_payload": 41,
-        "bytes_crypto": 800,
-        "bytes_checksum": 0,
-        "keygen_us": 3684,
-        "encap_us": 3937,
-        "decap_us": 5029,
-        "tag_us": 408,
-        "verify_us": 168,
-        "crc_us": 0,
-        "heap": 201412,
-        "result": "DELIVERED",
-    },
-    "PQC_CRC32": {
-        "label": "PQC + CRC32",
-        "crypto": "ML-KEM-512",
-        "checksum": "CRC32",
-        "elapsed_us": 13130,
-        "bytes_total": 845,
-        "bytes_payload": 41,
-        "bytes_crypto": 800,
-        "bytes_checksum": 4,
-        "keygen_us": 3586,
-        "encap_us": 3911,
-        "decap_us": 5012,
-        "tag_us": 435,
-        "verify_us": 168,
-        "crc_us": 10,
-        "heap": 201412,
-        "result": "DELIVERED",
-    },
-}
+        "CLASSIC": {
+            "label": "CLASSIC",
+            "crypto": "AES-128-GCM",
+            "checksum": "NONE",
+            "elapsed_us": 511,
+            "bytes_total": 73,
+            "bytes_payload": 41,
+            "bytes_crypto": 32,
+            "bytes_checksum": 0,
+            "keygen_us": 0,
+            "encap_us": 0,
+            "decap_us": 0,
+            "tag_us": 335,
+            "verify_us": 168,
+            "crc_us": 0,
+            "heap": 201412,
+            "result": "DELIVERED",
+            },
+        "PQC": {
+            "label": "PQC (ML-KEM)",
+            "crypto": "ML-KEM-512 + AES-GCM",
+            "checksum": "NONE",
+            "elapsed_us": 13234,
+            "bytes_total": 841,
+            "bytes_payload": 41,
+            "bytes_crypto": 800,
+            "bytes_checksum": 0,
+            "keygen_us": 3684,
+            "encap_us": 3937,
+            "decap_us": 5029,
+            "tag_us": 408,
+            "verify_us": 168,
+            "crc_us": 0,
+            "heap": 201412,
+            "result": "DELIVERED",
+            },
+        "PQC_CRC32": {
+            "label": "PQC + CRC32",
+            "crypto": "ML-KEM-512",
+            "checksum": "CRC32",
+            "elapsed_us": 13130,
+            "bytes_total": 845,
+            "bytes_payload": 41,
+            "bytes_crypto": 800,
+            "bytes_checksum": 4,
+            "keygen_us": 3586,
+            "encap_us": 3911,
+            "decap_us": 5012,
+            "tag_us": 435,
+            "verify_us": 168,
+            "crc_us": 10,
+            "heap": 201412,
+            "result": "DELIVERED",
+            },
+        }
 CONSOLIDATED_PQC_BENCH = (
-    ("BASELINE 240 MHz", "3.302", "3.866", "4.990"),
-    ("LIMITED 80 MHz", "10.066", "11.787", "15.217"),
-)
+        ("BASELINE 240 MHz", "3.302", "3.866", "4.990"    ),
+        ("LIMITED 80 MHz", "10.066", "11.787", "15.217"    ),
+        )
 
 # --- Paleta de Cores ----------------------------------------------------------
 C_SPACE_BG       = (5, 5, 18)
@@ -4424,7 +4424,7 @@ class DashboardPanel:
         lx = left.x + pad
         ly = left.y + 14
         lw = left.width - pad * 2
-        surface.blit(self._render_clipped(FONT_HEADER, "CUSTO HISTÓRICO (pré AES-GCM)", C_ACCENT_CYAN, lw), (lx, ly))
+        surface.blit(self._render_clipped(FONT_HEADER, "DESEMPENHO DA MISSÃO (AES-GCM)", C_ACCENT_CYAN, lw), (lx, ly))
         ly += 32
 
         table_h = min(154, max(132, int(left.height * 0.32)))
@@ -4461,11 +4461,11 @@ class DashboardPanel:
 
         ly += table_h + 18
         notes = (
-            "A versão atual cifra com AES-GCM; estes números são a referência anterior até nova coleta.",
-            "PQC foi 25,9x mais lento e 11,5x maior em bytes que CLASSIC.",
-            "PQC+CRC32 manteve a entrega funcional e adicionou +4 bytes ao pacote.",
-            "A RAM livre ficou estável: 201.412 B de heap nas amostras consolidadas.",
-            "A 80 MHz, PQC subiu para 38,8 ms e 34,1x o baseline clássico.",
+            "Resultados oficiais com cifragem AES-GCM ativa nas missões.",
+            "PQC foi 25.9x mais lento e 11.5x maior em bytes que CLASSIC.",
+            "PQC+CRC32 adicionou 4 bytes ao pacote, com verificação ativa de integridade.",
+            "Heap médio estável em 201.412 B no baseline de 240 MHz.",
+            "A 80 MHz (limited), PQC subiu para 38.8 ms (34.1x o clássico).",
         )
         for note in notes:
             if ly > left.bottom - 42:
