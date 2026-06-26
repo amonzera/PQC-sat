@@ -168,17 +168,20 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(panel.fault_overlay["guard"], "CRC32")
         self.assertEqual(panel.fault_overlay["result"], "DETECTED_GUARD")
 
-    def test_fault_visualization_animates_and_can_pause(self):
+    def test_fault_visualization_animates_can_scrub_and_requires_confirmation(self):
         panel = dashboard.DashboardPanel()
         panel._execute_command("BIT_FLIP 0 0x01")
 
         self.assertTrue(panel.fault_overlay_visible)
         self.assertIsNotNone(panel.fault_flow_animation)
-        self.assertGreaterEqual(panel.fault_flow_animation["duration"], 9.5)
+        self.assertEqual(panel.fault_flow_animation["duration"], dashboard.FAULT_FLOW_ANIMATION_SECONDS)
+        self.assertFalse(panel.fault_flow_animation["awaiting_confirm"])
+        self.assertNotIn("paused", panel.fault_flow_animation)
         self.assertEqual(
             [step["label"] for step in panel.fault_flow_animation["steps"]],
-            ["PAYLOAD", "BIT-FLIP", "GUARD", "VERIFICA", "RESULTADO"],
+            ["PAYLOAD", "BIT-FLIP", "SEM CRC", "ENTREGA", "RESULTADO"],
         )
+        self.assertIn("Não existe checksum", panel.fault_flow_animation["steps"][2]["explain"])
         self.assertEqual(panel.fault_overlay["before_byte"], "0x50")
         self.assertEqual(panel.fault_overlay["after_byte"], "0x51")
 
@@ -191,25 +194,63 @@ class DashboardCommandTests(unittest.TestCase):
             panel.draw(surface, 0.5, satellite)
             self.assertIsNotNone(panel.fault_overlay_rect)
             self.assertIsNotNone(panel.fault_flow_control_rect)
+            self.assertIsNotNone(panel.fault_flow_scrub_rect)
 
+            scrub_rect = panel.fault_flow_scrub_rect
+            scrub_start = pygame.event.Event(
+                pygame.MOUSEBUTTONDOWN,
+                {"button": 1, "pos": (scrub_rect.x, scrub_rect.centery)},
+            )
+            self.assertTrue(panel._handle_fault_overlay_event(scrub_start))
+            self.assertAlmostEqual(panel.fault_flow_animation["age"], 0.0)
+            scrub_end = pygame.event.Event(
+                pygame.MOUSEMOTION,
+                {"pos": (scrub_rect.right, scrub_rect.centery)},
+            )
+            self.assertTrue(panel._handle_fault_overlay_event(scrub_end))
+            self.assertEqual(panel.fault_flow_animation["age"], dashboard.FAULT_FLOW_ANIMATION_SECONDS)
+            self.assertTrue(panel.fault_flow_animation["awaiting_confirm"])
+            scrub_release = pygame.event.Event(
+                pygame.MOUSEBUTTONUP,
+                {"button": 1, "pos": (scrub_rect.right, scrub_rect.centery)},
+            )
+            self.assertTrue(panel._handle_fault_overlay_event(scrub_release))
+
+            panel.fault_flow_animation["awaiting_confirm"] = False
+            panel.fault_flow_animation["age"] = 0.0
             control_rect = panel.fault_flow_control_rect
             click = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": control_rect.center})
             self.assertTrue(panel._handle_fault_overlay_event(click))
-            self.assertTrue(panel.fault_flow_animation["paused"])
-            paused_age = panel.fault_flow_animation["age"]
+            self.assertIsNotNone(panel.fault_flow_animation)
             panel.update(2.0)
-            self.assertEqual(panel.fault_flow_animation["age"], paused_age)
-
-            self.assertTrue(panel._handle_fault_overlay_event(click))
-            self.assertFalse(panel.fault_flow_animation["paused"])
-            panel.update(0.5)
-            self.assertGreater(panel.fault_flow_animation["age"], paused_age)
+            self.assertGreater(panel.fault_flow_animation["age"], 0.0)
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
 
         panel.update(dashboard.FAULT_FLOW_ANIMATION_SECONDS + 0.1)
+        self.assertIsNotNone(panel.fault_flow_animation)
+        self.assertTrue(panel.fault_flow_animation["awaiting_confirm"])
+        self.assertTrue(panel.fault_overlay_visible)
+
+        control_rect = panel.fault_flow_control_rect
+        click = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": control_rect.center})
+        self.assertTrue(panel._handle_fault_overlay_event(click))
         self.assertIsNone(panel.fault_flow_animation)
         self.assertTrue(panel.fault_overlay_visible)
+
+    def test_crc_fault_flow_shows_checksum_verification(self):
+        panel = dashboard.DashboardPanel()
+        panel._execute_command("CHECKSUM ON")
+        panel._execute_command("BIT_FLIP 0 0x01")
+
+        self.assertTrue(panel.fault_overlay_visible)
+        self.assertEqual(panel.fault_overlay["result"], "DETECTED_GUARD")
+        self.assertEqual(
+            [step["label"] for step in panel.fault_flow_animation["steps"]],
+            ["PAYLOAD", "BIT-FLIP", "CRC32", "VERIFICA", "RESULTADO"],
+        )
+        self.assertIn("CRC32 salvo", panel.fault_flow_animation["steps"][2]["explain"])
+        self.assertIn("recalculamos o CRC", panel.fault_flow_animation["steps"][3]["explain"])
 
     def test_manual_bit_flip_uses_given_position_and_mask(self):
         panel = dashboard.DashboardPanel()
@@ -638,15 +679,22 @@ class DashboardCommandTests(unittest.TestCase):
                 "scenario": "PQC_CRC32",
                 "result": "DELIVERED",
                 "crypto": "ML-KEM-512",
+                "cipher": "AES-128-GCM",
                 "checksum": "CRC32",
+                "confirmation": "AES-128-GCM",
                 "elapsed_us": "15000",
                 "payload_len": str(payload_len),
                 "bytes_payload": str(payload_len),
-                "bytes_crypto": "800",
+                "bytes_ciphertext": str(payload_len + 4),
+                "bytes_mlkem": "768",
+                "bytes_nonce": "12",
+                "bytes_gcm_tag": "16",
+                "bytes_crypto": "796",
                 "bytes_checksum": "4",
-                "bytes_total": str(payload_len + 804),
+                "bytes_total": str(payload_len + 800),
                 "key_match": "1",
                 "tag_match": "1",
+                "aead_match": "1",
                 "crc_match": "1",
             },
         )
@@ -695,23 +743,34 @@ class DashboardCommandTests(unittest.TestCase):
                 "scenario": "PQC_CRC32",
                 "result": "DELIVERED",
                 "crypto": "ML-KEM-512",
+                "cipher": "AES-128-GCM",
                 "checksum": "CRC32",
+                "confirmation": "AES-128-GCM",
                 "profile": "BASELINE",
                 "cpu_mhz": "240",
                 "heap": "201412",
                 "elapsed_us": "13367",
                 "bytes_payload": "41",
-                "bytes_crypto": "800",
+                "bytes_ciphertext": "45",
+                "bytes_mlkem": "768",
+                "bytes_nonce": "12",
+                "bytes_gcm_tag": "16",
+                "bytes_crypto": "796",
                 "bytes_checksum": "4",
-                "bytes_total": "845",
+                "bytes_total": "841",
                 "keygen_us": "3679",
                 "encap_us": "3988",
                 "decap_us": "5087",
+                "rng_us": "4",
+                "kdf_us": "39",
+                "encrypt_us": "435",
+                "decrypt_us": "163",
                 "tag_us": "435",
                 "verify_us": "163",
                 "crc_us": "10",
                 "key_match": "1",
                 "tag_match": "1",
+                "aead_match": "1",
                 "crc_match": "1",
             },
         )
@@ -738,37 +797,49 @@ class DashboardCommandTests(unittest.TestCase):
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
 
-    def test_mission_popups_can_be_compared_and_dragged_independently(self):
+    def test_mission_popups_can_be_opened_and_dragged_independently(self):
         panel = dashboard.DashboardPanel()
 
         def mission_payload(scenario, elapsed_us, bytes_crypto, bytes_checksum, crc_us):
+            use_pqc = scenario != "CLASSIC"
             return {
                 "scenario": scenario,
                 "result": "DELIVERED",
-                "crypto": "HMAC-SHA256" if scenario == "CLASSIC" else "ML-KEM-512",
+                "crypto": "AES-128-GCM" if scenario == "CLASSIC" else "ML-KEM-512",
+                "cipher": "AES-128-GCM",
                 "checksum": "CRC32" if scenario == "PQC_CRC32" else "NONE",
+                "confirmation": "AES-128-GCM",
                 "profile": "BASELINE",
                 "cpu_mhz": "240",
                 "heap": "201412",
                 "elapsed_us": str(elapsed_us),
                 "bytes_payload": "41",
+                "bytes_ciphertext": str(41 + bytes_checksum),
+                "bytes_mlkem": "768" if use_pqc else "0",
+                "bytes_nonce": "12",
+                "bytes_gcm_tag": "16",
                 "bytes_crypto": str(bytes_crypto),
                 "bytes_checksum": str(bytes_checksum),
                 "bytes_total": str(41 + bytes_crypto + bytes_checksum),
                 "keygen_us": "0" if scenario == "CLASSIC" else "3679",
                 "encap_us": "0" if scenario == "CLASSIC" else "3988",
                 "decap_us": "0" if scenario == "CLASSIC" else "5087",
+                "rng_us": "4",
+                "kdf_us": "0" if scenario == "CLASSIC" else "39",
+                "encrypt_us": "435",
+                "decrypt_us": "163",
                 "tag_us": "435",
                 "verify_us": "163",
                 "crc_us": str(crc_us),
                 "key_match": "1",
                 "tag_match": "1",
+                "aead_match": "1",
                 "crc_match": "1" if scenario == "PQC_CRC32" else "NA",
             }
 
-        panel._apply_hardware_response("MISSION CLASSIC", mission_payload("CLASSIC", 721, 32, 0, 0))
-        panel._apply_hardware_response("MISSION PQC", mission_payload("PQC", 13536, 800, 0, 0))
-        panel._apply_hardware_response("MISSION PQC_CRC32", mission_payload("PQC_CRC32", 13367, 800, 4, 10))
+        panel._apply_hardware_response("MISSION CLASSIC", mission_payload("CLASSIC", 721, 28, 0, 0))
+        panel._apply_hardware_response("MISSION PQC", mission_payload("PQC", 13536, 796, 0, 0))
+        panel._apply_hardware_response("MISSION PQC_CRC32", mission_payload("PQC_CRC32", 13367, 796, 4, 10))
 
         self.assertEqual(set(panel.mission_overlays), {"CLASSIC", "PQC", "PQC_CRC32"})
         self.assertTrue(panel.mission_overlay_visible)
@@ -781,18 +852,18 @@ class DashboardCommandTests(unittest.TestCase):
             satellite = dashboard.Satellite(earth)
             panel.draw(surface, 0.5, satellite)
             self.assertEqual(set(panel.mission_overlay_rects), {"CLASSIC", "PQC", "PQC_CRC32"})
-            self.assertIsNotNone(panel.mission_comparison_rect)
-            self.assertGreater(panel.mission_comparison_rect.width, 300)
-            self.assertGreater(panel.mission_comparison_rect.height, 120)
+            self.assertIsNone(panel.mission_comparison_rect)
 
+            panel._bring_mission_overlay_to_front("PQC")
+            panel.draw(surface, 0.55, satellite)
             original_pqc_position = panel.mission_overlay_rects["PQC"].topleft
             drag_start = panel.mission_overlay_drag_rects["PQC"].center
-            drag_end = (drag_start[0] + 120, drag_start[1] + 70)
+            drag_end = (drag_start[0] - 120, drag_start[1] + 70)
             panel.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": drag_start}))
             panel.handle_event(
                 pygame.event.Event(
                     pygame.MOUSEMOTION,
-                    {"pos": drag_end, "rel": (120, 70), "buttons": (1, 0, 0)},
+                    {"pos": drag_end, "rel": (-120, 70), "buttons": (1, 0, 0)},
                 )
             )
             panel.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, {"button": 1, "pos": drag_end}))
@@ -812,6 +883,56 @@ class DashboardCommandTests(unittest.TestCase):
             self.assertTrue(panel.mission_overlay_visible)
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
+
+    def test_aes_gcm_package_parts_split_nonce_tag_and_mlkem(self):
+        panel = dashboard.DashboardPanel()
+        mission = {
+            "scenario": "PQC",
+            "crypto": "ML-KEM-512",
+            "cipher": "AES-128-GCM",
+            "bytes_payload": "41",
+            "bytes_mlkem": "768",
+            "bytes_nonce": "12",
+            "bytes_gcm_tag": "16",
+            "bytes_crypto": "796",
+            "bytes_checksum": "0",
+        }
+
+        parts = {label: value for label, value, _color in panel._mission_package_parts(mission)}
+
+        self.assertEqual(parts["payload"], 41)
+        self.assertEqual(parts["ML-KEM"], 768)
+        self.assertEqual(parts["nonce"], 12)
+        self.assertEqual(parts["GCM"], 16)
+        self.assertEqual(parts["HMAC"], 0)
+
+    def test_classic_aes_gcm_flow_uses_ephemeral_rng_step(self):
+        panel = dashboard.DashboardPanel()
+        mission = {
+            "scenario": "CLASSIC",
+            "result": "DELIVERED",
+            "crypto": "AES-128-GCM",
+            "cipher": "AES-128-GCM",
+            "checksum": "NONE",
+            "key_source": "RANDOM_SESSION",
+            "bytes_payload": "41",
+            "bytes_nonce": "12",
+            "bytes_gcm_tag": "16",
+            "bytes_crypto": "28",
+            "bytes_checksum": "0",
+            "bytes_total": "69",
+            "rng_us": "5",
+            "encrypt_us": "80",
+            "decrypt_us": "81",
+            "aead_match": "1",
+        }
+
+        steps = panel._mission_flow_steps(mission)
+
+        self.assertEqual([step["label"] for step in steps], ["PAYLOAD", "RNG", "AES-GCM", "VERIFICA", "RESULTADO"])
+        self.assertEqual(steps[2]["added_bytes"], 28)
+        self.assertEqual(steps[-1]["packet_bytes"], 69)
+        self.assertIn("chave AES-128 efêmera", steps[1]["explain"])
 
     def test_send_message_without_live_satellite_does_not_replay_metrics(self):
         panel = dashboard.DashboardPanel()
@@ -859,6 +980,32 @@ class DashboardCommandTests(unittest.TestCase):
 
                 self.assertIs(nebula.surface_cache, first_cache)
                 self.assertEqual(surface.get_size(), (width, height))
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
+    def test_top_bar_onboarding_button_requests_intro(self):
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            dashboard.WIDTH, dashboard.HEIGHT = 1366, 768
+            surface = pygame.Surface((1366, 768), pygame.SRCALPHA)
+            panel = dashboard.DashboardPanel()
+
+            panel._draw_top_bar(surface, 0.5)
+
+            self.assertIsNotNone(panel.top_results_btn_rect)
+            self.assertIsNotNone(panel.top_onboarding_btn_rect)
+            self.assertGreater(panel.top_onboarding_btn_rect.left, panel.top_results_btn_rect.right)
+
+            panel.results_overlay_visible = True
+            click = pygame.event.Event(
+                pygame.MOUSEBUTTONDOWN,
+                {"button": 1, "pos": panel.top_onboarding_btn_rect.center},
+            )
+
+            self.assertTrue(panel.handle_event(click))
+            self.assertTrue(panel.request_onboarding)
+            self.assertFalse(panel.results_overlay_visible)
+            self.assertEqual(panel.session_status, "ONBOARDING")
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
 
@@ -1053,20 +1200,31 @@ class DashboardCommandTests(unittest.TestCase):
                 "message": "HELLO_UFF",
                 "result": "DELIVERED",
                 "crypto": "ML-KEM-512",
+                "cipher": "AES-128-GCM",
                 "checksum": "CRC32",
-                "confirmation": "HMAC-SHA256",
+                "confirmation": "AES-128-GCM",
                 "key_match": "1",
                 "tag_ready": "1",
                 "tag_match": "1",
+                "aead_match": "1",
+                "decrypt_ok": "1",
                 "crc_match": "1",
                 "payload_len": "41",
                 "bytes_payload": "41",
-                "bytes_crypto": "800",
+                "bytes_ciphertext": "45",
+                "bytes_mlkem": "768",
+                "bytes_nonce": "12",
+                "bytes_gcm_tag": "16",
+                "bytes_crypto": "796",
                 "bytes_checksum": "4",
-                "bytes_total": "845",
+                "bytes_total": "841",
                 "keygen_us": "10045",
                 "encap_us": "11769",
                 "decap_us": "15194",
+                "rng_us": "5",
+                "kdf_us": "44",
+                "encrypt_us": "80",
+                "decrypt_us": "81",
                 "tag_us": "80",
                 "verify_us": "81",
                 "crc_us": "11",
@@ -1081,7 +1239,9 @@ class DashboardCommandTests(unittest.TestCase):
         sample = panel.hardware_samples[-1]
         self.assertEqual(panel.last_mission["scenario"], "PQC_CRC32")
         self.assertEqual(sample["mission"]["result"], "DELIVERED")
-        self.assertEqual(sample["mission"]["bytes_total"], 845)
+        self.assertEqual(sample["mission"]["bytes_total"], 841)
+        self.assertEqual(sample["mission"]["cipher"], "AES-128-GCM")
+        self.assertEqual(sample["mission"]["aead_match"], 1)
         data = panel._build_export_document()
         scenario = data["metrics"]["mission"]["scenarios"]["PQC_CRC32"]
         self.assertEqual(scenario["elapsed_us"], 37180)
@@ -1095,20 +1255,31 @@ class DashboardCommandTests(unittest.TestCase):
             "message": "HELLO_UFF",
             "result": "DELIVERED",
             "crypto": "ML-KEM-512",
+            "cipher": "AES-128-GCM",
             "checksum": "CRC32",
-            "confirmation": "HMAC-SHA256",
+            "confirmation": "AES-128-GCM",
             "key_match": "1",
             "tag_ready": "1",
             "tag_match": "1",
+            "aead_match": "1",
+            "decrypt_ok": "1",
             "crc_match": "1",
             "payload_len": "41",
             "bytes_payload": "41",
-            "bytes_crypto": "800",
+            "bytes_ciphertext": "45",
+            "bytes_mlkem": "768",
+            "bytes_nonce": "12",
+            "bytes_gcm_tag": "16",
+            "bytes_crypto": "796",
             "bytes_checksum": "4",
-            "bytes_total": "845",
+            "bytes_total": "841",
             "keygen_us": "3679",
             "encap_us": "3988",
             "decap_us": "5087",
+            "rng_us": "4",
+            "kdf_us": "39",
+            "encrypt_us": "435",
+            "decrypt_us": "163",
             "tag_us": "435",
             "verify_us": "163",
             "crc_us": "10",
@@ -1122,18 +1293,20 @@ class DashboardCommandTests(unittest.TestCase):
         panel._apply_hardware_response("MISSION PQC_CRC32", payload)
 
         self.assertIsNotNone(panel.mission_flow_animation)
-        self.assertGreaterEqual(panel.mission_flow_animation["duration"], 12.0)
-        self.assertFalse(panel.mission_flow_animation["paused"])
+        self.assertEqual(panel.mission_flow_animation["duration"], dashboard.MISSION_FLOW_ANIMATION_SECONDS)
+        self.assertLess(panel.mission_flow_animation["duration"], 12.0)
+        self.assertFalse(panel.mission_flow_animation["awaiting_confirm"])
+        self.assertNotIn("paused", panel.mission_flow_animation)
         steps = panel.mission_flow_animation["steps"]
         self.assertEqual(
             [step["label"] for step in steps],
-            ["PAYLOAD", "KEYGEN", "ENCAP", "DECAP", "HMAC", "CRC32", "VERIFICA", "RESULTADO"],
+            ["PAYLOAD", "CRC32", "KEYGEN", "ENCAP", "DECAP", "KDF", "AES-GCM", "VERIFICA", "RESULTADO"],
         )
-        self.assertEqual(steps[-1]["packet_bytes"], 845)
-        self.assertEqual(steps[2]["added_bytes"], 768)
-        self.assertEqual(steps[4]["added_bytes"], 32)
-        self.assertEqual(steps[5]["added_bytes"], 4)
-        self.assertIn("ciphertext ML-KEM", steps[2]["explain"])
+        self.assertEqual(steps[-1]["packet_bytes"], 841)
+        self.assertEqual(steps[1]["added_bytes"], 4)
+        self.assertEqual(steps[3]["added_bytes"], 768)
+        self.assertEqual(steps[6]["added_bytes"], 28)
+        self.assertIn("ciphertext ML-KEM", steps[3]["explain"])
         self.assertTrue(panel._mission_overlay_is_animating("PQC_CRC32"))
 
         old_size = (dashboard.WIDTH, dashboard.HEIGHT)
@@ -1148,26 +1321,46 @@ class DashboardCommandTests(unittest.TestCase):
                 self.assertIsNotNone(panel.mission_flow_animation)
                 self.assertIn("PQC_CRC32", panel.mission_overlay_rects)
                 self.assertIn("PQC_CRC32", panel.mission_flow_control_rects)
+                self.assertIn("PQC_CRC32", panel.mission_flow_scrub_rects)
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
+
+        scrub_rect = panel.mission_flow_scrub_rects["PQC_CRC32"]
+        scrub_start = pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": (scrub_rect.x, scrub_rect.centery)},
+        )
+        self.assertTrue(panel._handle_mission_overlay_event(scrub_start))
+        self.assertAlmostEqual(panel.mission_flow_animation["age"], 0.0)
+        scrub_end = pygame.event.Event(
+            pygame.MOUSEMOTION,
+            {"pos": (scrub_rect.right, scrub_rect.centery)},
+        )
+        self.assertTrue(panel._handle_mission_overlay_event(scrub_end))
+        self.assertEqual(panel.mission_flow_animation["age"], dashboard.MISSION_FLOW_ANIMATION_SECONDS)
+        self.assertTrue(panel.mission_flow_animation["awaiting_confirm"])
+        scrub_release = pygame.event.Event(
+            pygame.MOUSEBUTTONUP,
+            {"button": 1, "pos": (scrub_rect.right, scrub_rect.centery)},
+        )
+        self.assertTrue(panel._handle_mission_overlay_event(scrub_release))
+
+        panel.mission_flow_animation["awaiting_confirm"] = False
+        panel.mission_flow_animation["age"] = 0.0
+        panel.update(0.5)
+        self.assertGreater(panel.mission_flow_animation["age"], 0.0)
+
+        panel.update(dashboard.MISSION_FLOW_ANIMATION_SECONDS + 0.1)
+        self.assertIsNotNone(panel.mission_flow_animation)
+        self.assertTrue(panel.mission_flow_animation["awaiting_confirm"])
+        self.assertTrue(panel._mission_overlay_is_animating("PQC_CRC32"))
+        self.assertTrue(panel.mission_overlay_visible)
 
         control_rect = panel.mission_flow_control_rects["PQC_CRC32"]
         click = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": control_rect.center})
         self.assertTrue(panel._handle_mission_overlay_event(click))
-        self.assertTrue(panel.mission_flow_animation["paused"])
-        paused_age = panel.mission_flow_animation["age"]
-        panel.update(2.0)
-        self.assertEqual(panel.mission_flow_animation["age"], paused_age)
-
-        self.assertTrue(panel._handle_mission_overlay_event(click))
-        self.assertFalse(panel.mission_flow_animation["paused"])
-        panel.update(0.5)
-        self.assertGreater(panel.mission_flow_animation["age"], paused_age)
-
-        panel.update(dashboard.MISSION_FLOW_ANIMATION_SECONDS + 0.1)
         self.assertIsNone(panel.mission_flow_animation)
         self.assertFalse(panel._mission_overlay_is_animating("PQC_CRC32"))
-        self.assertTrue(panel.mission_overlay_visible)
 
     def test_run_battery_pairs_none_and_crc32_with_same_fault_ids(self):
         panel = dashboard.DashboardPanel()

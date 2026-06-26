@@ -80,9 +80,9 @@ DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = (
 DEMO_FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PING", "confirma que a placa respondeu ao painel"),
     CommandInfo("STATUS", "mostra perfil, CPU, memória e rádio"),
-    CommandInfo("MISSION CLASSIC", "envia mensagem com autenticação clássica HMAC-SHA256"),
-    CommandInfo("MISSION PQC", "envia mensagem com segredo estabelecido por ML-KEM-512"),
-    CommandInfo("MISSION PQC_CRC32", "envia mensagem com ML-KEM-512 mais CRC32 no payload"),
+    CommandInfo("MISSION CLASSIC", "envia mensagem cifrada com AES-128-GCM e chave efêmera"),
+    CommandInfo("MISSION PQC", "usa ML-KEM-512 para chave e AES-128-GCM para cifrar"),
+    CommandInfo("MISSION PQC_CRC32", "usa ML-KEM-512, AES-GCM e CRC32 protegido no payload"),
     CommandInfo("TELEMETRY", "atualiza telemetria real da Wisdom"),
     CommandInfo("SENSOR_READ TEMP_HUM", "lê temperatura e umidade"),
     CommandInfo("SENSOR_READ ACCEL", "lê aceleração para demonstrar movimento"),

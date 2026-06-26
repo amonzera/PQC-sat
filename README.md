@@ -16,7 +16,8 @@ O repositório contém hoje:
 - medições de ML-KEM-512 até `PQC_BENCH 100` em `BASELINE` e
   `OBC-1U-LIMITED`;
 - entrega real de mensagem pelo firmware nos cenários `MISSION CLASSIC`,
-  `MISSION PQC` e `MISSION PQC_CRC32`, com tempos, bytes, heap e resultado;
+  `MISSION PQC` e `MISSION PQC_CRC32`, agora com `AES-128-GCM` para cifrar e
+  autenticar o payload, além de tempos, bytes, heap e resultado;
 - injeção manual de bit-flip em ciphertext ML-KEM com confirmação
   HMAC-SHA256 da chave derivada;
 - modo `DEMO` A/B cronometrado, com pausa, retomada, parada, overlay calculado
@@ -55,9 +56,9 @@ A entrega final deve comparar duas dimensões complementares:
 
 Para custo de comunicação, a demonstração principal compara:
 
-1. `CLASSIC`: payload autenticado por `HMAC-SHA256`;
-2. `PQC`: acordo de segredo com `ML-KEM-512` e autenticação da mensagem;
-3. `PQC_CRC32`: o mesmo fluxo PQC com CRC32 adicional no payload.
+1. `CLASSIC`: payload cifrado/autenticado por `AES-128-GCM` com chave efêmera;
+2. `PQC`: acordo de segredo com `ML-KEM-512` e payload cifrado com `AES-GCM`;
+3. `PQC_CRC32`: o mesmo fluxo PQC com CRC32 protegido dentro do payload cifrado.
 
 Para consistência sob falha, o dashboard ainda compara, com a mesma campanha
 determinística:
@@ -231,9 +232,9 @@ comandos avançados, inclusive comandos fora do escopo visual da demo:
 | Bloco/comando | Uso na demonstração |
 |---|---|
 | `ENVIAR MSG` / `SEND_MESSAGE` | Envia a mensagem de missão usando o preset selecionado. |
-| `CLÁSSICA` / `SET_PRESET_CLASSIC` | Preset de criptografia clássica: HMAC-SHA256. |
-| `PQC` / `SET_PRESET_PQC` | Preset pós-quântico: ML-KEM-512 + HMAC-SHA256. |
-| `PQC+CRC` / `SET_PRESET_PQC_CRC32` | Preset pós-quântico com CRC32 no payload. |
+| `CLÁSSICA` / `SET_PRESET_CLASSIC` | Preset clássico simétrico: AES-128-GCM com chave efêmera. |
+| `PQC` / `SET_PRESET_PQC` | Preset pós-quântico: ML-KEM-512 estabelece a chave e AES-GCM cifra. |
+| `PQC+CRC` / `SET_PRESET_PQC_CRC32` | Preset pós-quântico com CRC32 protegido junto do payload. |
 | `FALHA` / `INJECT_FAULT` | Injeta falha determinística (bit-flip) respeitando o guardião ativo. |
 | `BIT_FLIP [i m]` | Inverte um bit escolhido manualmente. |
 | `RESET_SESSION` | Zera a sessão da demonstração. |

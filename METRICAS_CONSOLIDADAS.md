@@ -14,17 +14,22 @@ A apresentação deve comparar três cenários de entrega de uma mensagem curta:
 
 | Cenário | O que representa | Comando |
 |---|---|---|
-| `CLASSIC` | Mensagem autenticada por criptografia clássica simétrica (`HMAC-SHA256`) | `MISSION CLASSIC` |
-| `PQC` | Mensagem autenticada após acordo de segredo com `ML-KEM-512` | `MISSION PQC` |
-| `PQC_CRC32` | `ML-KEM-512` mais guardião `CRC32` no payload | `MISSION PQC_CRC32` |
+| `CLASSIC` | Mensagem cifrada/autenticada por `AES-128-GCM` com chave efêmera | `MISSION CLASSIC` |
+| `PQC` | `ML-KEM-512` estabelece a chave; `AES-128-GCM` cifra o payload | `MISSION PQC` |
+| `PQC_CRC32` | `ML-KEM-512` + `AES-GCM` + `CRC32` protegido no payload | `MISSION PQC_CRC32` |
 
 A tese visual é:
 
 ```text
-CLASSIC  -> menor custo, autenticação clássica simétrica
+CLASSIC  -> menor custo, cifra clássica simétrica com chave efêmera
 PQC      -> maior custo, preparo para ameaça quântica
 PQC+CRC  -> maior robustez contra corrupção acidental, com custo adicional
 ```
+
+> Estado dos números: a bateria consolidada registrada neste arquivo foi
+> coletada antes da inclusão de AES-128-GCM no fluxo `MISSION`. Ela continua
+> útil como histórico metodológico e comparação pré-AES, mas a versão atual
+> exige uma nova bateria para gerar os números oficiais finais.
 
 ## 2. O que a placa realmente faz
 
@@ -50,13 +55,13 @@ as conclusões estatísticas oficiais da apresentação.
 Fluxo:
 
 1. a placa pega o payload padrão `PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK`;
-2. calcula uma tag `HMAC-SHA256` com chave simétrica didática fixa;
-3. recalcula a tag como se fosse o receptor;
-4. compara as tags em tempo constante;
+2. gera uma chave AES-128 efêmera e um nonce aleatório;
+3. cifra o payload com `AES-128-GCM` e gera a tag GCM;
+4. decifra/verifica a tag como se fosse o receptor;
 5. retorna tempo, bytes, heap e resultado.
 
 Esse cenário não executa PQC. Ele é o baseline clássico simétrico de mensagem
-autenticada.
+cifrada/autenticada, não uma pilha assimétrica completa.
 
 ### `MISSION PQC`
 
@@ -66,8 +71,9 @@ Fluxo:
 2. encapsula um segredo;
 3. decapsula o ciphertext;
 4. compara se os dois lados chegaram ao mesmo segredo;
-5. usa o segredo derivado para autenticar a mensagem com `HMAC-SHA256`;
-6. retorna tempo, bytes, heap e resultado.
+5. deriva uma chave AES-128 a partir do segredo compartilhado;
+6. cifra/verifica o payload com `AES-128-GCM`;
+7. retorna tempo, bytes, heap e resultado.
 
 Esse cenário demonstra o custo de introduzir PQC na sessão.
 
@@ -76,9 +82,10 @@ Esse cenário demonstra o custo de introduzir PQC na sessão.
 Fluxo:
 
 1. executa o mesmo caminho do `MISSION PQC`;
-2. calcula também `CRC32` do payload;
-3. verifica se o CRC recebido bate com o CRC transmitido;
-4. retorna o custo adicional do checksum.
+2. calcula `CRC32` do payload;
+3. inclui o CRC no material protegido antes da cifragem AES-GCM;
+4. verifica se o CRC recebido bate após decifrar;
+5. retorna o custo adicional do checksum.
 
 Esse cenário demonstra o acúmulo de custo: PQC mais guardião de integridade.
 
@@ -100,15 +107,17 @@ Campos principais:
 | `keygen_us` | Custo de geração de chave ML-KEM; zero no cenário clássico. |
 | `encap_us` | Custo de encapsulamento ML-KEM; zero no cenário clássico. |
 | `decap_us` | Custo de decapsulação ML-KEM; zero no cenário clássico. |
-| `tag_us` | Custo para autenticar a mensagem. |
-| `verify_us` | Custo para verificar a autenticação. |
+| `rng_us` | Custo de gerar chave/nonce quando aplicável. |
+| `kdf_us` | Custo de derivar chave AES a partir do segredo ML-KEM. |
+| `encrypt_us` / `tag_us` | Custo de cifrar e gerar tag AES-GCM (`tag_us` fica como alias histórico). |
+| `decrypt_us` / `verify_us` | Custo de decifrar/verificar AES-GCM (`verify_us` fica como alias histórico). |
 | `crc_us` | Custo do CRC32; zero quando checksum está desligado. |
 | `bytes_total` | Tamanho relativo transmitido para a entrega da mensagem. |
 | `heap` / `min_heap` | RAM livre e menor RAM livre observada na amostra. |
 | `cpu_mhz` | Frequência do perfil ativo. |
 | `profile` | `BASELINE` ou `OBC-1U-LIMITED`. |
 | `key_match` | Se os segredos ML-KEM bateram. |
-| `tag_match` | Se a mensagem autenticada foi aceita. |
+| `aead_match` / `tag_match` | Se a verificação AES-GCM aceitou a mensagem. |
 | `crc_match` | Se o checksum bateu. |
 | `result` | `DELIVERED` ou `REJECTED`. |
 
@@ -228,13 +237,15 @@ Leitura didática:
 
 - A 240 MHz, PQC custa cerca de 26 vezes mais tempo que o baseline clássico.
 - A 80 MHz, a mesma operação PQC custa cerca de 34 vezes mais que o clássico
-  limitado. O ML-KEM sofre mais com CPU reduzida do que o HMAC puro.
+  limitado. O ML-KEM sofre mais com CPU reduzida que o caminho simétrico.
 - O CRC32 adiciona custo negligivel (~10 us a 240 MHz, ~30 us a 80 MHz),
   mostrando que verificação de integridade no payload é barata.
-- O trafego PQC da missao e 11,5x maior que o clássico porque o pacote de
-  entrega contabiliza payload + ciphertext ML-KEM (768 bytes) + tag HMAC
-  (32 bytes). A chave publica ML-KEM tem 800 bytes, mas não está sendo somada
-  nesse `bytes_total` da mensagem consolidada.
+- Na bateria histórica pré-AES, o trafego PQC da missão foi 11,5x maior que o
+  clássico porque o pacote de entrega contabilizava payload + ciphertext
+  ML-KEM (768 bytes) + tag HMAC (32 bytes). Na versão atual, a composição
+  passa a ser payload cifrado + ciphertext ML-KEM + nonce + tag GCM. A chave
+  publica ML-KEM tem 800 bytes, mas não está sendo somada nesse `bytes_total`
+  da mensagem consolidada.
 - A heap permaneceu constante em todos os cenários: a criptografia PQC não
   causou fragmentacao perceptivel nos testes.
 
@@ -335,7 +346,7 @@ Resultado esperado:
 
 - todos os comandos `MISSION` devem retornar `status=OK`;
 - `result=DELIVERED`;
-- `tag_match=1`;
+- `aead_match=1` e `tag_match=1` como alias de compatibilidade;
 - `PQC` e `PQC_CRC32` devem ter `key_match=1`;
 - `PQC_CRC32` deve ter `crc_match=1`;
 - `elapsed_us` de `PQC` deve ser maior que `CLASSIC`;
@@ -437,6 +448,7 @@ Não afirmar:
 
 - que `HMAC-SHA256` é equivalente a ECDH ou a uma pilha clássica completa;
 - que o payload foi cifrado por ML-KEM;
+- que ML-KEM substitui AES-GCM na cifragem do payload;
 - que CRC32 é criptografia;
 - que os efeitos de LED/bargraph medem energia;
 - que o proxy `MHz * us` é consumo real em watts ou joules;
@@ -444,8 +456,8 @@ Não afirmar:
 
 Afirmar:
 
-- `CLASSIC` é um baseline clássico simétrico de mensagem autenticada;
-- `PQC` mede o custo de estabelecer segredo com `ML-KEM-512`;
-- `PQC_CRC32` mede o acréscimo de checksum sobre o fluxo PQC;
+- `CLASSIC` é um baseline clássico simétrico com AES-GCM e chave efêmera;
+- `PQC` mede ML-KEM-512 para estabelecer chave e AES-GCM para cifrar;
+- `PQC_CRC32` mede o acréscimo de checksum protegido sobre o fluxo PQC;
 - a Wisdom representa um OBC COTS educacional sob perfil limitado;
 - energia real exigiria medição elétrica externa.

@@ -10,9 +10,9 @@ integridade como checksum.
 O ESP32/Wisdom representa um OBC COTS educacional inspirado em CubeSat. A
 demonstração principal envia uma mensagem curta em três cenários:
 
-- **CLASSIC**: mensagem autenticada com HMAC-SHA256;
-- **PQC**: mensagem autenticada depois de acordo de segredo com ML-KEM-512;
-- **PQC+CRC**: o mesmo fluxo PQC com CRC32 adicional no payload.
+- **CLASSIC**: mensagem cifrada/autenticada com AES-128-GCM e chave efêmera;
+- **PQC**: ML-KEM-512 estabelece a chave e AES-GCM cifra/autentica o payload;
+- **PQC+CRC**: o mesmo fluxo PQC com CRC32 protegido no payload cifrado.
 
 A parte de bit-flip continua como apoio visual para consistência: sem
 guardião, a corrupção vira falha silenciosa; com CRC32, a mesma alteração é
@@ -30,7 +30,7 @@ bytes da missão e executa a criptografia sobre esses bytes.
 
 1. **Problema**: CubeSats usam COTS; falhas transitórias podem inverter bits.
 2. **Experimento**: Wisdom + notebook, payload vivo de sensores, ML-KEM-512,
-   HMAC-SHA256, CRC32 e bit-flip manual.
+   AES-128-GCM, CRC32 e bit-flip manual.
 3. **Demo visual**: enviar `CLASSIC`, `PQC` e `PQC+CRC`; depois mostrar
    falha silenciosa versus detecção por CRC32.
 4. **Resultados medidos**: tempos, bytes, heap, benchmark PQC, falha ML-KEM
@@ -43,7 +43,12 @@ de slides externos para conduzir a apresentação.
 
 ## Resultados para apresentar
 
-Fonte principal: `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`.
+Fonte histórica principal: `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`.
+
+Observação importante: essa bateria foi coletada antes da inclusão de
+AES-128-GCM no fluxo `MISSION`. Use-a como histórico metodológico e como
+referência do custo de ML-KEM/CRC já medido; rode uma nova bateria para
+apresentar números oficiais da versão cifrada.
 
 | Medida | Resultado |
 |---|---|
@@ -65,7 +70,7 @@ ML-KEM-512, mas a operação continua funcional. O custo de checksum no payload
 é baixo e suficiente para demonstrar a diferença entre falha silenciosa e erro
 detectado.
 
-Comparacao MISSION BASELINE (240 MHz, media de 300 amostras por cenário):
+Comparacao MISSION BASELINE histórica pré-AES-GCM (240 MHz, media de 300 amostras por cenário):
 
 | Cenário | Tempo total (us) | Bytes | Heap livre | Resultado |
 |---|---:|---:|---:|---|
@@ -181,16 +186,16 @@ Use apenas a placa conectada. Não use `--simulated` para a apresentação final
    Fala: "A placa vai medir sensores agora; esses valores viram o payload que
    será protegido. Não é uma string inventada no notebook."
 3. Clique `CLÁSSICA` -> `ENVIAR MSG`.
-   Fala: “Este é o baseline: autenticação simétrica com HMAC-SHA256 sobre o
-   payload real coletado agora.”
+   Fala: “Este é o baseline: AES-128-GCM com chave efêmera cifrando o payload
+   real coletado agora.”
 4. Clique `PQC` -> `ENVIAR MSG`.
-   Fala: “Agora o mesmo envio inclui ML-KEM-512. Observem `keygen`, `encap` e
-   `decap`: o custo não está na animação, está no hardware.”
+   Fala: “Agora o mesmo envio usa ML-KEM-512 para estabelecer a chave AES.
+   Observem `keygen`, `encap`, `decap` e depois AES-GCM cifrando o payload.”
 5. Clique `PQC+CRC` -> `ENVIAR MSG`.
    Fala: “Agora somamos um guardião simples de integridade no payload. O custo
    em bytes e tempo aparece junto com a validação.”
    Arraste os três popups lado a lado e use o comparador ao vivo para destacar
-   payload, HMAC, ciphertext ML-KEM e CRC32.
+   payload, ciphertext ML-KEM, nonce, tag GCM e CRC32.
 6. Gire o potenciômetro e clique `PQC` -> `FALHA`.
    Fala: “A placa escolheu fisicamente o bit da falha. Sem guardião no payload,
    uma mutação pode passar silenciosamente.”
@@ -211,10 +216,11 @@ chave (`PROTOCOL_REJECT`), não de uma “mágica” automática da decapsulaç�
 
 Clique `RESULTADOS` e feche a narrativa:
 
-- `CLASSIC`: 511 us, 73 bytes;
-- `PQC`: 13.234 us, 841 bytes;
-- `PQC_CRC32`: 13.130 us, 845 bytes;
-- PQC ficou 25,9x mais lento e 11,5x maior em bytes que o baseline;
+- histórico pré-AES: `CLASSIC`: 511 us, 73 bytes;
+- histórico pré-AES: `PQC`: 13.234 us, 841 bytes;
+- histórico pré-AES: `PQC_CRC32`: 13.130 us, 845 bytes;
+- na bateria histórica, PQC ficou 25,9x mais lento e 11,5x maior em bytes que o baseline;
+- na versão atual, AES-GCM cifra o payload e exige nova bateria oficial;
 - a bateria teve 3.074 registros, 0 falhas, 1.800 envios de missão e 10
   benchmarks PQC;
 - falhas de payload: 600/600 silenciosas sem CRC32 e 600/600 detectadas com
@@ -229,7 +235,7 @@ Clique `RESULTADOS` e feche a narrativa:
 |---|---|
 | 0-2 min | Provocação: "segurança pós-quântica cabe em hardware pequeno sem custo?" |
 | 2-5 min | Contexto: COTS, CubeSat, falhas transitórias e ameaça quântica |
-| 5-7 min | Modelo mental: HMAC autentica, ML-KEM estabelece segredo, CRC32 detecta corrupção |
+| 5-7 min | Modelo mental: AES-GCM cifra/autentica, ML-KEM estabelece segredo, CRC32 detecta corrupção |
 | 7-8 min | Pergunta para a turma: prever se cresce mais CPU, bytes ou RAM |
 | 8-12 min | Enviar `CLÁSSICA`, `PQC`, `PQC+CRC` com payload vivo; arrastar popups e usar o comparador |
 | 12-15 min | Girar potenciômetro e demonstrar falha silenciosa vs. detecção (`PQC -> FALHA`, `PQC+CRC -> FALHA`) |

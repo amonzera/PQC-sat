@@ -1,15 +1,16 @@
 # Algoritmos usados no PQC-SAT
 
 Este arquivo explica, com mais profundidade, os algoritmos usados no projeto:
-`CLASSIC`, `PQC`, `PQC_CRC32`, HMAC-SHA256, ML-KEM-512, CRC32, bit-flips,
-comparação em tempo constante, KAT e confirmação de chave.
+`CLASSIC`, `PQC`, `PQC_CRC32`, AES-128-GCM, HMAC-SHA256, ML-KEM-512, CRC32,
+bit-flips, comparação em tempo constante, KAT e confirmação de chave.
 
 A ideia é separar três coisas que às vezes se confundem:
 
-1. **criptografia clássica simétrica**: no projeto, HMAC-SHA256 autentica uma
-   mensagem usando uma chave compartilhada;
+1. **criptografia clássica simétrica**: no projeto, AES-128-GCM cifra e
+   autentica uma mensagem usando uma chave de sessão;
 2. **criptografia pós-quântica**: no projeto, ML-KEM-512 estabelece um segredo
-   compartilhado resistente à ameaça quântica conhecida;
+   compartilhado resistente à ameaça quântica conhecida, e esse segredo vira
+   chave AES;
 3. **integridade contra corrupção acidental**: no projeto, CRC32 detecta
    alteração de payload causada por bit-flip controlado.
 
@@ -21,13 +22,13 @@ fluxo real e devolve métricas.
 ```text
 Dashboard                      Wisdom/ESP32
    |                                |
-   |-- MISSION CLASSIC -----------> | HMAC-SHA256
+   |-- MISSION CLASSIC -----------> | AES-128-GCM
    |<-- elapsed, bytes, heap ------ |
    |                                |
-   |-- MISSION PQC ---------------> | ML-KEM-512 + HMAC-SHA256
+   |-- MISSION PQC ---------------> | ML-KEM-512 + AES-128-GCM
    |<-- keygen, encap, decap ------ |
    |                                |
-   |-- MISSION PQC_CRC32 ---------> | ML-KEM-512 + HMAC-SHA256 + CRC32
+   |-- MISSION PQC_CRC32 ---------> | ML-KEM-512 + AES-GCM + CRC32
    |<-- crc, bytes +4, validações - |
 ```
 
@@ -43,42 +44,44 @@ Esse payload tem 41 bytes nos resultados consolidados.
 
 ### `MISSION CLASSIC`
 
-Objetivo: medir um baseline barato de mensagem autenticada.
+Objetivo: medir um baseline barato de mensagem cifrada/autenticada.
 
 O que acontece:
 
 1. a placa recebe ou monta o payload;
-2. calcula uma tag HMAC-SHA256 com uma chave simétrica didática fixa;
-3. recalcula a tag como verificação;
-4. compara as duas tags em tempo constante;
-5. se as tags batem, retorna `DELIVERED`.
+2. gera uma chave AES-128 efêmera com RNG da placa;
+3. gera um nonce aleatório de 12 bytes;
+4. cifra o payload com AES-128-GCM e produz uma tag de 16 bytes;
+5. decifra/verifica a tag como receptor;
+6. se `aead_match=1`, retorna `DELIVERED`.
 
 Pseudoalgoritmo:
 
 ```text
 payload = "PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK"
-key = classic_demo_key
+key = RNG(16 bytes)
+nonce = RNG(12 bytes)
 
-tag_tx = HMAC_SHA256(key, payload)
-tag_rx = HMAC_SHA256(key, payload)
+ciphertext, tag = AES_128_GCM_Encrypt(key, nonce, payload)
+plaintext = AES_128_GCM_Decrypt_And_Verify(key, nonce, ciphertext, tag)
 
-tag_match = constant_time_equal(tag_tx, tag_rx)
-delivered = tag_match
+aead_match = (plaintext == payload)
+delivered = aead_match
 
-bytes_total = len(payload) + len(tag_tx)
+bytes_total = len(payload) + len(nonce) + len(tag)
 ```
 
-No resultado consolidado:
+Na versão AES-GCM, para o payload padrão:
 
 ```text
 payload: 41 bytes
-tag HMAC: 32 bytes
-total: 73 bytes
-tempo médio: 511 us
+nonce GCM: 12 bytes
+tag GCM: 16 bytes
+total esperado: 69 bytes
 ```
 
 Esse cenário **não executa ML-KEM**. Ele não mede criptografia assimétrica
-clássica como ECDH. Ele mede um baseline simétrico de autenticação.
+clássica como ECDH. Ele mede um baseline simétrico de cifragem autenticada.
 
 ### `MISSION PQC`
 
@@ -90,9 +93,10 @@ O que acontece:
 2. encapsula um segredo usando a chave pública;
 3. decapsula o ciphertext usando a chave privada;
 4. verifica se os dois segredos são iguais (`key_match`);
-5. usa o segredo derivado para autenticar o payload com HMAC-SHA256;
-6. verifica a tag HMAC;
-7. se `key_match` e `tag_match` batem, retorna `DELIVERED`.
+5. deriva uma chave AES-128 a partir do segredo ML-KEM;
+6. cifra o payload com AES-128-GCM;
+7. decifra/verifica a tag GCM;
+8. se `key_match` e `aead_match` batem, retorna `DELIVERED`.
 
 Pseudoalgoritmo:
 
@@ -103,28 +107,31 @@ ss_dec = ML_KEM_Decaps(sk, ct)
 
 key_match = constant_time_equal(ss_enc, ss_dec)
 
-tag_tx = HMAC_SHA256(ss_enc, payload)
-tag_rx = HMAC_SHA256(ss_dec, payload)
-tag_match = constant_time_equal(tag_tx, tag_rx)
+aes_key_tx = KDF(ss_enc)
+aes_key_rx = KDF(ss_dec)
+nonce = RNG(12 bytes)
+ciphertext_payload, tag = AES_128_GCM_Encrypt(aes_key_tx, nonce, payload)
+plaintext = AES_128_GCM_Decrypt_And_Verify(aes_key_rx, nonce, ciphertext_payload, tag)
+aead_match = (plaintext == payload)
 
-delivered = key_match AND tag_match
+delivered = key_match AND aead_match
 
-bytes_total = len(payload) + len(ct) + len(tag_tx)
+bytes_total = len(payload) + len(ct) + len(nonce) + len(tag)
 ```
 
-No resultado consolidado:
+Na versão AES-GCM, para o payload padrão:
 
 ```text
 payload: 41 bytes
 ciphertext ML-KEM: 768 bytes
-tag HMAC: 32 bytes
-total: 841 bytes
-tempo médio: 13.234 us
+nonce GCM: 12 bytes
+tag GCM: 16 bytes
+total esperado: 837 bytes
 ```
 
 Importante: a chave pública ML-KEM tem 800 bytes, mas **não entra** no
-`bytes_total` consolidado de `MISSION`. O `bytes_total` da missão contabiliza
-payload + ciphertext + tag + checksum.
+`bytes_total` de `MISSION`. O `bytes_total` da missão contabiliza ciphertext
+do payload, ciphertext ML-KEM, nonce, tag GCM e checksum quando ativo.
 
 ### `MISSION PQC_CRC32`
 
@@ -134,9 +141,10 @@ O que acontece:
 
 1. executa todo o fluxo de `MISSION PQC`;
 2. calcula CRC32 do payload no lado de transmissão;
-3. recalcula CRC32 no lado de verificação;
-4. compara `crc_tx` e `crc_rx`;
-5. se `key_match`, `tag_match` e `crc_match` batem, retorna `DELIVERED`.
+3. inclui os 4 bytes de CRC no plaintext protegido;
+4. cifra `payload + CRC32` com AES-GCM;
+5. após decifrar, recalcula CRC32 sobre o payload;
+6. se `key_match`, `aead_match` e `crc_match` batem, retorna `DELIVERED`.
 
 Pseudoalgoritmo:
 
@@ -147,30 +155,38 @@ ss_dec = ML_KEM_Decaps(sk, ct)
 
 key_match = constant_time_equal(ss_enc, ss_dec)
 
-tag_tx = HMAC_SHA256(ss_enc, payload)
-tag_rx = HMAC_SHA256(ss_dec, payload)
-tag_match = constant_time_equal(tag_tx, tag_rx)
-
 crc_tx = CRC32(payload)
-crc_rx = CRC32(payload)
+protected_plaintext = payload || crc_tx
+
+aes_key_tx = KDF(ss_enc)
+aes_key_rx = KDF(ss_dec)
+nonce = RNG(12 bytes)
+ciphertext_payload, tag = AES_128_GCM_Encrypt(aes_key_tx, nonce, protected_plaintext)
+protected_rx = AES_128_GCM_Decrypt_And_Verify(aes_key_rx, nonce, ciphertext_payload, tag)
+
+payload_rx, crc_field = split(protected_rx)
+crc_rx = CRC32(payload_rx)
 crc_match = (crc_tx == crc_rx)
 
-delivered = key_match AND tag_match AND crc_match
+delivered = key_match AND aead_match AND crc_match
 
-bytes_total = len(payload) + len(ct) + len(tag_tx) + 4
+bytes_total = len(payload) + len(ct) + len(nonce) + len(tag) + 4
 ```
 
-No resultado consolidado:
+Na versão AES-GCM, para o payload padrão:
 
 ```text
 payload: 41 bytes
 ciphertext ML-KEM: 768 bytes
-tag HMAC: 32 bytes
 CRC32: 4 bytes
-total: 845 bytes
-tempo médio: 13.130 us
-crc_us médio: ~10 us
+nonce GCM: 12 bytes
+tag GCM: 16 bytes
+total esperado: 841 bytes
 ```
+
+Os valores consolidados antigos de `511 us`, `13.234 us`, `13.130 us`,
+`73 bytes`, `841 bytes` e `845 bytes` pertencem à bateria pré-AES-GCM. Eles
+servem como histórico até a nova bateria oficial da versão cifrada.
 
 O tempo total de `PQC_CRC32` pode aparecer ligeiramente menor que `PQC` em uma
 coleta específica por variação natural de execução. A conclusão correta é:
@@ -187,6 +203,11 @@ HMAC significa Hash-based Message Authentication Code. Ele responde à pergunta:
 > que conhece a chave secreta e que a mensagem não mudou?
 
 HMAC não cifra. A mensagem continua visível. O HMAC gera uma **tag**.
+
+Na versão atual do projeto, `MISSION` usa AES-GCM para autenticar/cifrar a
+mensagem. O HMAC-SHA256 continua relevante no comando técnico
+`PQC_FAULT ... CONFIRM`, onde ele confirma se duas pontas chegaram ao mesmo
+segredo ML-KEM sem revelar esse segredo.
 
 ```text
 mensagem + chave secreta -> HMAC-SHA256 -> tag de 32 bytes
@@ -240,21 +261,21 @@ apenas fizéssemos `SHA256(chave || mensagem)`.
 
 ### 3.4 Como entra no projeto
 
-No firmware, HMAC-SHA256 é usado em dois contextos.
+Na versão atual, HMAC-SHA256 não é mais a autenticação principal de `MISSION`.
+O fluxo de mensagem usa AES-GCM para cifrar e autenticar o payload.
 
-No `CLASSIC`:
-
-```text
-key = classic_demo_key
-tag = HMAC_SHA256(key, payload)
-```
-
-No `PQC`:
+HMAC-SHA256 permanece em dois papéis técnicos:
 
 ```text
-key = ss_enc ou ss_dec
-tag = HMAC_SHA256(shared_secret, payload)
+KDF: ss_mlkem + contexto -> chave AES-128 da missão
+PQC_FAULT CONFIRM: ss_mlkem + transcript -> tag de confirmação de chave
 ```
+
+Assim, a apresentação pode separar corretamente os papéis:
+
+- ML-KEM estabelece segredo;
+- HMAC pode ajudar a derivar/confirmar chave;
+- AES-GCM cifra e autentica a mensagem.
 
 Isso é importante para a apresentação:
 
@@ -927,34 +948,42 @@ Campos:
 No firmware:
 
 ```text
-bytes_total = bytes_payload + bytes_crypto + bytes_checksum
+bytes_total = bytes_ciphertext + bytes_mlkem + bytes_nonce + bytes_gcm_tag
 ```
 
 Para `CLASSIC`:
 
 ```text
 bytes_payload = 41
-bytes_crypto = 32       # tag HMAC
+bytes_ciphertext = 41
+bytes_nonce = 12
+bytes_gcm_tag = 16
 bytes_checksum = 0
-bytes_total = 73
+bytes_total = 69
 ```
 
 Para `PQC`:
 
 ```text
 bytes_payload = 41
-bytes_crypto = 768 + 32 # ciphertext ML-KEM + tag HMAC
+bytes_ciphertext = 41
+bytes_mlkem = 768
+bytes_nonce = 12
+bytes_gcm_tag = 16
 bytes_checksum = 0
-bytes_total = 841
+bytes_total = 837
 ```
 
 Para `PQC_CRC32`:
 
 ```text
 bytes_payload = 41
-bytes_crypto = 768 + 32
+bytes_ciphertext = 45     # payload + CRC32 cifrados
+bytes_mlkem = 768
+bytes_nonce = 12
+bytes_gcm_tag = 16
 bytes_checksum = 4
-bytes_total = 845
+bytes_total = 841
 ```
 
 ### 12.3 Heap/RAM
@@ -985,11 +1014,13 @@ Não é correto dizer que a RAM foi o gargalo principal.
 | `KEYGEN` | ML-KEM | geração de `pk` e `sk` |
 | `ENCAP` | ML-KEM | criação de `ct` e `ss_enc` |
 | `DECAP` | ML-KEM | recuperação de `ss_dec` |
-| `TAG` | HMAC-SHA256 | geração da tag de autenticação |
-| `VERIFY` | HMAC-SHA256 | recálculo e comparação da tag |
+| `RNG` | ESP32 RNG | geração de chave efêmera e nonce |
+| `KDF` | HMAC-SHA256 como derivador | derivação da chave AES a partir do segredo ML-KEM |
+| `ENC` | AES-128-GCM | cifragem e geração da tag GCM |
+| `DEC` | AES-128-GCM | decifragem e verificação da tag GCM |
 | `CRC` | CRC32 | cálculo/verificação de checksum |
 | `key` | ML-KEM | `ss_enc == ss_dec` |
-| `tag` | HMAC-SHA256 | tag transmitida bate com tag verificada |
+| `aead` | AES-128-GCM | tag GCM válida e plaintext recuperado |
 | `crc` | CRC32 | checksum transmitido bate com checksum recalculado |
 
 ## 14. Diferenças essenciais para defender no seminário
@@ -1002,17 +1033,17 @@ Não é correto dizer que a RAM foi o gargalo principal.
 | autentica mensagem | detecta erro acidental |
 | resiste a atacante sem chave | atacante pode recalcular |
 | gera tag de 32 bytes | gera checksum de 4 bytes |
-| usado em `CLASSIC`, `PQC`, `PQC_CRC32` | usado em `PQC_CRC32` e na demo de falha |
+| usado para KDF/confirmacao técnica | usado em `PQC_CRC32` e na demo de falha |
 
-### ML-KEM vs HMAC
+### ML-KEM vs AES-GCM
 
-| ML-KEM-512 | HMAC-SHA256 |
+| ML-KEM-512 | AES-128-GCM |
 |---|---|
-| estabelece segredo compartilhado | autentica mensagem |
-| usa chave pública e chave privada | usa chave simétrica |
-| gera ciphertext de 768 bytes | gera tag de 32 bytes |
-| é PQC | é clássico simétrico, ainda considerado seguro com chaves adequadas |
-| custa milissegundos no ESP32 | custa centenas de microssegundos |
+| estabelece segredo compartilhado | cifra e autentica payload |
+| usa chave pública e chave privada | usa chave simétrica derivada |
+| gera ciphertext KEM de 768 bytes | gera nonce de 12 bytes e tag de 16 bytes |
+| é PQC | é clássico simétrico e continua relevante |
+| custa milissegundos no ESP32 | tende a custar muito menos que ML-KEM |
 
 ### PQC vs "cifrar mensagem"
 
@@ -1025,20 +1056,19 @@ ML-KEM cifra a mensagem.
 Explique assim:
 
 ```text
-ML-KEM estabelece um segredo; esse segredo autentica a mensagem via HMAC.
+ML-KEM estabelece um segredo; esse segredo vira chave AES para cifrar/autenticar a mensagem.
 ```
 
 ## 15. Roteiro de fala técnica de 2 minutos
 
-> No modo clássico, a placa calcula uma tag HMAC-SHA256 sobre o payload usando
-> uma chave simétrica didática. Isso custa pouco: 511 us e 73 bytes no nosso
-> baseline. No modo PQC, antes de autenticar a mensagem, a placa executa
-> ML-KEM-512: gera chave, encapsula um segredo e decapsula o ciphertext. Aí ela
-> usa o segredo compartilhado para o HMAC. O pacote sobe para 841 bytes porque
-> inclui ciphertext ML-KEM e tag HMAC, e o tempo sobe para 13.234 us. No modo
-> PQC+CRC, adicionamos CRC32 ao payload. CRC32 não é criptografia; ele detecta
-> corrupção acidental. Ele soma só 4 bytes e cerca de 10 us, mas ajuda a mostrar
-> visualmente a diferença entre falha silenciosa e erro detectado.
+> No modo clássico, a placa usa AES-128-GCM com chave efêmera e nonce aleatório
+> para cifrar/autenticar o payload. No modo PQC, antes da cifra, a placa executa
+> ML-KEM-512: gera chave, encapsula um segredo e decapsula o ciphertext. Esse
+> segredo vira a chave AES da mensagem. Na versão AES-GCM, o pacote inclui
+> payload cifrado, ciphertext ML-KEM, nonce e tag GCM; os números oficiais
+> precisam de nova bateria. No modo PQC+CRC, adicionamos CRC32 ao plaintext
+> protegido. CRC32 não é criptografia; ele detecta corrupção acidental e ajuda
+> a mostrar visualmente a diferença entre falha silenciosa e erro detectado.
 
 ## 16. Frases que devem ser evitadas
 

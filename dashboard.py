@@ -60,8 +60,8 @@ DEMO_DEFAULT_ATTEMPTS = 5
 DEMO_FAULT_INTERVAL_SECONDS = 0.55
 DEMO_SNAPSHOT_SECONDS = 1.5
 DEMO_RESULTS_SECONDS = 8.0
-MISSION_FLOW_ANIMATION_SECONDS = 12.0
-FAULT_FLOW_ANIMATION_SECONDS = 9.5
+MISSION_FLOW_ANIMATION_SECONDS = 8.0
+FAULT_FLOW_ANIMATION_SECONDS = 7.5
 HELP_HINT_LINES = (
     "Botões: comandos visuais da demo.",
     "Payload vivo usa sensores no envio.",
@@ -82,6 +82,7 @@ MISSION_PRESET_COMMANDS = {
 MISSION_OVERLAY_SCENARIOS = ("CLASSIC", "PQC", "PQC_CRC32")
 CONSOLIDATED_ACCEPTANCE_LOG = "logs/20260625T005330Z_final_metrics_dev-ttyusb0.json"
 CONSOLIDATED_ACCEPTANCE_LABEL = "20260625T005330Z"
+CONSOLIDATED_METRICS_STATUS = "histórico pré-AES-GCM; rode nova bateria para números oficiais da versão cifrada"
 CONSOLIDATED_SUMMARY = {
     "elapsed_s": 1681.24,
     "records": 3074,
@@ -94,7 +95,7 @@ CONSOLIDATED_SUMMARY = {
 }
 CONSOLIDATED_MISSION_BASELINE = {
     "CLASSIC": {
-        "label": "CLASSIC (HMAC)",
+        "label": "CLASSIC hist.",
         "crypto": "HMAC-SHA256",
         "checksum": "NONE",
         "elapsed_us": 511,
@@ -1231,7 +1232,9 @@ class DashboardPanel:
         self.fault_overlay_close_rect = None
         self.fault_overlay_drag_rect = None
         self.fault_flow_control_rect = None
+        self.fault_flow_scrub_rect = None
         self.dragging_fault_overlay = False
+        self.dragging_fault_flow = False
         self.fault_drag_offset = (0, 0)
         self.fault_flow_animation = None
         self.checksum_enabled = False
@@ -1245,6 +1248,8 @@ class DashboardPanel:
         self.pending_fault_contexts = {}
         self.results_overlay_visible = False
         self.top_results_btn_rect = None
+        self.top_onboarding_btn_rect = None
+        self.request_onboarding = False
         self.results_stress_btn_rect = None
         self.results_overlay_content_bottom = None
         self.stress_state = "IDLE"
@@ -1276,8 +1281,10 @@ class DashboardPanel:
         self.mission_overlay_close_rects = {}
         self.mission_overlay_drag_rects = {}
         self.mission_flow_control_rects = {}
+        self.mission_flow_scrub_rects = {}
         self.mission_comparison_rect = None
         self.dragging_mission_overlay = None
+        self.dragging_mission_flow_scenario = None
         self.mission_drag_offset = (0, 0)
         self.mission_flow_animation = None
         self.effect_timer = 0.0
@@ -1317,6 +1324,11 @@ class DashboardPanel:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.top_results_btn_rect is not None and self.top_results_btn_rect.collidepoint(event.pos):
                 self._execute_command("PQC_RESULTS")
+                return True
+            if self.top_onboarding_btn_rect is not None and self.top_onboarding_btn_rect.collidepoint(event.pos):
+                self.results_overlay_visible = False
+                self.request_onboarding = True
+                self.session_status = "ONBOARDING"
                 return True
 
         if getattr(self, "results_overlay_visible", False):
@@ -1398,8 +1410,16 @@ class DashboardPanel:
             for scenario in reversed(self.mission_overlay_order):
                 control_rect = self.mission_flow_control_rects.get(scenario)
                 if control_rect is not None and control_rect.collidepoint(event.pos):
-                    self._toggle_mission_flow_pause(scenario)
                     self._bring_mission_overlay_to_front(scenario)
+                    self._confirm_mission_flow(scenario)
+                    return True
+
+            for scenario in reversed(self.mission_overlay_order):
+                scrub_rect = self.mission_flow_scrub_rects.get(scenario)
+                if scrub_rect is not None and scrub_rect.collidepoint(event.pos):
+                    self._bring_mission_overlay_to_front(scenario)
+                    self.dragging_mission_flow_scenario = scenario
+                    self._scrub_mission_flow_to_x(event.pos[0], scrub_rect)
                     return True
 
             for scenario in reversed(self.mission_overlay_order):
@@ -1415,12 +1435,23 @@ class DashboardPanel:
                     self._bring_mission_overlay_to_front(scenario)
                     return True
 
+        if event.type == pygame.MOUSEMOTION and self.dragging_mission_flow_scenario:
+            scenario = self.dragging_mission_flow_scenario
+            scrub_rect = self.mission_flow_scrub_rects.get(scenario)
+            if scrub_rect is not None:
+                self._scrub_mission_flow_to_x(event.pos[0], scrub_rect)
+            return True
+
         if event.type == pygame.MOUSEMOTION and self.dragging_mission_overlay:
             scenario = self.dragging_mission_overlay
             width, height = self._mission_overlay_size()
             x = event.pos[0] - self.mission_drag_offset[0]
             y = event.pos[1] - self.mission_drag_offset[1]
             self.mission_overlay_positions[scenario] = self._clamp_mission_overlay_position(x, y, width, height)
+            return True
+
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging_mission_flow_scenario:
+            self.dragging_mission_flow_scenario = None
             return True
 
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging_mission_overlay:
@@ -1438,7 +1469,11 @@ class DashboardPanel:
                 self._close_fault_overlay()
                 return True
             if self.fault_flow_control_rect is not None and self.fault_flow_control_rect.collidepoint(event.pos):
-                self._toggle_fault_flow_pause()
+                self._confirm_fault_flow()
+                return True
+            if self.fault_flow_scrub_rect is not None and self.fault_flow_scrub_rect.collidepoint(event.pos):
+                self.dragging_fault_flow = True
+                self._scrub_fault_flow_to_x(event.pos[0])
                 return True
             if self.fault_overlay_drag_rect is not None and self.fault_overlay_drag_rect.collidepoint(event.pos):
                 rect = self.fault_overlay_rect or self.fault_overlay_drag_rect
@@ -1448,11 +1483,19 @@ class DashboardPanel:
             if self.fault_overlay_rect is not None and self.fault_overlay_rect.collidepoint(event.pos):
                 return True
 
+        if event.type == pygame.MOUSEMOTION and self.dragging_fault_flow:
+            self._scrub_fault_flow_to_x(event.pos[0])
+            return True
+
         if event.type == pygame.MOUSEMOTION and self.dragging_fault_overlay:
             width, height = self._fault_overlay_size()
             x = event.pos[0] - self.fault_drag_offset[0]
             y = event.pos[1] - self.fault_drag_offset[1]
             self.fault_overlay_position = self._clamp_overlay_position(x, y, width, height)
+            return True
+
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging_fault_flow:
+            self.dragging_fault_flow = False
             return True
 
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging_fault_overlay:
@@ -1461,11 +1504,29 @@ class DashboardPanel:
 
         return False
 
-    def _toggle_fault_flow_pause(self):
+    def _confirm_fault_flow(self):
         if self.fault_flow_animation is None:
             return
-        paused = not bool(self.fault_flow_animation.get("paused"))
-        self.fault_flow_animation["paused"] = paused
+        animation = self.fault_flow_animation
+        duration = max(0.001, animation.get("duration", FAULT_FLOW_ANIMATION_SECONDS))
+        if not animation.get("awaiting_confirm") and animation.get("age", 0.0) < duration:
+            return
+        self.fault_flow_control_rect = None
+        self.fault_flow_scrub_rect = None
+        self.dragging_fault_flow = False
+        self.fault_flow_animation = None
+
+    def _scrub_fault_flow_to_x(self, mouse_x):
+        animation = self.fault_flow_animation
+        scrub_rect = self.fault_flow_scrub_rect
+        if animation is None or scrub_rect is None:
+            return
+        duration = max(0.001, animation.get("duration", FAULT_FLOW_ANIMATION_SECONDS))
+        ratio = (mouse_x - scrub_rect.x) / max(1, scrub_rect.width)
+        ratio = max(0.0, min(1.0, ratio))
+        animation["age"] = duration * ratio
+        if ratio >= 1.0:
+            animation["awaiting_confirm"] = True
 
     def _close_fault_overlay(self):
         self.fault_overlay_visible = False
@@ -1474,14 +1535,34 @@ class DashboardPanel:
         self.fault_overlay_close_rect = None
         self.fault_overlay_drag_rect = None
         self.fault_flow_control_rect = None
+        self.fault_flow_scrub_rect = None
         self.dragging_fault_overlay = False
+        self.dragging_fault_flow = False
         self.fault_flow_animation = None
 
-    def _toggle_mission_flow_pause(self, scenario):
+    def _confirm_mission_flow(self, scenario):
         if not self._mission_overlay_is_animating(scenario):
             return
-        paused = not bool(self.mission_flow_animation.get("paused"))
-        self.mission_flow_animation["paused"] = paused
+        animation = self.mission_flow_animation
+        duration = max(0.001, animation.get("duration", MISSION_FLOW_ANIMATION_SECONDS))
+        if not animation.get("awaiting_confirm") and animation.get("age", 0.0) < duration:
+            return
+        self.mission_flow_animation = None
+        self.mission_flow_control_rects.pop(scenario, None)
+        self.mission_flow_scrub_rects.pop(scenario, None)
+        if self.dragging_mission_flow_scenario == scenario:
+            self.dragging_mission_flow_scenario = None
+
+    def _scrub_mission_flow_to_x(self, mouse_x, scrub_rect):
+        animation = self.mission_flow_animation
+        if animation is None:
+            return
+        duration = max(0.001, animation.get("duration", MISSION_FLOW_ANIMATION_SECONDS))
+        ratio = (mouse_x - scrub_rect.x) / max(1, scrub_rect.width)
+        ratio = max(0.0, min(1.0, ratio))
+        animation["age"] = duration * ratio
+        if ratio >= 1.0:
+            animation["awaiting_confirm"] = True
 
     def _execute_command(self, cmd):
         """Processa um comando digitado."""
@@ -1906,7 +1987,9 @@ class DashboardPanel:
         self.fault_overlay_close_rect = None
         self.fault_overlay_drag_rect = None
         self.fault_flow_control_rect = None
+        self.fault_flow_scrub_rect = None
         self.dragging_fault_overlay = False
+        self.dragging_fault_flow = False
         self.fault_drag_offset = (0, 0)
         self.fault_flow_animation = None
         self.demo_state = "IDLE"
@@ -1929,8 +2012,10 @@ class DashboardPanel:
         self.mission_overlay_close_rects.clear()
         self.mission_overlay_drag_rects.clear()
         self.mission_flow_control_rects.clear()
+        self.mission_flow_scrub_rects.clear()
         self.mission_comparison_rect = None
         self.dragging_mission_overlay = None
+        self.dragging_mission_flow_scenario = None
         self.mission_drag_offset = (0, 0)
         self.mission_flow_animation = None
         self.pending_mission_contexts.clear()
@@ -2383,7 +2468,7 @@ class DashboardPanel:
             "steps": self._fault_flow_steps(fault),
             "age": 0.0,
             "duration": FAULT_FLOW_ANIMATION_SECONDS,
-            "paused": False,
+            "awaiting_confirm": False,
         }
 
     @staticmethod
@@ -2475,46 +2560,65 @@ class DashboardPanel:
                 },
             )
 
+        payload_start = {
+            "label": "PAYLOAD",
+            "detail": "payload íntegro",
+            "explain": "Começamos com o payload íntegro. É o mesmo tipo de dado que o satélite enviaria na missão.",
+            "color": C_ACCENT_BLUE,
+        }
+        bit_flip_step = {
+            "label": "BIT-FLIP",
+            "detail": f"byte {fault.get('byte_index', '--')} mask {fault.get('bit_mask', '--')}",
+            "explain": self._fault_selector_explanation(
+                fault,
+                "O byte muda, mas o sistema ainda precisa perceber.",
+            ),
+            "color": C_ACCENT_RED,
+        }
+        result_step = {
+            "label": "RESULTADO",
+            "detail": self._fault_result_label(result),
+            "explain": self._fault_result_explanation(fault),
+            "color": self._fault_result_color(result),
+            "time_us": fault.get("elapsed_us"),
+        }
+
+        if guard != "CRC32":
+            return (
+                payload_start,
+                bit_flip_step,
+                {
+                    "label": "SEM CRC",
+                    "detail": "sem referência",
+                    "explain": "Não existe checksum salvo para comparar o payload depois da inversão do bit.",
+                    "color": C_TEXT_DIM,
+                },
+                {
+                    "label": "ENTREGA",
+                    "detail": "falha silenciosa" if result == "SILENT" else "sem bloqueio",
+                    "explain": "Como nada valida a integridade do payload, a alteração segue para o resultado.",
+                    "color": C_ACCENT_RED if result == "SILENT" else C_TEXT_DIM,
+                },
+                result_step,
+            )
+
         return (
+            payload_start,
+            bit_flip_step,
             {
-                "label": "PAYLOAD",
-                "detail": "payload íntegro",
-                "explain": "Começamos com o payload íntegro. É o mesmo tipo de dado que o satélite enviaria na missão.",
-                "color": C_ACCENT_BLUE,
-            },
-            {
-                "label": "BIT-FLIP",
-                "detail": f"byte {fault.get('byte_index', '--')} mask {fault.get('bit_mask', '--')}",
-                "explain": self._fault_selector_explanation(
-                    fault,
-                    "O byte muda, mas o sistema ainda precisa perceber.",
-                ),
-                "color": C_ACCENT_RED,
-            },
-            {
-                "label": "GUARD",
-                "detail": "CRC32 ativo" if guard == "CRC32" else "sem checksum",
-                "explain": (
-                    "O CRC32 guardado antes da falha será comparado com o CRC recalculado depois."
-                    if guard == "CRC32"
-                    else "Sem checksum, o sistema não tem uma referência simples para comparar o payload."
-                ),
-                "color": C_ACCENT_GREEN if guard == "CRC32" else C_TEXT_DIM,
+                "label": "CRC32",
+                "detail": "checksum ativo",
+                "explain": "O CRC32 salvo antes da falha vira a referência para comparar o payload corrompido.",
+                "color": C_ACCENT_GREEN,
             },
             {
                 "label": "VERIFICA",
-                "detail": "CRC divergiu" if crc_changed else "nada compara",
+                "detail": "CRC divergiu" if crc_changed else "CRC igual",
                 "explain": "Depois do bit-flip, recalculamos o CRC. Se mudou, a corrupção fica visível antes da entrega.",
-                "color": C_ACCENT_ORANGE if guard == "CRC32" else C_TEXT_DIM,
+                "color": C_ACCENT_ORANGE,
                 "time_us": fault.get("guard_verify_us"),
             },
-            {
-                "label": "RESULTADO",
-                "detail": self._fault_result_label(result),
-                "explain": self._fault_result_explanation(fault),
-                "color": self._fault_result_color(result),
-                "time_us": fault.get("elapsed_us"),
-            },
+            result_step,
         )
 
     @staticmethod
@@ -2588,18 +2692,16 @@ class DashboardPanel:
             elapsed = self.uptime - self.stress_started_at
             if elapsed >= STRESS_DIDACTIC_TIMEOUT_SECONDS:
                 self.stress_status = "TIMEOUT DIDÁTICO"
-        if self.mission_flow_animation is not None and not self.mission_flow_animation.get("paused"):
+        if self.mission_flow_animation is not None and not self.mission_flow_animation.get("awaiting_confirm"):
             self.mission_flow_animation["age"] += dt
             if self.mission_flow_animation["age"] >= self.mission_flow_animation["duration"]:
-                scenario = self.mission_flow_animation.get("scenario")
-                if scenario:
-                    self.mission_flow_control_rects.pop(scenario, None)
-                self.mission_flow_animation = None
-        if self.fault_flow_animation is not None and not self.fault_flow_animation.get("paused"):
+                self.mission_flow_animation["age"] = self.mission_flow_animation["duration"]
+                self.mission_flow_animation["awaiting_confirm"] = True
+        if self.fault_flow_animation is not None and not self.fault_flow_animation.get("awaiting_confirm"):
             self.fault_flow_animation["age"] += dt
             if self.fault_flow_animation["age"] >= self.fault_flow_animation["duration"]:
-                self.fault_flow_control_rect = None
-                self.fault_flow_animation = None
+                self.fault_flow_animation["age"] = self.fault_flow_animation["duration"]
+                self.fault_flow_animation["awaiting_confirm"] = True
         self._advance_demo(dt)
         self._poll_telemetry(dt)
         self._drain_serial_events()
@@ -2772,17 +2874,19 @@ class DashboardPanel:
             "steps": steps,
             "age": 0.0,
             "duration": MISSION_FLOW_ANIMATION_SECONDS,
-            "paused": False,
+            "awaiting_confirm": False,
         }
 
     def _mission_flow_steps(self, mission):
         scenario = self._normalize_mission_scenario(mission.get("scenario", "MISSION"))
         parts = {label: value for label, value, _color in self._mission_package_parts(mission)}
         payload = parts.get("payload", 0)
-        hmac = parts.get("HMAC", 0)
         mlkem = parts.get("ML-KEM", 0)
+        nonce = parts.get("nonce", 0)
+        gcm = parts.get("GCM", 0)
+        hmac = parts.get("HMAC", 0)
         checksum = parts.get("CRC", 0)
-        total = self._mission_int(mission, "bytes_total", payload + hmac + mlkem + checksum)
+        total = self._mission_int(mission, "bytes_total", payload + mlkem + nonce + gcm + hmac + checksum)
 
         if total <= 0:
             return []
@@ -2806,15 +2910,29 @@ class DashboardPanel:
             }
         ]
 
+        if checksum > 0 or scenario == "PQC_CRC32":
+            steps.append(
+                {
+                    "label": "CRC32",
+                    "detail": "checksum do payload",
+                    "explain": "O CRC32 entra antes da cifragem para a demo de bit-flip. Ele detecta corrupção acidental, mas não autentica contra atacante.",
+                    "kind": "crc",
+                    "packet_bytes": payload + checksum,
+                    "added_bytes": checksum,
+                    "time_us": self._mission_int(mission, "crc_us"),
+                    "color": C_ACCENT_GREEN,
+                }
+            )
+
         if scenario in {"PQC", "PQC_CRC32"}:
             steps.extend(
                 (
                     {
                         "label": "KEYGEN",
                         "detail": "gera chaves ML-KEM",
-                        "explain": "A Wisdom cria o par ML-KEM-512. É custo local de CPU/RAM; o pacote ainda não cresce.",
+                        "explain": "A Wisdom cria o par ML-KEM-512. É custo local de CPU/RAM; ainda não cifra o payload.",
                         "kind": "keygen",
-                        "packet_bytes": payload,
+                        "packet_bytes": payload + checksum,
                         "added_bytes": 0,
                         "time_us": self._mission_int(mission, "keygen_us"),
                         "color": C_ACCENT_PURPLE,
@@ -2822,9 +2940,9 @@ class DashboardPanel:
                     {
                         "label": "ENCAP",
                         "detail": "encapsula segredo",
-                        "explain": "O emissor usa a chave pública para encapsular um segredo. O ciphertext ML-KEM entra no pacote.",
+                        "explain": "O emissor encapsula um segredo compartilhado. O ciphertext ML-KEM entra no pacote para o receptor recuperar a chave.",
                         "kind": "mlkem",
-                        "packet_bytes": payload + mlkem,
+                        "packet_bytes": payload + checksum + mlkem,
                         "added_bytes": mlkem,
                         "time_us": self._mission_int(mission, "encap_us"),
                         "color": C_ACCENT_PURPLE,
@@ -2832,52 +2950,63 @@ class DashboardPanel:
                     {
                         "label": "DECAP",
                         "detail": "recupera segredo",
-                        "explain": "O receptor decapsula o ciphertext e deriva o mesmo segredo. Bit-flip crítico pode ser rejeitado.",
+                        "explain": "O receptor decapsula o ciphertext ML-KEM e chega ao mesmo segredo compartilhado sem expor esse segredo.",
                         "kind": "decap",
-                        "packet_bytes": payload + mlkem,
+                        "packet_bytes": payload + checksum + mlkem,
                         "added_bytes": 0,
                         "time_us": self._mission_int(mission, "decap_us"),
                         "color": C_ACCENT_PURPLE,
                     },
+                    {
+                        "label": "KDF",
+                        "detail": "deriva chave AES",
+                        "explain": "O segredo ML-KEM vira uma chave AES-128 de sessão. O ML-KEM estabelece a chave; quem cifra o payload é o AES-GCM.",
+                        "kind": "kdf",
+                        "packet_bytes": payload + checksum + mlkem,
+                        "added_bytes": 0,
+                        "time_us": self._mission_int(mission, "kdf_us"),
+                        "color": C_ACCENT_CYAN,
+                    },
                 )
+            )
+        else:
+            steps.append(
+                {
+                    "label": "RNG",
+                    "detail": "chave efêmera",
+                    "explain": "No baseline clássico, a placa gera uma chave AES-128 efêmera e um nonce aleatório para esta mensagem.",
+                    "kind": "rng",
+                    "packet_bytes": payload + checksum,
+                    "added_bytes": 0,
+                    "time_us": self._mission_int(mission, "rng_us"),
+                    "color": C_ACCENT_CYAN,
+                }
             )
 
         steps.append(
             {
-                "label": "HMAC",
-                "detail": "autenticação",
-                "explain": "A placa calcula HMAC-SHA256 com o segredo. A tag autentica mensagem e chave.",
-                "kind": "hmac",
-                "packet_bytes": payload + mlkem + hmac,
-                "added_bytes": hmac,
-                "time_us": self._mission_int(mission, "tag_us"),
+                "label": "AES-GCM",
+                "detail": "cifra e tag",
+                "explain": "AES-128-GCM cifra o payload e gera uma tag de autenticação. O nonce acompanha o pacote e não deve repetir com a mesma chave.",
+                "kind": "aead",
+                "packet_bytes": payload + checksum + mlkem + nonce + gcm + hmac,
+                "added_bytes": nonce + gcm + hmac,
+                "time_us": self._mission_int(mission, "encrypt_us", self._mission_int(mission, "tag_us")),
                 "color": C_ACCENT_ORANGE,
             }
         )
 
-        if checksum > 0 or scenario == "PQC_CRC32":
-            steps.append(
-                {
-                    "label": "CRC32",
-                    "detail": "checksum do payload",
-                    "explain": "O CRC32 adiciona 4 bytes baratos. Não é criptografia; revela bit-flip acidental no payload.",
-                    "kind": "crc",
-                    "packet_bytes": payload + mlkem + hmac + checksum,
-                    "added_bytes": checksum,
-                    "time_us": self._mission_int(mission, "crc_us"),
-                    "color": C_ACCENT_GREEN,
-                }
-            )
-
-        verify_detail = "verifica CRC e tag" if checksum > 0 else "verifica tag"
-        verify_time = self._mission_int(mission, "verify_us") + (self._mission_int(mission, "crc_us") if checksum > 0 else 0)
+        verify_detail = "decifra, tag e CRC" if checksum > 0 else "decifra e tag GCM"
+        verify_time = self._mission_int(mission, "decrypt_us", self._mission_int(mission, "verify_us"))
+        if checksum > 0:
+            verify_time += self._mission_int(mission, "crc_us")
         steps.append(
             {
             "label": "VERIFICA",
             "detail": verify_detail,
-            "explain": "No recebimento, a Wisdom recalcula tag e CRC. A comparação decide entrega, silêncio ou rejeição.",
+            "explain": "No recebimento, AES-GCM só libera plaintext se a tag for válida. Com CRC32, a demo ainda checa corrupção acidental do payload.",
                 "kind": "verify",
-                "packet_bytes": payload + mlkem + hmac + checksum,
+                "packet_bytes": payload + checksum + mlkem + nonce + gcm + hmac,
                 "added_bytes": 0,
                 "time_us": verify_time,
                 "color": C_ACCENT_GREEN if checksum > 0 else C_TEXT_PRIMARY,
@@ -2888,7 +3017,7 @@ class DashboardPanel:
             {
             "label": "RESULTADO",
             "detail": str(mission.get("result", "DELIVERED")),
-            "explain": "Fluxo concluído. Compare tempo, bytes, heap e flags para medir o custo prático.",
+            "explain": "Fluxo concluído. Compare tempo, bytes, heap, AEAD e CRC para medir o custo prático.",
                 "kind": "send",
                 "packet_bytes": total,
                 "added_bytes": 0,
@@ -2912,9 +3041,12 @@ class DashboardPanel:
         self.mission_overlay_close_rects.pop(scenario, None)
         self.mission_overlay_drag_rects.pop(scenario, None)
         self.mission_flow_control_rects.pop(scenario, None)
+        self.mission_flow_scrub_rects.pop(scenario, None)
         self.mission_overlay_order = [item for item in self.mission_overlay_order if item != scenario]
         if self.dragging_mission_overlay == scenario:
             self.dragging_mission_overlay = None
+        if self.dragging_mission_flow_scenario == scenario:
+            self.dragging_mission_flow_scenario = None
         if self.mission_flow_animation and self.mission_flow_animation.get("scenario") == scenario:
             self.mission_flow_animation = None
         self._sync_mission_overlay_state()
@@ -2993,17 +3125,33 @@ class DashboardPanel:
             "scenario",
             "message",
             "crypto",
+            "cipher",
             "checksum",
+            "key_source",
+            "key_policy",
             "payload_len",
             "payload_crc32",
             "bytes_payload",
+            "bytes_ciphertext",
+            "bytes_mlkem",
+            "bytes_nonce",
+            "bytes_gcm_tag",
             "bytes_crypto",
             "bytes_checksum",
             "bytes_total",
+            "nonce_bytes",
+            "gcm_tag_bytes",
+            "ciphertext_bytes",
             "tag_us",
             "verify_us",
+            "rng_us",
+            "kdf_us",
+            "encrypt_us",
+            "decrypt_us",
             "crc_us",
             "crc_match",
+            "aead_match",
+            "decrypt_ok",
         }
         metric_keys = {
             "uptime_ms",
@@ -3145,8 +3293,11 @@ class DashboardPanel:
             "message",
             "result",
             "crypto",
+            "cipher",
             "checksum",
             "confirmation",
+            "key_source",
+            "key_policy",
             "payload_mode",
             "payload_live_status",
             "payload_text",
@@ -3154,6 +3305,9 @@ class DashboardPanel:
             "payload_crc32",
             "crc_tx",
             "crc_rx",
+            "nonce_crc32",
+            "ciphertext_crc32",
+            "gcm_tag_crc32",
             "sensor_accel",
             "sensor_failures",
         )
@@ -3161,13 +3315,22 @@ class DashboardPanel:
             "key_match",
             "tag_ready",
             "tag_match",
+            "aead_match",
+            "decrypt_ok",
             "crc_match",
             "payload_seq",
             "payload_len",
             "bytes_payload",
+            "bytes_ciphertext",
+            "bytes_mlkem",
+            "bytes_nonce",
+            "bytes_gcm_tag",
             "bytes_crypto",
             "bytes_checksum",
             "bytes_total",
+            "nonce_bytes",
+            "gcm_tag_bytes",
+            "ciphertext_bytes",
             "sensor_temp_c_x100",
             "sensor_hum_x100",
             "sensor_light",
@@ -3176,6 +3339,10 @@ class DashboardPanel:
             "keygen_us",
             "encap_us",
             "decap_us",
+            "rng_us",
+            "kdf_us",
+            "encrypt_us",
+            "decrypt_us",
             "tag_us",
             "verify_us",
             "crc_us",
@@ -3229,6 +3396,207 @@ class DashboardPanel:
         if scenario == "PQC":
             return C_ACCENT_ORANGE
         return C_TEXT_PRIMARY
+
+    @staticmethod
+    def _active_trace_line(lines, local_progress):
+        if not lines:
+            return 0
+        return min(len(lines) - 1, max(0, int(local_progress * len(lines))))
+
+    def _draw_function_trace_panel(self, surface, rect, title, lines, active_index, accent):
+        trace_bg = (5, 8, 18)
+        trace_header = (24, 34, 64)
+        trace_active = (34, 48, 92)
+        trace_muted = (176, 194, 230)
+        pygame.draw.rect(surface, trace_bg, rect, border_radius=5)
+        pygame.draw.rect(surface, accent, rect, width=2, border_radius=5)
+        pygame.draw.rect(surface, trace_header, (rect.x, rect.y, rect.width, 21), border_top_left_radius=5, border_top_right_radius=5)
+        pygame.draw.line(surface, accent, (rect.x, rect.y + 21), (rect.right, rect.y + 21), 1)
+        surface.blit(self._render_clipped(FONT_LABEL, title, C_TEXT_PRIMARY, rect.width - 12), (rect.x + 7, rect.y + 4))
+
+        y = rect.y + 25
+        line_h = 14
+        max_lines = max(1, (rect.height - 29) // line_h)
+        for index, line in enumerate(lines[:max_lines]):
+            line_rect = pygame.Rect(rect.x + 5, y - 1, rect.width - 10, line_h)
+            if index == active_index:
+                pygame.draw.rect(surface, trace_active, line_rect, border_radius=3)
+                pygame.draw.rect(surface, accent, (line_rect.x, line_rect.y, 3, line_rect.height), border_radius=2)
+            prefix = ">" if index == active_index else " "
+            color = C_TEXT_PRIMARY if index == active_index else trace_muted
+            surface.blit(self._render_clipped(FONT_LABEL, f"{prefix} {line}", color, rect.width - 14), (rect.x + 7, y))
+            y += line_h
+
+    def _mission_step_trace(self, scenario, mission, step):
+        kind = str(step.get("kind", "")).lower()
+        payload_len = self._mission_int(mission, "bytes_payload")
+        checksum = self._mission_int(mission, "bytes_checksum")
+        mlkem = self._mission_int(mission, "bytes_mlkem")
+        nonce = self._mission_int(mission, "bytes_nonce", self._mission_int(mission, "nonce_bytes"))
+        gcm = self._mission_int(mission, "bytes_gcm_tag", self._mission_int(mission, "gcm_tag_bytes"))
+        total = self._mission_int(mission, "bytes_total")
+        live = str(mission.get("payload_mode", "")).upper() == "LIVE"
+
+        if kind == "payload":
+            if live:
+                return "build_live_payload()", (
+                    "temp, hum = SENSOR_READ(TEMP_HUM)",
+                    "accel = SENSOR_READ(ACCEL)",
+                    "light = SENSOR_READ(APDS); pot = ANALOG(POT)",
+                    "payload = format('PQC-SAT|SEQ|TEMP|POT')",
+                    f"payload_len = {payload_len} bytes",
+                    "payload_hex = payload.encode('ascii').hex()",
+                )
+            return "parse_mission_payload()", (
+                "payload = payload_hex or MISSION_DEFAULT_PAYLOAD",
+                "payload_len = min(len(payload), MAX_PAYLOAD)",
+                f"payload_crc32 = crc32(payload)  # {payload_len} B",
+                "protected_payload = payload",
+                "nenhuma cifra aplicada ainda",
+            )
+        if kind == "crc":
+            return "protect_with_crc32()", (
+                "crc_tx = crc32_bytes(payload)",
+                "write_u32_be(protected_payload + payload_len, crc_tx)",
+                f"checksum_bytes = {checksum}",
+                "protected_payload = payload || crc_tx",
+                "CRC detecta corrupção acidental; não cifra",
+            )
+        if kind == "keygen":
+            return "mlkem_keygen()", (
+                "op_started = micros()",
+                "pk, sk = crypto_kem_keypair()",
+                "keygen_us = micros() - op_started",
+                "pk fica local; sk fica local",
+                "payload ainda não foi cifrado",
+            )
+        if kind == "mlkem":
+            return "mlkem_encapsulate()", (
+                "ct, ss_enc = crypto_kem_enc(pk)",
+                f"bytes_mlkem = {mlkem}",
+                "packet += ct  # ciphertext ML-KEM",
+                "ss_enc será usado para derivar chave AES",
+                "ML-KEM não cifra o payload diretamente",
+            )
+        if kind == "decap":
+            return "mlkem_decap_and_compare()", (
+                "ss_dec = crypto_kem_dec(ct, sk)",
+                "key_match = consttime_eq(ss_enc, ss_dec)",
+                "pqc_shared_secret_ready = key_match",
+                "se ct corromper, segredo pode divergir",
+            )
+        if kind == "kdf":
+            return "derive_mission_aes128_key()", (
+                f"context = 'PQC-SAT|MISSION|{scenario}|AES-128-GCM|v1'",
+                "digest = HMAC_SHA256(ss, context)",
+                "aes_key = digest[0:16]",
+                "secure_wipe(digest)",
+                "mesmo segredo -> mesma chave AES",
+            )
+        if kind == "rng":
+            return "classic_ephemeral_key()", (
+                "aes_key = fill_random_bytes(16)",
+                "aes_key_rx = aes_key_tx",
+                "nonce = fill_random_bytes(12)",
+                "key_policy = ephemeral_per_message",
+                "baseline simétrico barato",
+            )
+        if kind == "aead":
+            return "aes128_gcm_encrypt()", (
+                f"nonce = random({nonce} B)",
+                f"aad = 'PQC-SAT|MISSION|{scenario}|v1'",
+                "ciphertext, tag = GCM.encrypt(key, nonce, aad, protected)",
+                f"tag = {gcm} B; ciphertext = payload + crc",
+                "encrypt_us mede custo real na Wisdom",
+            )
+        if kind == "verify":
+            crc_line = "crc_match = crc32(plaintext_payload) == crc_field" if checksum else "crc_match = NA  # sem CRC neste cenário"
+            return "aes128_gcm_decrypt_and_verify()", (
+                "plaintext = GCM.auth_decrypt(key, nonce, aad, ciphertext, tag)",
+                "decrypt_ok = tag GCM válida",
+                "aead_match = plaintext == protected_payload",
+                crc_line,
+                "plaintext só é aceito se a tag bater",
+            )
+        return "mission_result()", (
+            "delivered = key_match and aead_match and crc_match",
+            f"bytes_total = {total}",
+            "return cipher, timings, heap, flags",
+            "dashboard exibe resposta real da placa",
+        )
+
+    def _fault_step_trace(self, fault, step):
+        label = str(step.get("label", "")).upper()
+        target = str(fault.get("target", "PAYLOAD")).upper()
+        guard = str(fault.get("guard", "NONE")).upper()
+        byte_index = fault.get("byte_index", "--")
+        bit_mask = fault.get("bit_mask", "--")
+
+        if label in {"PAYLOAD", "CIPHERTEXT"}:
+            source = "pqc_ct" if target == "CIPHERTEXT" else "payload"
+            return "prepare_fault_target()", (
+                f"target = {source}",
+                "before = copy(target)",
+                "crc_before = crc32_bytes(before)",
+                f"guard = {guard}",
+                "nenhum byte foi alterado ainda",
+            )
+        if label == "BIT-FLIP":
+            return "inject_single_bit_flip()", (
+                f"byte_index = {byte_index}",
+                f"bit_mask = {bit_mask}",
+                "after = before.copy()",
+                "after[byte_index] ^= bit_mask",
+                "um único bit mudou no material observado",
+            )
+        if label == "SEM CRC":
+            return "guard_none_path()", (
+                "guard == NONE",
+                "não existe crc_tx salvo no pacote",
+                "não há comparação simples antes da entrega",
+                "payload alterado pode passar silenciosamente",
+            )
+        if label == "ENTREGA":
+            return "silent_delivery_decision()", (
+                "if after != before and guard == NONE:",
+                "    result = SILENT",
+                "session_status = DEGRADADO",
+                "este é o caso didático perigoso",
+            )
+        if label == "CRC32":
+            return "crc_guard_prepare()", (
+                "crc_before = crc32_bytes(before)",
+                "crc_tx foi anexado antes da falha",
+                "guard_verify_us começa na verificação",
+                "CRC cobre single-bit flip da demo",
+            )
+        if label == "VERIFICA":
+            return "crc_guard_verify()", (
+                "crc_after = crc32_bytes(after)",
+                "crc_changed = crc_after != crc_before",
+                "if crc_changed: result = DETECTED_GUARD",
+                "payload não é aceito como íntegro",
+            )
+        if label == "DECAP":
+            return "pqc_fault_decap()", (
+                "ct_corrompido = after",
+                "ss_dec = crypto_kem_dec(ct_corrompido, sk)",
+                "key_match = consttime_eq(ss_enc, ss_dec)",
+                "falha em ct afeta acordo de chave",
+            )
+        if label == "CONFIRMA":
+            return "key_confirmation_check()", (
+                "tag_expected = HMAC_SHA256(ss_enc, contexto)",
+                "tag_rx = HMAC_SHA256(ss_dec, contexto)",
+                "tag_match = consttime_eq(tag_expected, tag_rx)",
+                "se falhar: PROTOCOL_REJECT",
+            )
+        return "fault_result_event()", (
+            "elapsed_us = micros() - started",
+            "recorda before/after/guard/result",
+            "exporta amostra para métricas",
+            "popup mostra o efeito do bit-flip",
+        )
 
     def _draw_stress_results_control(self, surface, x, y, width, mouse_pos):
         card_h = 86
@@ -3314,7 +3682,11 @@ class DashboardPanel:
         title_max = max(260, close_rect.x - (x + 36) - 18)
         title = "RESULTADOS CONSOLIDADOS DA BATERIA REAL"
         surface.blit(self._render_clipped(FONT_HEADER, title, C_ACCENT_CYAN, title_max), (x + 30, y + 16))
-        subtitle = f"{CONSOLIDATED_ACCEPTANCE_LABEL}: {CONSOLIDATED_SUMMARY['records']} registros, {CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões"
+        subtitle = (
+            f"{CONSOLIDATED_ACCEPTANCE_LABEL}: {CONSOLIDATED_SUMMARY['records']} registros, "
+            f"{CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões; "
+            f"{CONSOLIDATED_METRICS_STATUS}"
+        )
         surface.blit(self._render_clipped(FONT_LABEL, subtitle, C_TEXT_DIM, title_max), (x + 30, y + 48))
 
         try:
@@ -3352,7 +3724,7 @@ class DashboardPanel:
         lx = left.x + pad
         ly = left.y + 14
         lw = left.width - pad * 2
-        surface.blit(self._render_clipped(FONT_HEADER, "CUSTO DAS MISSÕES (240 MHz)", C_ACCENT_CYAN, lw), (lx, ly))
+        surface.blit(self._render_clipped(FONT_HEADER, "CUSTO HISTÓRICO (pré AES-GCM)", C_ACCENT_CYAN, lw), (lx, ly))
         ly += 32
 
         table_h = min(154, max(132, int(left.height * 0.32)))
@@ -3389,6 +3761,7 @@ class DashboardPanel:
 
         ly += table_h + 18
         notes = (
+            "A versão atual cifra com AES-GCM; estes números são a referência anterior até nova coleta.",
             "PQC foi 25,9x mais lento e 11,5x maior em bytes que CLASSIC.",
             "PQC+CRC32 manteve a entrega funcional e adicionou +4 bytes ao pacote.",
             "A RAM livre ficou estável: 201.412 B de heap nas amostras consolidadas.",
@@ -3447,9 +3820,9 @@ class DashboardPanel:
             block_w = max(120, (rw - block_gap * 2) // 3)
             block_h = min(54, max(44, right.bottom - ry - 8))
             narrative_blocks = (
-                ("CUSTO", "PQC: 25,9x tempo.", C_ACCENT_ORANGE),
+                ("CUSTO", "Histórico: PQC 25,9x.", C_ACCENT_ORANGE),
                 ("CRC32", "Detecta corrupção.", C_ACCENT_GREEN),
-                ("LIMITE", "Energia real exige medidor.", C_ACCENT_CYAN),
+                ("AES-GCM", "Nova bateria pendente.", C_ACCENT_CYAN),
             )
             for index, (label, body, color) in enumerate(narrative_blocks):
                 bx = rx + index * (block_w + block_gap)
@@ -3483,9 +3856,10 @@ class DashboardPanel:
         return self._fault_overlay_surface
 
     def _fault_overlay_size(self):
-        width = 386 if WIDTH >= 1600 else 350
-        width = min(width, max(300, WIDTH - 40))
-        height = min(360, max(332, HEIGHT - 120))
+        width = 500 if WIDTH >= 1600 else 456
+        width = min(width, max(340, WIDTH - 40))
+        target_height = 540 if HEIGHT >= 900 else 512
+        height = min(target_height, max(460, HEIGHT - 96))
         return width, height
 
     def _default_fault_overlay_position(self):
@@ -3523,6 +3897,8 @@ class DashboardPanel:
             self.fault_overlay_close_rect = None
             self.fault_overlay_drag_rect = None
             self.fault_flow_control_rect = None
+            self.fault_flow_scrub_rect = None
+            self.dragging_fault_flow = False
             return
 
         rect, close_rect = self._fault_overlay_geometry()
@@ -3574,20 +3950,23 @@ class DashboardPanel:
         active_index, local_progress = self._mission_flow_active_state(animation)
         active_step = steps[active_index]
         color = active_step["color"]
-        paused = bool(animation.get("paused"))
+        awaiting_confirm = bool(animation.get("awaiting_confirm"))
 
         x = rect.x + 14
         y = rect.y + 72
         width = rect.width - 28
 
-        header = f"FALHA PASSO {active_index + 1}/{len(steps)}"
-        control_rect = pygame.Rect(rect.right - 82, y - 2, 64, 22)
+        header = "FALHA CONCLUÍDA" if awaiting_confirm else f"FALHA PASSO {active_index + 1}/{len(steps)}"
+        control_rect = pygame.Rect(rect.right - 104, y - 2, 86, 22)
         self.fault_flow_control_rect = control_rect
-        surface.blit(self._render_clipped(FONT_LABEL, header, C_ACCENT_CYAN, width - 76), (x, y))
-        button_label = "PLAY" if paused else "PAUSAR"
-        pygame.draw.rect(surface, (16, 22, 42), control_rect, border_radius=4)
-        pygame.draw.rect(surface, C_ACCENT_ORANGE if paused else C_PANEL_BORDER, control_rect, width=1, border_radius=4)
-        button_text = FONT_LABEL.render(button_label, True, C_ACCENT_ORANGE if paused else C_TEXT_DIM)
+        surface.blit(self._render_clipped(FONT_LABEL, header, C_ACCENT_CYAN, width - 100), (x, y))
+        button_label = "VER DADOS" if awaiting_confirm else "AGUARDE"
+        button_border = C_ACCENT_GREEN if awaiting_confirm else C_PANEL_BORDER
+        button_fill = (18, 58, 46) if awaiting_confirm else (30, 38, 72)
+        button_color = C_ACCENT_GREEN if awaiting_confirm else C_TEXT_PRIMARY
+        pygame.draw.rect(surface, button_fill, control_rect, border_radius=4)
+        pygame.draw.rect(surface, button_border, control_rect, width=1, border_radius=4)
+        button_text = FONT_LABEL.render(button_label, True, button_color)
         surface.blit(
             button_text,
             (
@@ -3598,13 +3977,13 @@ class DashboardPanel:
         y += 18
 
         step_rect = pygame.Rect(x, y, width, 96)
-        pygame.draw.rect(surface, (14, 20, 38), step_rect, border_radius=5)
-        pygame.draw.rect(surface, color, step_rect, width=1, border_radius=5)
+        pygame.draw.rect(surface, (8, 12, 26), step_rect, border_radius=5)
+        pygame.draw.rect(surface, color, step_rect, width=2, border_radius=5)
         step_title = f"{active_step['label']} - {active_step['detail']}"
         surface.blit(self._render_clipped(FONT_SMALL, step_title, color, width - 14), (step_rect.x + 7, step_rect.y + 7))
         time_us = active_step.get("time_us")
         metric = _format_elapsed(time_us) if time_us not in {None, ""} else self._fault_step_metric(fault, active_step["label"])
-        surface.blit(self._render_clipped(FONT_LABEL, metric, C_TEXT_DIM, width - 14), (step_rect.x + 7, step_rect.y + 27))
+        surface.blit(self._render_clipped(FONT_LABEL, metric, (180, 198, 235), width - 14), (step_rect.x + 7, step_rect.y + 27))
         self._draw_wrapped_text(
             surface,
             FONT_LABEL,
@@ -3617,7 +3996,18 @@ class DashboardPanel:
             max_lines=3,
         )
 
-        bits_y = step_rect.bottom + 12
+        trace_title, trace_lines = self._fault_step_trace(fault, active_step)
+        trace_rect = pygame.Rect(x, step_rect.bottom + 8, width, 108)
+        self._draw_function_trace_panel(
+            surface,
+            trace_rect,
+            trace_title,
+            trace_lines,
+            self._active_trace_line(trace_lines, local_progress),
+            color,
+        )
+
+        bits_y = trace_rect.bottom + 10
         self._draw_fault_byte_rows(surface, x, bits_y, width, fault)
 
         timeline_y = bits_y + 74
@@ -3630,12 +4020,15 @@ class DashboardPanel:
             max(0.0, animation.get("age", 0.0) / max(0.001, animation.get("duration", FAULT_FLOW_ANIMATION_SECONDS))),
         )
         marker_x = node_positions[0] + int((node_positions[-1] - node_positions[0]) * progress_ratio)
+        self.fault_flow_scrub_rect = pygame.Rect(node_positions[0], timeline_y - 14, max(1, node_positions[-1] - node_positions[0]), 42)
         pygame.draw.line(surface, color, (node_positions[0], timeline_y), (marker_x, timeline_y), 3)
         short_labels = {
             "PAYLOAD": "PAY",
             "CIPHERTEXT": "CT",
             "BIT-FLIP": "BIT",
-            "GUARD": "CRC",
+            "CRC32": "CRC",
+            "SEM CRC": "NO",
+            "ENTREGA": "OUT",
             "VERIFICA": "VER",
             "DECAP": "DEC",
             "CONFIRMA": "MAC",
@@ -3653,7 +4046,16 @@ class DashboardPanel:
             label = self._render_clipped(FONT_LABEL, short_labels.get(step["label"], step["label"][:3]), node_color, 34)
             surface.blit(label, (node_x - label.get_width() // 2, timeline_y + 10))
 
-        hint = "Final: resultado da falha e detecção."
+        marker_rect = pygame.Rect(marker_x - 8, timeline_y - 8, 16, 16)
+        pygame.draw.rect(surface, color, marker_rect, border_radius=4)
+        pygame.draw.rect(surface, C_TEXT_PRIMARY, marker_rect, width=1, border_radius=4)
+        pygame.draw.circle(surface, C_TEXT_PRIMARY, (marker_x, timeline_y), 12, 1)
+
+        hint = (
+            "Arraste a linha para revisar; clique VER DADOS para abrir o resultado."
+            if awaiting_confirm
+            else "Arraste a linha do tempo para avançar ou voltar durante a explicação."
+        )
         surface.blit(self._render_clipped(FONT_LABEL, hint, C_TEXT_DIM, width), (x, rect.bottom - 20))
 
     def _draw_fault_overlay_details(self, surface, rect, fault):
@@ -3710,7 +4112,11 @@ class DashboardPanel:
     def _fault_step_metric(self, fault, label):
         if label == "BIT-FLIP":
             return f"{fault.get('before_byte', '--')} -> {fault.get('after_byte', '--')}"
-        if label in {"GUARD", "VERIFICA"}:
+        if label == "SEM CRC":
+            return "sem checksum salvo"
+        if label == "ENTREGA":
+            return "sem bloqueio de integridade"
+        if label in {"CRC32", "VERIFICA"}:
             before = str(fault.get("crc_before") or "--")
             after = str(fault.get("crc_after") or "--")
             return f"crc {before[-8:]} -> {after[-8:]}"
@@ -4308,7 +4714,11 @@ class DashboardPanel:
     def _draw_mission_flow_packet_bar(self, surface, rect, mission, current_bytes, total_bytes):
         parts_by_label = {label: (label, value, color) for label, value, color in self._mission_package_parts(mission)}
         scenario = self._normalize_mission_scenario(mission.get("scenario", "MISSION"))
-        ordered_labels = ("payload", "ML-KEM", "HMAC", "CRC") if scenario in {"PQC", "PQC_CRC32"} else ("payload", "HMAC", "CRC")
+        ordered_labels = (
+            ("payload", "CRC", "ML-KEM", "nonce", "GCM", "HMAC")
+            if scenario in {"PQC", "PQC_CRC32"}
+            else ("payload", "CRC", "nonce", "GCM", "HMAC")
+        )
         parts = tuple(parts_by_label[label] for label in ordered_labels if label in parts_by_label)
         bar_x = rect.x + 18
         bar_y = rect.bottom - 34
@@ -4337,6 +4747,8 @@ class DashboardPanel:
         short_part_labels = {
             "payload": "pay",
             "ML-KEM": "kem",
+            "nonce": "iv",
+            "GCM": "gcm",
             "HMAC": "mac",
             "CRC": "crc",
         }
@@ -4413,9 +4825,10 @@ class DashboardPanel:
             surface.blit(self._render_clipped(FONT_LABEL, f"JSON: {name}", C_ACCENT_GREEN, rect.width - 28), (rect.x + 250, rect.y + 88))
 
     def _mission_overlay_size(self):
-        width = 380 if WIDTH >= 1600 else 340
-        width = min(width, max(280, WIDTH - 40))
-        height = min(390, max(354, HEIGHT - 120))
+        width = 540 if WIDTH >= 1600 else 488
+        width = min(width, max(360, WIDTH - 40))
+        target_height = 600 if HEIGHT >= 900 else 552
+        height = min(target_height, max(500, HEIGHT - 92))
         return width, height
 
     def _mission_overlay_geometry(self, scenario=None):
@@ -4485,17 +4898,16 @@ class DashboardPanel:
             self.mission_overlay_close_rects.clear()
             self.mission_overlay_drag_rects.clear()
             self.mission_flow_control_rects.clear()
+            self.mission_flow_scrub_rects.clear()
             return
 
         self.mission_overlay_rects.clear()
         self.mission_overlay_close_rects.clear()
         self.mission_overlay_drag_rects.clear()
         self.mission_flow_control_rects.clear()
+        self.mission_flow_scrub_rects.clear()
         self.mission_overlay_order = [scenario for scenario in self.mission_overlay_order if scenario in self.mission_overlays]
-        if len(self.mission_overlays) >= 2:
-            self._draw_mission_comparison(surface, t)
-        else:
-            self.mission_comparison_rect = None
+        self.mission_comparison_rect = None
         for scenario in self.mission_overlay_order:
             self._draw_single_mission_overlay(surface, t, scenario, self.mission_overlays[scenario])
         self._sync_mission_overlay_state()
@@ -4522,15 +4934,36 @@ class DashboardPanel:
         payload = self._mission_int(mission, "bytes_payload")
         crypto = self._mission_int(mission, "bytes_crypto")
         checksum = self._mission_int(mission, "bytes_checksum")
-        hmac = min(32, crypto) if crypto else 0
-        mlkem = max(0, crypto - hmac) if scenario in {"PQC", "PQC_CRC32"} else 0
-        if scenario == "CLASSIC":
-            hmac = crypto
-            mlkem = 0
+        cipher = str(mission.get("cipher", "")).upper()
+        has_aead_fields = (
+            "AES" in cipher
+            or "bytes_gcm_tag" in mission
+            or "gcm_tag_bytes" in mission
+            or "bytes_nonce" in mission
+            or "nonce_bytes" in mission
+        )
+        hmac = 0
+        nonce = 0
+        gcm = 0
+        mlkem = 0
+        if has_aead_fields:
+            nonce = self._mission_int(mission, "bytes_nonce", self._mission_int(mission, "nonce_bytes"))
+            gcm = self._mission_int(mission, "bytes_gcm_tag", self._mission_int(mission, "gcm_tag_bytes"))
+            mlkem = self._mission_int(mission, "bytes_mlkem")
+            if mlkem <= 0 and scenario in {"PQC", "PQC_CRC32"}:
+                mlkem = max(0, crypto - nonce - gcm)
+        else:
+            hmac = min(32, crypto) if crypto else 0
+            mlkem = max(0, crypto - hmac) if scenario in {"PQC", "PQC_CRC32"} else 0
+            if scenario == "CLASSIC":
+                hmac = crypto
+                mlkem = 0
         return (
             ("payload", payload, C_ACCENT_BLUE),
-            ("HMAC", hmac, C_ACCENT_ORANGE),
             ("ML-KEM", mlkem, C_ACCENT_PURPLE),
+            ("nonce", nonce, C_TEXT_DIM),
+            ("GCM", gcm, C_ACCENT_ORANGE),
+            ("HMAC", hmac, C_ACCENT_ORANGE),
             ("CRC", checksum, C_ACCENT_GREEN),
         )
 
@@ -4613,8 +5046,14 @@ class DashboardPanel:
 
             part_values = {label: value for label, value, _part_color in parts}
             payload_label = "payload real" if str(mission.get("payload_mode", "")).upper() == "LIVE" else "payload"
-            line1 = f"{payload_label} {part_values.get('payload', 0)}B  hmac {part_values.get('HMAC', 0)}B"
-            line2 = f"kem {part_values.get('ML-KEM', 0)}B  crc {part_values.get('CRC', 0)}B"
+            line1 = (
+                f"{payload_label} {part_values.get('payload', 0)}B  "
+                f"gcm {part_values.get('GCM', part_values.get('HMAC', 0))}B"
+            )
+            line2 = (
+                f"kem {part_values.get('ML-KEM', 0)}B  "
+                f"iv {part_values.get('nonce', 0)}B  crc {part_values.get('CRC', 0)}B"
+            )
             surface.blit(self._render_clipped(FONT_LABEL, line1, C_TEXT_DIM, col_w - 12), (x + 7, y + 67))
             surface.blit(self._render_clipped(FONT_LABEL, line2, C_TEXT_DIM, col_w - 12), (x + 7, y + 81))
 
@@ -4627,6 +5066,7 @@ class DashboardPanel:
 
         result = str(mission.get("result", ""))
         crypto = str(mission.get("crypto", "--"))
+        cipher = str(mission.get("cipher", "")).strip()
         checksum = str(mission.get("checksum", "NONE"))
         elapsed = _format_elapsed(mission.get("elapsed_us"))
         bytes_total = self._mission_metric_value(mission, "bytes_total")
@@ -4637,12 +5077,17 @@ class DashboardPanel:
         }.get(scenario, C_ACCENT_CYAN)
         color = scenario_color if result in {"", "DELIVERED"} else C_ACCENT_RED
 
+        shadow = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(shadow, (0, 0, 0, 118), (0, 0, rect.width, rect.height), border_radius=10)
+        surface.blit(shadow, (rect.x + 8, rect.y + 10))
+
         panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-        alpha = int(150 + 45 * math.sin(t * 7)) if self.mission_effect_timer > 0 else 150
-        pygame.draw.rect(panel, (*C_PANEL_BG, 225), (0, 0, rect.width, rect.height), border_radius=8)
-        pygame.draw.rect(panel, (*color, max(120, alpha)), (0, 0, rect.width, rect.height), 1, border_radius=8)
-        pygame.draw.rect(panel, (*color, 30), (0, 0, rect.width, 44), border_radius=8)
-        pygame.draw.line(panel, (*C_PANEL_BORDER, 180), (0, 44), (rect.width, 44), 1)
+        alpha = int(170 + 55 * math.sin(t * 7)) if self.mission_effect_timer > 0 else 190
+        border_alpha = min(245, max(185, alpha))
+        pygame.draw.rect(panel, (*C_PANEL_BG, 248), (0, 0, rect.width, rect.height), border_radius=8)
+        pygame.draw.rect(panel, (*color, border_alpha), (0, 0, rect.width, rect.height), 2, border_radius=8)
+        pygame.draw.rect(panel, (*color, 58), (0, 0, rect.width, 44), border_radius=8)
+        pygame.draw.line(panel, (*C_PANEL_BORDER, 230), (0, 44), (rect.width, 44), 1)
         surface.blit(panel, rect.topleft)
 
         result_label = "OK" if result == "DELIVERED" else (result or "EM CURSO")
@@ -4653,7 +5098,10 @@ class DashboardPanel:
         x_text = FONT_SMALL.render("X", True, C_TEXT_PRIMARY)
         surface.blit(x_text, (close_rect.centerx - x_text.get_width() // 2, close_rect.centery - x_text.get_height() // 2))
 
-        subtitle = f"{crypto}  |  CRC: {checksum}"
+        crypto_label = crypto
+        if cipher and cipher != "--" and cipher.upper() not in crypto.upper():
+            crypto_label = f"{crypto} + {cipher}"
+        subtitle = f"{crypto_label}  |  CRC: {checksum}"
         surface.blit(self._render_clipped(FONT_LABEL, subtitle, C_TEXT_DIM, rect.width - 28), (rect.x + 14, rect.y + 48))
 
         if self._mission_overlay_is_animating(scenario):
@@ -4686,16 +5134,18 @@ class DashboardPanel:
         y = rect.y + 72
         width = rect.width - 28
 
-        paused = bool(animation.get("paused"))
-        header = f"FLUXO REAL {active_index + 1}/{len(steps)}"
-        control_rect = pygame.Rect(rect.right - 82, y - 2, 64, 22)
+        awaiting_confirm = bool(animation.get("awaiting_confirm"))
+        header = "FLUXO CONCLUÍDO" if awaiting_confirm else f"FLUXO REAL {active_index + 1}/{len(steps)}"
+        control_rect = pygame.Rect(rect.right - 104, y - 2, 86, 22)
         self.mission_flow_control_rects[scenario] = control_rect
-        surface.blit(self._render_clipped(FONT_LABEL, header, C_ACCENT_CYAN, width - 76), (x, y))
-        button_label = "PLAY" if paused else "PAUSAR"
-        button_border = C_ACCENT_ORANGE if paused else C_PANEL_BORDER
-        pygame.draw.rect(surface, (16, 22, 42), control_rect, border_radius=4)
+        surface.blit(self._render_clipped(FONT_LABEL, header, C_ACCENT_CYAN, width - 100), (x, y))
+        button_label = "VER DADOS" if awaiting_confirm else "AGUARDE"
+        button_border = C_ACCENT_GREEN if awaiting_confirm else C_PANEL_BORDER
+        button_fill = (18, 58, 46) if awaiting_confirm else (30, 38, 72)
+        button_color = C_ACCENT_GREEN if awaiting_confirm else C_TEXT_PRIMARY
+        pygame.draw.rect(surface, button_fill, control_rect, border_radius=4)
         pygame.draw.rect(surface, button_border, control_rect, width=1, border_radius=4)
-        button_text = FONT_LABEL.render(button_label, True, C_ACCENT_ORANGE if paused else C_TEXT_DIM)
+        button_text = FONT_LABEL.render(button_label, True, button_color)
         surface.blit(
             button_text,
             (
@@ -4705,9 +5155,9 @@ class DashboardPanel:
         )
         y += 18
 
-        step_rect = pygame.Rect(x, y, width, 102)
-        pygame.draw.rect(surface, (14, 20, 38), step_rect, border_radius=5)
-        pygame.draw.rect(surface, color, step_rect, width=1, border_radius=5)
+        step_rect = pygame.Rect(x, y, width, 104)
+        pygame.draw.rect(surface, (8, 12, 26), step_rect, border_radius=5)
+        pygame.draw.rect(surface, color, step_rect, width=2, border_radius=5)
 
         packet_text = f"pacote {current_bytes}/{total_bytes} B"
         added = active_step.get("added_bytes", 0)
@@ -4719,7 +5169,7 @@ class DashboardPanel:
 
         title = f"{active_step['label']} - {active_step['detail']}"
         surface.blit(self._render_clipped(FONT_SMALL, title, color, width - 14), (step_rect.x + 7, step_rect.y + 7))
-        surface.blit(self._render_clipped(FONT_LABEL, packet_text, C_TEXT_DIM, width - 14), (step_rect.x + 7, step_rect.y + 26))
+        surface.blit(self._render_clipped(FONT_LABEL, packet_text, (180, 198, 235), width - 14), (step_rect.x + 7, step_rect.y + 26))
         self._draw_wrapped_text(
             surface,
             FONT_LABEL,
@@ -4732,7 +5182,18 @@ class DashboardPanel:
             max_lines=3,
         )
 
-        timeline_y = step_rect.bottom + 24
+        trace_title, trace_lines = self._mission_step_trace(scenario, mission, active_step)
+        trace_rect = pygame.Rect(x, step_rect.bottom + 8, width, 118)
+        self._draw_function_trace_panel(
+            surface,
+            trace_rect,
+            trace_title,
+            trace_lines,
+            self._active_trace_line(trace_lines, local_progress),
+            color,
+        )
+
+        timeline_y = trace_rect.bottom + 24
         timeline_x = x + 10
         timeline_w = width - 20
         if len(steps) == 1:
@@ -4749,6 +5210,8 @@ class DashboardPanel:
             max(0.0, animation.get("age", 0.0) / max(0.001, animation.get("duration", MISSION_FLOW_ANIMATION_SECONDS))),
         )
         packet_x = node_positions[0] + int((node_positions[-1] - node_positions[0]) * progress_ratio)
+        scrub_rect = pygame.Rect(node_positions[0], timeline_y - 14, max(1, node_positions[-1] - node_positions[0]), 42)
+        self.mission_flow_scrub_rects[scenario] = scrub_rect
         pygame.draw.line(surface, self._scenario_color(scenario), (node_positions[0], timeline_y), (packet_x, timeline_y), 3)
 
         for index, step in enumerate(steps):
@@ -4765,6 +5228,9 @@ class DashboardPanel:
                 "KEYGEN": "KEY",
                 "ENCAP": "ENC",
                 "DECAP": "DEC",
+                "KDF": "KDF",
+                "RNG": "RNG",
+                "AES-GCM": "AES",
                 "HMAC": "MAC",
                 "CRC32": "CRC",
                 "VERIFICA": "VER",
@@ -4781,10 +5247,15 @@ class DashboardPanel:
         packet_rect = pygame.Rect(packet_x - 8, timeline_y - 8, 16, 16)
         pygame.draw.rect(surface, color, packet_rect, border_radius=4)
         pygame.draw.rect(surface, C_TEXT_PRIMARY, packet_rect, width=1, border_radius=4)
+        pygame.draw.circle(surface, C_TEXT_PRIMARY, (packet_x, timeline_y), 12, 1)
 
         bar_rect = pygame.Rect(rect.x, timeline_y + 34, rect.width, 68)
         self._draw_mission_flow_packet_bar(surface, bar_rect, mission, current_bytes, total_bytes)
-        hint = "Final: métricas detalhadas."
+        hint = (
+            "Arraste a linha para revisar; clique VER DADOS para abrir as métricas."
+            if awaiting_confirm
+            else "Arraste a linha do tempo para avançar ou voltar durante a explicação."
+        )
         surface.blit(self._render_clipped(FONT_LABEL, hint, C_TEXT_DIM, width), (x, rect.bottom - 20))
 
     def _draw_mission_overlay_metrics(self, surface, rect, mission, elapsed, bytes_total):
@@ -4812,15 +5283,19 @@ class DashboardPanel:
             ("keygen", "keygen_us"),
             ("encap", "encap_us"),
             ("decap", "decap_us"),
-            ("tag", "tag_us"),
-            ("verify", "verify_us"),
+            ("rng", "rng_us"),
+            ("kdf", "kdf_us"),
+            ("enc", "encrypt_us"),
+            ("dec", "decrypt_us"),
             ("crc", "crc_us"),
         )
-        phase_w = (rect.width - 28 - 2 * 8) // 3
-        phase_h = 40
+        phase_gap = 6
+        phase_cols = 4
+        phase_w = (rect.width - 28 - (phase_cols - 1) * phase_gap) // phase_cols
+        phase_h = 38
         for index, (label, key) in enumerate(phases):
-            x = rect.x + 14 + (index % 3) * (phase_w + 8)
-            y = phase_y + (index // 3) * (phase_h + 8)
+            x = rect.x + 14 + (index % phase_cols) * (phase_w + phase_gap)
+            y = phase_y + (index // phase_cols) * (phase_h + 8)
             value = _format_elapsed(mission.get(key))
             phase_color = C_TEXT_DIM if value in {"--", "0 us"} else (C_ACCENT_GREEN if key == "crc_us" else C_TEXT_PRIMARY)
             pygame.draw.rect(surface, (15, 20, 38), (x, y, phase_w, phase_h), border_radius=4)
@@ -4829,17 +5304,20 @@ class DashboardPanel:
             surface.blit(self._render_clipped(FONT_SMALL, value, phase_color, phase_w - 10), (x + 5, y + 21))
 
         bytes_y = phase_y + phase_h * 2 + 20
+        part_values = {label: value for label, value, _color in self._mission_package_parts(mission)}
         byte_line = (
-            f"payload {self._mission_metric_value(mission, 'bytes_payload')}B   "
-            f"crypto {self._mission_metric_value(mission, 'bytes_crypto')}B   "
-            f"crc {self._mission_metric_value(mission, 'bytes_checksum')}B"
+            f"pay {part_values.get('payload', 0)}B   "
+            f"kem {part_values.get('ML-KEM', 0)}B   "
+            f"iv {part_values.get('nonce', 0)}B   "
+            f"gcm {part_values.get('GCM', part_values.get('HMAC', 0))}B   "
+            f"crc {part_values.get('CRC', 0)}B"
         )
         surface.blit(self._render_clipped(FONT_LABEL, byte_line, C_TEXT_PRIMARY, rect.width - 28), (rect.x + 14, bytes_y))
 
         validation_y = bytes_y + 20
         validation = (
             f"key={self._mission_metric_value(mission, 'key_match')}   "
-            f"tag={self._mission_metric_value(mission, 'tag_match')}   "
+            f"aead={self._mission_metric_value(mission, 'aead_match')}   "
             f"crc={self._mission_metric_value(mission, 'crc_match')}"
         )
         surface.blit(self._render_clipped(FONT_LABEL, validation, C_TEXT_DIM, rect.width - 28), (rect.x + 14, validation_y))
@@ -4889,26 +5367,52 @@ class DashboardPanel:
         subtitle = FONT_SMALL.render(sub_text, True, C_TEXT_DIM)
         surface.blit(subtitle, (title_x + title.get_width() + 15, 14))
 
-        # Botao de Resultados no centro da barra superior
-        btn_w, btn_h = (240, 26) if WIDTH >= 1500 else (156, 26)
-        btn_x = (WIDTH - btn_w) // 2
+        # Botoes centrais: resultados e retorno ao onboarding
+        btn_h = 26
+        results_w = 240 if WIDTH >= 1500 else 156
+        onboarding_w = 132 if WIDTH >= 1500 else 112
+        btn_gap = 8
+        group_w = results_w + btn_gap + onboarding_w
+        btn_x = (WIDTH - group_w) // 2
         btn_y = (bar_h - btn_h) // 2
-        self.top_results_btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+        self.top_results_btn_rect = pygame.Rect(btn_x, btn_y, results_w, btn_h)
+        self.top_onboarding_btn_rect = pygame.Rect(self.top_results_btn_rect.right + btn_gap, btn_y, onboarding_w, btn_h)
 
         try:
             mouse_pos = pygame.mouse.get_pos()
         except pygame.error:
             mouse_pos = (-1, -1)
-        hovered = self.top_results_btn_rect.collidepoint(mouse_pos)
+        results_hovered = self.top_results_btn_rect.collidepoint(mouse_pos)
+        onboarding_hovered = self.top_onboarding_btn_rect.collidepoint(mouse_pos)
 
-        fill_c = (28, 42, 82) if hovered else (18, 22, 50)
-        border_c = C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else (C_ACCENT_CYAN if hovered else C_PANEL_BORDER)
+        fill_c = (28, 42, 82) if results_hovered else (18, 22, 50)
+        border_c = C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else (C_ACCENT_CYAN if results_hovered else C_PANEL_BORDER)
         pygame.draw.rect(surface, fill_c, self.top_results_btn_rect, border_radius=4)
         pygame.draw.rect(surface, border_c, self.top_results_btn_rect, width=1, border_radius=4)
 
         btn_label = "RESULTADOS CONSOLIDADOS" if WIDTH >= 1500 else "RESULTADOS"
         btn_txt = FONT_LABEL.render(btn_label, True, C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else C_TEXT_PRIMARY)
-        surface.blit(btn_txt, (btn_x + (btn_w - btn_txt.get_width()) // 2, btn_y + (btn_h - btn_txt.get_height()) // 2))
+        surface.blit(
+            btn_txt,
+            (
+                self.top_results_btn_rect.x + (self.top_results_btn_rect.width - btn_txt.get_width()) // 2,
+                btn_y + (btn_h - btn_txt.get_height()) // 2,
+            ),
+        )
+
+        intro_fill = (34, 36, 74) if onboarding_hovered else (18, 22, 50)
+        intro_border = C_ACCENT_ORANGE if onboarding_hovered else C_PANEL_BORDER
+        pygame.draw.rect(surface, intro_fill, self.top_onboarding_btn_rect, border_radius=4)
+        pygame.draw.rect(surface, intro_border, self.top_onboarding_btn_rect, width=1, border_radius=4)
+        intro_label = "ONBOARDING" if WIDTH >= 1500 else "INTRO"
+        intro_txt = FONT_LABEL.render(intro_label, True, C_ACCENT_ORANGE if onboarding_hovered else C_TEXT_PRIMARY)
+        surface.blit(
+            intro_txt,
+            (
+                self.top_onboarding_btn_rect.x + (self.top_onboarding_btn_rect.width - intro_txt.get_width()) // 2,
+                btn_y + (btn_h - intro_txt.get_height()) // 2,
+            ),
+        )
 
         # Lado direito: clock + link
         clock_text = FONT_SMALL.render(time.strftime("%H:%M:%S"), True, C_TEXT_DIM)
@@ -5531,7 +6035,7 @@ class Onboarding:
 
         paragraphs = [
             "ML-KEM (FIPS 203) é um mecanismo pós-quântico baseado em reticulados e no problema Learning With Errors.",
-            "Um KEM não cifra a mensagem diretamente: ele executa KEYGEN, ENCAP e DECAP para criar um segredo compartilhado usado depois pelo HMAC.",
+            "Um KEM não cifra a mensagem diretamente: ele executa KEYGEN, ENCAP e DECAP para criar um segredo compartilhado usado depois pelo AES-GCM.",
             "Na Wisdom, o custo aparece no pacote e no tempo: chave pública de 800 B, ciphertext de 768 B e segredo de 32 B. O popup pausável mostra onde isso entra.",
         ]
 
@@ -5599,9 +6103,9 @@ class Onboarding:
                 "title": "CLASSIC",
                 "color": C_ACCENT_BLUE,
                 "body": [
-                    "HMAC-SHA256 com chave simétrica.",
-                    "Serve como baseline: o caminho barato.",
-                    "Resultado real: 511 us, 73 bytes.",
+                    "AES-128-GCM com chave efêmera.",
+                    "Baseline simétrico: cifra real barata.",
+                    "Novos números exigem nova bateria.",
                 ],
             },
             {
@@ -5609,17 +6113,17 @@ class Onboarding:
                 "color": C_ACCENT_ORANGE,
                 "body": [
                     "ML-KEM-512 estabelece segredo.",
-                    "Depois HMAC autentica a mensagem.",
-                    "Resultado real: 13.234 us, 841 bytes.",
+                    "Depois AES-GCM cifra a mensagem.",
+                    "Histórico pré-AES: 13.234 us.",
                 ],
             },
             {
                 "title": "PQC + CRC32",
                 "color": C_ACCENT_GREEN,
                 "body": [
-                    "Mesmo fluxo PQC com checksum no payload.",
+                    "Mesmo fluxo PQC com CRC protegido.",
                     "Mostra detecção de corrupção por bit-flip.",
-                    "Resultado real: 13.130 us, 845 bytes.",
+                    "CRC32 segue didático, não criptográfico.",
                 ],
             },
         ]
@@ -5680,9 +6184,9 @@ class Onboarding:
         surface.blit(self.wrap_render(FONT_HEADER, "ROTEIRO MANUAL", C_ACCENT_GREEN, lw), (lx, ly))
         ly += 38
         steps = [
-            ("CLÁSSICA", "envia a mensagem com HMAC-SHA256."),
-            ("PQC", "troca para ML-KEM-512 + HMAC."),
-            ("PQC+CRC", "usa ML-KEM-512 e CRC32 no payload."),
+            ("CLÁSSICA", "envia a mensagem com AES-128-GCM."),
+            ("PQC", "usa ML-KEM-512 para chave e AES-GCM para cifra."),
+            ("PQC+CRC", "usa ML-KEM-512, AES-GCM e CRC32 protegido."),
             ("ENVIAR MSG", "abre popup pausável do fluxo interno."),
             ("FALHA", "mostra bit-flip, CRC e resultado."),
             ("RESULTADOS", "abre a consolidação real da bateria longa."),
@@ -5702,10 +6206,10 @@ class Onboarding:
         comparisons = [
             "Sensores da Wisdom viram payload real.",
             "Popups pausáveis mostram pacote, bit-flip e verificações.",
-            "CLASSIC é o baseline barato: 511 us e 73 bytes.",
-            "PQC: 13.234 us e 841 bytes por causa do ML-KEM-512.",
-            "PQC+CRC32: +4 bytes e detecção de corrupção no payload.",
-            "RESULTADOS fecha com 3.074 registros, 0 falhas e conclusões.",
+            "CLASSIC agora cifra de verdade com AES-GCM e chave efêmera.",
+            "PQC adiciona ML-KEM-512 para estabelecer a chave AES.",
+            "PQC+CRC32 protege também um checksum didático contra bit-flip.",
+            "RESULTADOS mostra a bateria histórica e alerta sobre nova coleta.",
         ]
         for item in comparisons:
             ry = self.draw_wrapped_onboarding(surface, f"- {item}", rx, ry, rw, C_TEXT_PRIMARY, max_lines=2)
@@ -5820,6 +6324,13 @@ def main():
                     dashboard.handle_event(event)
 
             # -- Atualizacao --
+            if dashboard.request_onboarding:
+                dashboard.request_onboarding = False
+                onboarding = Onboarding(stars, earth, satellite, nebula, dust, shooting_stars)
+                if not onboarding.run(screen, clock):
+                    running = False
+                    continue
+
             if dashboard.satellite_online() or args.simulated:
                 satellite.update(dt)
             dashboard.update(dt)

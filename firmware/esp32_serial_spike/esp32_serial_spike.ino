@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "mbedtls/md.h"
+#include "mbedtls/gcm.h"
 
 #include <mlkem_native.h>
 
@@ -41,8 +42,12 @@ static constexpr const char *PQC_COMMIT = "d2cae2b";
 static constexpr const char *PQC_LICENSE = "Apache2-ISC-MIT";
 static constexpr const char *PQC_CONFIRMATION = "HMAC-SHA256";
 static constexpr size_t PQC_CONFIRM_TAG_BYTES = 32;
-static constexpr size_t CLASSIC_TAG_BYTES = 32;
-static constexpr const char *CLASSIC_TARGET = "HMAC-SHA256";
+static constexpr const char *AEAD_CIPHER = "AES-128-GCM";
+static constexpr size_t AES128_KEY_BYTES = 16;
+static constexpr size_t AES_GCM_NONCE_BYTES = 12;
+static constexpr size_t AES_GCM_TAG_BYTES = 16;
+static constexpr size_t MISSION_CRC_BYTES = 4;
+static constexpr const char *CLASSIC_TARGET = AEAD_CIPHER;
 static constexpr const char *MISSION_DEFAULT_PAYLOAD = "PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK";
 
 static_assert(CRYPTO_PUBLICKEYBYTES == 800, "unexpected ML-KEM-512 public key size");
@@ -139,13 +144,6 @@ static uint8_t pqc_fault_tag_dec[PQC_CONFIRM_TAG_BYTES];
 static bool pqc_keypair_ready = false;
 static bool pqc_ciphertext_ready = false;
 static bool pqc_shared_secret_ready = false;
-
-static const uint8_t classic_demo_key[CLASSIC_TAG_BYTES] = {
-    0x50, 0x51, 0x43, 0x2D, 0x53, 0x41, 0x54, 0x2D,
-    0x43, 0x4C, 0x41, 0x53, 0x53, 0x49, 0x43, 0x2D,
-    0x55, 0x46, 0x46, 0x2D, 0x44, 0x45, 0x4D, 0x4F,
-    0x2D, 0x4B, 0x45, 0x59, 0x2D, 0x30, 0x31, 0x21,
-};
 
 static uint8_t pqc_kat_pk[CRYPTO_PUBLICKEYBYTES];
 static uint8_t pqc_kat_sk[CRYPTO_SECRETKEYBYTES];
@@ -1102,6 +1100,112 @@ static bool pqc_confirmation_tag(const uint8_t *shared_secret, uint8_t *out_tag)
       out_tag);
 }
 
+static void secure_wipe(uint8_t *data, size_t len) {
+  volatile uint8_t *p = data;
+  while (len-- > 0) {
+    *p++ = 0;
+  }
+}
+
+static bool fill_random_bytes(uint8_t *out, size_t len) {
+  return randombytes(out, len) == 0;
+}
+
+static void write_u32_be(uint8_t *out, uint32_t value) {
+  out[0] = static_cast<uint8_t>((value >> 24) & 0xFFU);
+  out[1] = static_cast<uint8_t>((value >> 16) & 0xFFU);
+  out[2] = static_cast<uint8_t>((value >> 8) & 0xFFU);
+  out[3] = static_cast<uint8_t>(value & 0xFFU);
+}
+
+static uint32_t read_u32_be(const uint8_t *data) {
+  return (static_cast<uint32_t>(data[0]) << 24) |
+         (static_cast<uint32_t>(data[1]) << 16) |
+         (static_cast<uint32_t>(data[2]) << 8) |
+         static_cast<uint32_t>(data[3]);
+}
+
+static bool derive_mission_aes128_key(
+    const uint8_t *secret,
+    size_t secret_len,
+    const char *scenario,
+    uint8_t *out_key) {
+  char context[80];
+  snprintf(context, sizeof(context), "PQC-SAT|MISSION|%s|AES-128-GCM|v1", scenario);
+
+  uint8_t digest[32];
+  const bool ok = hmac_sha256_tag(
+      secret,
+      secret_len,
+      reinterpret_cast<const uint8_t *>(context),
+      strlen(context),
+      digest);
+  if (ok) {
+    memcpy(out_key, digest, AES128_KEY_BYTES);
+  }
+  secure_wipe(digest, sizeof(digest));
+  return ok;
+}
+
+static bool aes128_gcm_encrypt(
+    const uint8_t *key,
+    const uint8_t *nonce,
+    const uint8_t *aad,
+    size_t aad_len,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *ciphertext,
+    uint8_t *tag) {
+  mbedtls_gcm_context ctx;
+  mbedtls_gcm_init(&ctx);
+  int rc = mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key, AES128_KEY_BYTES * 8U);
+  if (rc == 0) {
+    rc = mbedtls_gcm_crypt_and_tag(
+        &ctx,
+        MBEDTLS_GCM_ENCRYPT,
+        plaintext_len,
+        nonce,
+        AES_GCM_NONCE_BYTES,
+        aad,
+        aad_len,
+        plaintext,
+        ciphertext,
+        AES_GCM_TAG_BYTES,
+        tag);
+  }
+  mbedtls_gcm_free(&ctx);
+  return rc == 0;
+}
+
+static bool aes128_gcm_decrypt(
+    const uint8_t *key,
+    const uint8_t *nonce,
+    const uint8_t *aad,
+    size_t aad_len,
+    const uint8_t *ciphertext,
+    size_t ciphertext_len,
+    const uint8_t *tag,
+    uint8_t *plaintext) {
+  mbedtls_gcm_context ctx;
+  mbedtls_gcm_init(&ctx);
+  int rc = mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key, AES128_KEY_BYTES * 8U);
+  if (rc == 0) {
+    rc = mbedtls_gcm_auth_decrypt(
+        &ctx,
+        ciphertext_len,
+        nonce,
+        AES_GCM_NONCE_BYTES,
+        aad,
+        aad_len,
+        tag,
+        AES_GCM_TAG_BYTES,
+        ciphertext,
+        plaintext);
+  }
+  mbedtls_gcm_free(&ctx);
+  return rc == 0;
+}
+
 static bool mission_payload_from_fields(size_t field_count, char *fields[], uint8_t *payload, size_t max_len, size_t *payload_len) {
   if (field_count >= 5) {
     return parse_hex_payload(fields[4], payload, max_len, payload_len);
@@ -1560,18 +1664,51 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   bool key_match = true;
   bool tag_ready = false;
   bool tag_match = false;
+  bool aead_match = false;
+  bool decrypt_ok = false;
   bool crc_match = true;
   uint32_t keygen_us = 0;
   uint32_t encap_us = 0;
   uint32_t decap_us = 0;
+  uint32_t rng_us = 0;
+  uint32_t kdf_us = 0;
+  uint32_t encrypt_us = 0;
+  uint32_t decrypt_us = 0;
   uint32_t tag_us = 0;
   uint32_t verify_us = 0;
   uint32_t crc_us = 0;
   uint32_t crc_tx = 0;
   uint32_t crc_rx = 0;
-  uint32_t bytes_crypto = CLASSIC_TAG_BYTES;
+  const uint32_t bytes_mlkem = use_pqc ? CRYPTO_CIPHERTEXTBYTES : 0U;
+  const uint32_t bytes_nonce = AES_GCM_NONCE_BYTES;
+  const uint32_t bytes_gcm_tag = AES_GCM_TAG_BYTES;
+  const uint32_t checksum_bytes = use_crc ? MISSION_CRC_BYTES : 0U;
+  const uint32_t bytes_crypto = bytes_mlkem + bytes_nonce + bytes_gcm_tag;
+  const size_t ciphertext_len = payload_len + checksum_bytes;
+  const uint32_t payload_crc = crc32_bytes(payload, payload_len);
+  uint8_t protected_payload[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
+  uint8_t ciphertext[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
+  uint8_t decrypted[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
+  uint8_t aes_key_enc[AES128_KEY_BYTES];
+  uint8_t aes_key_dec[AES128_KEY_BYTES];
+  uint8_t nonce[AES_GCM_NONCE_BYTES];
+  uint8_t gcm_tag[AES_GCM_TAG_BYTES];
+  memset(ciphertext, 0, sizeof(ciphertext));
+  memset(decrypted, 0, sizeof(decrypted));
+  memset(aes_key_enc, 0, sizeof(aes_key_enc));
+  memset(aes_key_dec, 0, sizeof(aes_key_dec));
+  memset(nonce, 0, sizeof(nonce));
+  memset(gcm_tag, 0, sizeof(gcm_tag));
+  memcpy(protected_payload, payload, payload_len);
 
   const uint32_t started = micros();
+  if (use_crc) {
+    const uint32_t crc_started = micros();
+    crc_tx = payload_crc;
+    write_u32_be(&protected_payload[payload_len], crc_tx);
+    crc_us = micros() - crc_started;
+  }
+
   if (use_pqc) {
     uint32_t op_started = micros();
     int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
@@ -1601,41 +1738,87 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
     pqc_keypair_ready = true;
     pqc_ciphertext_ready = true;
     pqc_shared_secret_ready = key_match;
-    bytes_crypto = CRYPTO_CIPHERTEXTBYTES + PQC_CONFIRM_TAG_BYTES;
 
     op_started = micros();
-    const bool tag_a = hmac_sha256_tag(pqc_ss_enc, CRYPTO_BYTES, payload, payload_len, pqc_fault_tag_enc);
-    tag_us = micros() - op_started;
-    op_started = micros();
-    const bool tag_b = hmac_sha256_tag(pqc_ss_dec, CRYPTO_BYTES, payload, payload_len, pqc_fault_tag_dec);
-    verify_us = micros() - op_started;
-    tag_ready = tag_a && tag_b;
-    tag_match = tag_ready && bytes_equal_constant_time(pqc_fault_tag_enc, pqc_fault_tag_dec, PQC_CONFIRM_TAG_BYTES);
+    const bool key_a = derive_mission_aes128_key(pqc_ss_enc, CRYPTO_BYTES, scenario, aes_key_enc);
+    const bool key_b = derive_mission_aes128_key(pqc_ss_dec, CRYPTO_BYTES, scenario, aes_key_dec);
+    kdf_us = micros() - op_started;
+    if (!key_a || !key_b) {
+      secure_wipe(aes_key_enc, sizeof(aes_key_enc));
+      secure_wipe(aes_key_dec, sizeof(aes_key_dec));
+      print_error(request_id, "AEAD_KDF_FAILED", "aes_key_derivation");
+      return;
+    }
   } else {
-    uint8_t classic_tag_tx[CLASSIC_TAG_BYTES];
-    uint8_t classic_tag_rx[CLASSIC_TAG_BYTES];
     uint32_t op_started = micros();
-    const bool tag_a = hmac_sha256_tag(classic_demo_key, sizeof(classic_demo_key), payload, payload_len, classic_tag_tx);
-    tag_us = micros() - op_started;
-    op_started = micros();
-    const bool tag_b = hmac_sha256_tag(classic_demo_key, sizeof(classic_demo_key), payload, payload_len, classic_tag_rx);
-    verify_us = micros() - op_started;
-    tag_ready = tag_a && tag_b;
-    tag_match = tag_ready && bytes_equal_constant_time(classic_tag_tx, classic_tag_rx, CLASSIC_TAG_BYTES);
+    if (!fill_random_bytes(aes_key_enc, sizeof(aes_key_enc))) {
+      print_error(request_id, "RNG_FAILED", "classic_session_key");
+      return;
+    }
+    memcpy(aes_key_dec, aes_key_enc, sizeof(aes_key_dec));
+    rng_us += micros() - op_started;
   }
+
+  uint32_t op_started = micros();
+  if (!fill_random_bytes(nonce, sizeof(nonce))) {
+    secure_wipe(aes_key_enc, sizeof(aes_key_enc));
+    secure_wipe(aes_key_dec, sizeof(aes_key_dec));
+    print_error(request_id, "RNG_FAILED", "gcm_nonce");
+    return;
+  }
+  rng_us += micros() - op_started;
+
+  char aad[80];
+  snprintf(aad, sizeof(aad), "PQC-SAT|MISSION|%s|v1", scenario);
+
+  op_started = micros();
+  const bool encrypt_ok = aes128_gcm_encrypt(
+      aes_key_enc,
+      nonce,
+      reinterpret_cast<const uint8_t *>(aad),
+      strlen(aad),
+      protected_payload,
+      ciphertext_len,
+      ciphertext,
+      gcm_tag);
+  encrypt_us = micros() - op_started;
+
+  op_started = micros();
+  decrypt_ok = aes128_gcm_decrypt(
+      aes_key_dec,
+      nonce,
+      reinterpret_cast<const uint8_t *>(aad),
+      strlen(aad),
+      ciphertext,
+      ciphertext_len,
+      gcm_tag,
+      decrypted);
+  decrypt_us = micros() - op_started;
+
+  tag_us = encrypt_us;
+  verify_us = decrypt_us;
+  tag_ready = encrypt_ok;
+  aead_match = encrypt_ok && decrypt_ok && bytes_equal_constant_time(protected_payload, decrypted, ciphertext_len);
+  tag_match = aead_match;
 
   if (use_crc) {
     const uint32_t crc_started = micros();
-    crc_tx = crc32_bytes(payload, payload_len);
-    crc_rx = crc32_bytes(payload, payload_len);
-    crc_us = micros() - crc_started;
-    crc_match = crc_tx == crc_rx;
+    if (decrypt_ok && ciphertext_len >= payload_len + MISSION_CRC_BYTES) {
+      crc_rx = crc32_bytes(decrypted, payload_len);
+      const uint32_t crc_field = read_u32_be(&decrypted[payload_len]);
+      crc_match = crc_rx == crc_field;
+    } else {
+      crc_match = false;
+    }
+    crc_us += micros() - crc_started;
   }
+
+  secure_wipe(aes_key_enc, sizeof(aes_key_enc));
+  secure_wipe(aes_key_dec, sizeof(aes_key_dec));
 
   const bool delivered = key_match && tag_match && (!use_crc || crc_match);
   const uint32_t elapsed_us = micros() - started;
-  const uint32_t checksum_bytes = use_crc ? 4U : 0U;
-  const uint32_t bytes_total = static_cast<uint32_t>(payload_len) + bytes_crypto + checksum_bytes;
+  const uint32_t bytes_total = static_cast<uint32_t>(ciphertext_len) + bytes_crypto;
 
   begin_result(request_id, "OK");
   print_kv("scenario", scenario);
@@ -1643,25 +1826,44 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   print_kv("message", "HELLO_UFF");
   print_kv("result", delivered ? "DELIVERED" : "REJECTED");
   print_kv("crypto", use_pqc ? PQC_TARGET : CLASSIC_TARGET);
+  print_kv("cipher", AEAD_CIPHER);
   print_kv("checksum", use_crc ? "CRC32" : "NONE");
-  print_kv("confirmation", use_pqc ? PQC_CONFIRMATION : "HMAC-SHA256");
+  print_kv("confirmation", AEAD_CIPHER);
+  print_kv("key_source", use_pqc ? PQC_TARGET : "RANDOM_SESSION");
+  print_kv("key_policy", "ephemeral_per_message");
   print_kv_bool("key_match", key_match);
   print_kv_bool("tag_ready", tag_ready);
   print_kv_bool("tag_match", tag_match);
+  print_kv_bool("aead_match", aead_match);
+  print_kv_bool("decrypt_ok", decrypt_ok);
   print_kv_bool("crc_match", crc_match);
   print_kv_u32("payload_len", payload_len);
-  print_kv_hex_u32("payload_crc32", crc32_bytes(payload, payload_len));
+  print_kv_hex_u32("payload_crc32", payload_crc);
   if (use_crc) {
     print_kv_hex_u32("crc_tx", crc_tx);
     print_kv_hex_u32("crc_rx", crc_rx);
   }
   print_kv_u32("bytes_payload", payload_len);
+  print_kv_u32("bytes_ciphertext", ciphertext_len);
+  print_kv_u32("bytes_mlkem", bytes_mlkem);
+  print_kv_u32("bytes_nonce", bytes_nonce);
+  print_kv_u32("bytes_gcm_tag", bytes_gcm_tag);
   print_kv_u32("bytes_crypto", bytes_crypto);
   print_kv_u32("bytes_checksum", checksum_bytes);
   print_kv_u32("bytes_total", bytes_total);
+  print_kv_u32("nonce_bytes", bytes_nonce);
+  print_kv_u32("gcm_tag_bytes", bytes_gcm_tag);
+  print_kv_u32("ciphertext_bytes", ciphertext_len);
+  print_kv_hex_u32("nonce_crc32", crc32_bytes(nonce, sizeof(nonce)));
+  print_kv_hex_u32("ciphertext_crc32", crc32_bytes(ciphertext, ciphertext_len));
+  print_kv_hex_u32("gcm_tag_crc32", crc32_bytes(gcm_tag, sizeof(gcm_tag)));
   print_kv_u32("keygen_us", keygen_us);
   print_kv_u32("encap_us", encap_us);
   print_kv_u32("decap_us", decap_us);
+  print_kv_u32("rng_us", rng_us);
+  print_kv_u32("kdf_us", kdf_us);
+  print_kv_u32("encrypt_us", encrypt_us);
+  print_kv_u32("decrypt_us", decrypt_us);
   print_kv_u32("tag_us", tag_us);
   print_kv_u32("verify_us", verify_us);
   print_kv_u32("crc_us", crc_us);
@@ -2222,7 +2424,7 @@ static void send_help_detail(const char *request_id, const char *command) {
     print_kv("does", "executa ML-KEM em loop extremo");
   } else if (strcmp(command, "MISSION") == 0) {
     print_kv("usage", "MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]");
-    print_kv("does", "envia mensagem e mede custo por cenario");
+    print_kv("does", "cifra com AES-GCM e mede custo por cenario");
   } else if (strcmp(command, "PERIPHERALS") == 0) {
     print_kv("usage", "PERIPHERALS");
     print_kv("does", "detecta OLED APDS HTU MMA");

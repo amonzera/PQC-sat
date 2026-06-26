@@ -12,7 +12,7 @@ o custo em hardware limitado.
 A interface visual já existe e agora possui dois experimentos complementares.
 O fluxo principal de apresentação envia uma mensagem curta pela Wisdom nos
 cenários `CLASSIC`, `PQC` e `PQC_CRC32`, registrando tempo, bytes, heap,
-confirmação e checksum. Esse fluxo pode usar payload vivo: o dashboard coleta
+confirmação, cifra AES-GCM e checksum. Esse fluxo pode usar payload vivo: o dashboard coleta
 sensores reais da Wisdom, monta `payload_hex` e envia o dado para `MISSION`.
 O fluxo de apoio muta um payload, registra eventos e compara `NONE` e `CRC32`
 para explicar falha silenciosa versus erro detectado; quando a placa está
@@ -33,6 +33,7 @@ confirmação HMAC-SHA256 da chave derivada.
 | Seed isolada do experimento | Funcional |
 | Mutação real de bytes | Funcional no dashboard |
 | ML-KEM real | Funcional na Wisdom com `mlkem-native` v1.1.0, commit `d2cae2b` |
+| AES-128-GCM em MISSION | Implementado no firmware; `CLASSIC` usa chave efêmera, `PQC` deriva chave de ML-KEM |
 | Mensagem CLASSIC/PQC/PQC+CRC | Implementada no firmware por `MISSION CLASSIC|PQC|PQC_CRC32` |
 | Interface serial PQC | `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH` funcionais |
 | Medição PQC na placa | `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`; `PQC_KAT` passou no hardware gravado |
@@ -120,7 +121,15 @@ projeto sem reconstruir decisões antigas:
   onboarding completo de cinco telas e botão `RESULTADOS` com a bateria real
   `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`; a documentação
   passou a registrar conclusões, próximos passos e a explicação correta de
-  `bytes_total` como payload + ciphertext ML-KEM + tag HMAC + checksum.
+  `bytes_total` então vigente como payload + ciphertext ML-KEM + tag HMAC +
+  checksum. Essa composição ficou histórica após a etapa AES-GCM de 2026-06-25.
+- 2026-06-25: `MISSION` passou a usar criptografia real de payload com
+  `AES-128-GCM`. No `CLASSIC`, a Wisdom gera chave AES-128 efêmera e nonce por
+  envio. Em `PQC`/`PQC_CRC32`, ML-KEM-512 estabelece o segredo e o firmware
+  deriva a chave AES. O CRC32 de `PQC_CRC32` entra no plaintext protegido antes
+  da cifragem. O dashboard passou a mostrar `RNG`, `KDF`, `AES-GCM`,
+  `aead_match`, nonce e tag GCM; a bateria `20260625T005330Z` ficou marcada
+  como histórica pré-AES-GCM até nova coleta oficial.
 - 2026-06-19: fluxo de apresentação de mensagens passou a exigir resposta
   serial real da Wisdom. `ENVIAR MSG` não gera métricas por replay local quando
   a placa está ausente; o modo `--simulated` fica restrito a ensaio visual e
@@ -571,7 +580,7 @@ Implementado no dashboard:
   completos.
 - comando `MISSION CLASSIC|PQC|PQC_CRC32` exportado em
   `metrics.mission.scenarios`, permitindo comparar tempo total, subtempos,
-  bytes, heap, `key_match`, `tag_match`, `crc_match` e `result`.
+  bytes, heap, `key_match`, `aead_match`, `tag_match`, `crc_match` e `result`.
 
 O firmware antigo proposto chamava `checkIntegrity()` sem inicializar os
 valores armazenados. Isso deve ser impedido por uma API explícita:

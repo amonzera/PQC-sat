@@ -231,13 +231,16 @@ Para ML-KEM:
 
 Para `MISSION`:
 
-- `CLASSIC` é baseline clássico simétrico com `HMAC-SHA256`; não o apresente
-  como ECDH nem como criptografia assimétrica clássica completa;
-- `PQC` é ML-KEM-512 para estabelecer segredo e HMAC-SHA256 para autenticar a
-  mensagem;
-- `PQC_CRC32` adiciona CRC32 ao payload sobre o fluxo PQC;
+- `CLASSIC` é baseline clássico simétrico com `AES-128-GCM`, chave efêmera e
+  nonce aleatório gerados na Wisdom; não o apresente como ECDH nem como
+  criptografia assimétrica clássica completa;
+- `PQC` é ML-KEM-512 para estabelecer segredo e `AES-128-GCM` para cifrar e
+  autenticar a mensagem;
+- `PQC_CRC32` adiciona CRC32 ao plaintext protegido antes da cifragem AES-GCM;
 - compare `elapsed_us`, `bytes_total`, `heap`, `min_heap`, `key_match`,
-  `tag_match`, `crc_match` e `result`;
+  `aead_match`, `tag_match`, `crc_match` e `result`;
+- os resultados consolidados anteriores à implementação de AES-GCM devem ser
+  tratados como históricos pré-AES até uma nova bateria oficial;
 - energia só pode ser proxy por tempo de CPU, exceto se houver medição elétrica
   externa.
 

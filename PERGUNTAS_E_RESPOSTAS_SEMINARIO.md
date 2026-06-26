@@ -65,18 +65,26 @@ visibilidade de falha, mas consome mais recursos.
 ### O projeto é sobre confidencialidade, autenticação ou integridade?
 
 Principalmente sobre custo de comunicação segura e integridade operacional.
-O fluxo `MISSION` autentica a mensagem com HMAC-SHA256. O ML-KEM-512 entra
-para estabelecer um segredo compartilhado pós-quântico. O CRC32 entra como
-guardião didático de corrupção de payload, não como criptografia.
+O fluxo `MISSION` cifra e autentica a mensagem com AES-128-GCM. O ML-KEM-512
+entra para estabelecer um segredo compartilhado pós-quântico que vira chave
+AES nos cenários PQC. O CRC32 entra como guardião didático de corrupção de
+payload, não como criptografia.
 
 ## 3. Perguntas sobre criptografia básica
 
 ### O que é criptografia clássica no projeto?
 
-No nosso baseline, "clássica" significa autenticar uma mensagem com
-HMAC-SHA256 usando uma chave simétrica didática. Não estamos comparando contra
-uma pilha clássica assimétrica completa, como ECDH + HMAC. Essa é uma limitação
-assumida.
+No nosso baseline, "clássica" significa cifrar/autenticar uma mensagem com
+AES-128-GCM usando uma chave simétrica efêmera gerada na placa. Não estamos
+comparando contra uma pilha clássica assimétrica completa, como ECDH +
+AES-GCM. Essa é uma limitação assumida.
+
+### O que é AES-128-GCM?
+
+AES é uma cifra simétrica: a mesma chave serve para cifrar e decifrar. GCM é
+um modo autenticado: além de esconder o conteúdo, ele gera uma tag para
+verificar se o ciphertext foi alterado. No projeto, `CLASSIC` usa AES-GCM com
+chave efêmera; `PQC` usa ML-KEM para estabelecer a chave AES.
 
 ### O que é HMAC-SHA256?
 
@@ -113,21 +121,20 @@ ML-KEM-512.
 
 KEM significa Key Encapsulation Mechanism, ou mecanismo de encapsulamento de
 chave. Ele não cifra uma mensagem diretamente. Ele cria um segredo
-compartilhado entre duas pontas. Depois esse segredo pode alimentar HMAC,
-cifras simétricas ou outros passos de protocolo.
+compartilhado entre duas pontas. Depois esse segredo pode alimentar AES-GCM,
+HMAC, cifras simétricas ou outros passos de protocolo.
 
 ### O ML-KEM cifra a mensagem do projeto?
 
 Não diretamente. No nosso fluxo, o ML-KEM estabelece um segredo. Esse segredo
-é usado para autenticar a mensagem com HMAC-SHA256. A mensagem em si não está
-sendo cifrada como em AES-GCM, por exemplo.
+é usado para derivar uma chave AES-128. Quem cifra e autentica o payload é o
+AES-GCM.
 
-### Por que não usar AES para cifrar a mensagem?
+### Por que adicionar AES-GCM agora?
 
-Porque o foco do seminário é medir o custo da troca/acordo de segredo
-pós-quântico em hardware limitado e comparar com um baseline simples. AES ou
-AES-GCM seriam uma evolução natural para uma pilha mais completa, mas
-aumentariam o escopo da apresentação.
+Porque deixa a demonstração mais parecida com sistemas reais: KEM estabelece
+chave, AEAD cifra/autentica dados. O custo principal ainda tende a estar em
+ML-KEM, mas AES-GCM evita a crítica de que a mensagem não estava cifrada.
 
 ### Por que não usar assinatura pós-quântica?
 
@@ -356,8 +363,10 @@ não em alterar significativamente o custo total do ML-KEM.
 ### Por que PQC aumentou tanto os bytes?
 
 Porque o fluxo PQC inclui material do ML-KEM. Na consolidação de mensagem, o
-pacote contabiliza payload, ciphertext ML-KEM de 768 bytes e tag HMAC de 32
-bytes. Por isso `PQC` chega a 841 bytes contra 73 bytes do clássico.
+pacote atual contabiliza ciphertext do payload, ciphertext ML-KEM de 768
+bytes, nonce GCM de 12 bytes e tag GCM de 16 bytes. Na bateria histórica
+pré-AES, `PQC` chegava a 841 bytes contra 73 bytes do clássico; na versão
+cifrada, os números oficiais devem vir de nova coleta.
 
 ### A chave pública ML-KEM entra nesses 841 bytes?
 
@@ -384,7 +393,9 @@ ML-KEM real ali.
 
 ### O que significa `tag_match=1`?
 
-Significa que a tag HMAC calculada na verificação bateu com a tag esperada.
+No fluxo `MISSION`, significa que a verificação AES-GCM aceitou a tag e o
+plaintext foi recuperado. O nome ficou como alias de compatibilidade; o campo
+mais claro agora é `aead_match=1`.
 
 ### O que significa `crc_match=1`?
 
@@ -547,9 +558,9 @@ comparar visualmente tempo, bytes, heap e fases internas lado a lado.
 
 ### O que explicar quando abrir os três popups?
 
-Explique que `CLASSIC` só tem HMAC, por isso keygen/encap/decap ficam zerados.
-Em `PQC`, aparecem keygen, encap e decap. Em `PQC+CRC`, aparece também custo
-de CRC e +4 bytes.
+Explique que `CLASSIC` usa AES-GCM com chave efêmera, por isso
+keygen/encap/decap ficam zerados. Em `PQC`, aparecem keygen, encap, decap e
+KDF antes do AES-GCM. Em `PQC+CRC`, aparece também custo de CRC e +4 bytes.
 
 ### O que falar se perguntarem por que o satélite some quando a placa não está conectada?
 
@@ -593,18 +604,18 @@ E resumidos em `METRICAS_CONSOLIDADAS.md`.
 
 ## 10. Perguntas difíceis e respostas seguras
 
-### Isso é realmente pós-quântico se a mensagem não é cifrada?
+### Isso é realmente pós-quântico se a cifra do payload é AES?
 
-Sim no componente de acordo de segredo: o projeto executa ML-KEM-512 real. Mas
-é importante dizer que a demonstração não implementa uma pilha completa de
-canal seguro com cifra autenticada. Ela mede o custo de inserir ML-KEM no
-fluxo de mensagem.
+Sim. Em sistemas reais, PQC normalmente não substitui a cifra simétrica. O
+ML-KEM estabelece um segredo resistente à ameaça quântica conhecida, e esse
+segredo alimenta uma cifra simétrica como AES-GCM. É exatamente essa separação
+que a versão atual demonstra.
 
 ### Vocês estão misturando autenticação, checksum e KEM?
 
 Sim, de forma controlada e didática. O roteiro separa os papéis: ML-KEM
-estabelece segredo, HMAC autentica mensagem e CRC32 detecta corrupção
-acidental do payload. Eles não são equivalentes.
+estabelece segredo, AES-GCM cifra/autentica a mensagem e CRC32 detecta
+corrupção acidental do payload. Eles não são equivalentes.
 
 ### CRC32 não é inseguro?
 
@@ -617,16 +628,16 @@ Melhor dizer "mais robusto contra corrupção acidental de payload", não "mais
 seguro contra atacante". A segurança criptográfica continua vindo do protocolo
 criptográfico; o CRC32 ajuda na consistência operacional.
 
-### Por que `CLASSIC` usa HMAC e `PQC` também usa HMAC?
+### Por que `CLASSIC` usa AES-GCM e `PQC` também usa AES-GCM?
 
-Porque queremos que a mensagem seja autenticada nos dois casos. A diferença é
-que, em `PQC`, o segredo usado para autenticação vem de uma sessão ML-KEM; no
-baseline clássico, vem de uma chave simétrica didática.
+Porque AES-GCM é a camada simétrica que cifra/autentica dados. A diferença é a
+origem da chave: no `CLASSIC`, ela é uma chave efêmera gerada localmente; no
+`PQC`, ela é derivada do segredo estabelecido por ML-KEM.
 
-### Se HMAC detecta alteração, para que CRC?
+### Se AES-GCM detecta alteração, para que CRC?
 
-Na prática, HMAC poderia detectar alteração maliciosa ou acidental na mensagem
-autenticada. O CRC entra como recurso didático para isolar e visualizar falhas
+Na prática, AES-GCM poderia detectar alteração maliciosa ou acidental no
+ciphertext da mensagem autenticada. O CRC entra como recurso didático para isolar e visualizar falhas
 de payload por bit-flip. Ele também representa mecanismos leves de integridade
 usados em camadas de transporte/armazenamento.
 
@@ -660,9 +671,10 @@ compiladores, perfis e cargas.
 
 ### O que vocês fariam diferente em uma versão de pesquisa?
 
-Adicionaríamos ECDH P-256 como baseline clássico assimétrico, AES-GCM para
-confidencialidade, medição de energia real, mais payloads, bursts de bit-flip,
-mais placas e análise estatística mais ampla.
+Adicionaríamos ECDH P-256 como baseline clássico assimétrico, identidade de
+dispositivo, anti-replay, armazenamento seguro de chaves, medição de energia
+real, mais payloads, bursts de bit-flip, mais placas e análise estatística
+mais ampla.
 
 ### A heap constante invalida a tese de hardware limitado?
 
@@ -854,9 +866,9 @@ revelar o resultado no dashboard.
 | Momento | Pergunta | Resposta que você quer conduzir |
 |---|---|---|
 | Antes do primeiro envio | O que vai crescer mais quando sairmos de `CLASSIC` para `PQC`: CPU, bytes ou RAM? | Tempo e bytes cresceram muito; heap ficou estável na coleta. |
-| Depois de `PQC` | Por que uma mensagem pequena virou um pacote muito maior? | O pacote passou a carregar ciphertext ML-KEM de 768 bytes mais tag HMAC. |
+| Depois de `PQC` | Por que uma mensagem pequena virou um pacote muito maior? | O pacote passou a carregar ciphertext ML-KEM de 768 bytes, nonce e tag GCM. |
 | Antes de `PQC+CRC` | CRC32 é criptografia ou detecção de erro? | Detecção de erro acidental; não autenticação contra atacante. |
-| Ao mostrar o comparador | Qual pedaço domina os bytes em `PQC`: payload, HMAC, ML-KEM ou CRC? | ML-KEM domina por causa do ciphertext. |
+| Ao mostrar o comparador | Qual pedaço domina os bytes em `PQC`: payload, AES-GCM, ML-KEM ou CRC? | ML-KEM domina por causa do ciphertext. |
 | Antes de `FALHA` | Se um bit mudar e ninguém conferir, o sistema percebe? | Não necessariamente; pode virar falha silenciosa. |
 | Depois de `PQC+CRC -> FALHA` | O que mudou entre falha silenciosa e falha detectada? | O guardião CRC32 tornou a corrupção observável. |
 | Antes de `RESULTADOS` | O que vocês esperam que tenha ficado estável na bateria longa? | A RAM/heap ficou estável; tempo e bytes foram o impacto forte. |

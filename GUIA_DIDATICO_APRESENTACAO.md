@@ -22,9 +22,9 @@ radiação pode causar falhas transitórias, como inverter um bit em um byte.
 No nosso seminário, a demonstração principal envia uma mensagem curta pelo
 "satélite" em três cenários:
 
-1. `CLASSIC`: mensagem autenticada com HMAC-SHA256;
-2. `PQC`: mensagem autenticada depois de acordo de segredo com ML-KEM-512;
-3. `PQC_CRC32`: o mesmo fluxo PQC com CRC32 no payload.
+1. `CLASSIC`: mensagem cifrada/autenticada com AES-128-GCM e chave efêmera;
+2. `PQC`: ML-KEM-512 estabelece a chave, AES-GCM cifra a mensagem;
+3. `PQC_CRC32`: o mesmo fluxo PQC com CRC32 protegido no payload cifrado.
 
 Depois disso, usamos bit-flips para mostrar por que integridade importa. Não
 usamos radiação física. Em vez disso, simulamos o efeito de forma controlada:
@@ -38,7 +38,7 @@ usamos radiação física. Em vez disso, simulamos o efeito de forma controlada:
 
 A mensagem principal é simples:
 
-- criptografia clássica simetrica é barata para o hardware;
+- criptografia clássica simetrica com AES-GCM é barata para o hardware;
 - PQC aumenta o custo, mas prepara a comunicação para o mundo pós-quântico;
 - PQC mais checksum aumenta a robustez de integridade e acrescenta custo;
 - sem proteção de integridade, uma falha pode virar **falha silenciosa**;
@@ -218,7 +218,7 @@ Ele executa uma entrega de mensagem curta no firmware e retorna métricas:
 - heap/RAM livre;
 - perfil de CPU;
 - resultado da entrega;
-- custo de HMAC;
+- custo de HMAC;faça uma ultima verificaçao por bugs e funcionalidades quebradas no codigo inteiro
 - custo de ML-KEM quando o cenário usa PQC;
 - custo de CRC32 quando o cenário usa checksum.
 
@@ -429,8 +429,10 @@ caixa (chave privada).
 
 **No nosso projeto:**
 
-- HMAC-SHA256 usa uma chave **simetrica** (as duas pontas compartilham o
-  mesmo segredo);
+- AES-128-GCM usa uma chave **simetrica** para cifrar e autenticar a
+  mensagem;
+- HMAC-SHA256 continua como mecanismo técnico de confirmação de chave no
+  comando `PQC_FAULT ... CONFIRM`;
 - ML-KEM gera pares **assimetricos** (chave publica + chave privada).
 
 ### 5.2 Por que a criptografia atual está ameaçada
@@ -486,7 +488,7 @@ Legenda:
 - `ss` = shared secret (segredo compartilhado que as duas pontas derivam).
 
 Depois desse processo, Alice e Bob possuem o mesmo segredo (`ss`), que pode
-ser usado para criptografia simetrica ou autenticação.
+ser usado para derivar uma chave AES e cifrar mensagens.
 
 **No nosso projeto:** o ESP32 faz os dois papeis (Alice e Bob) no mesmo chip
 para medir o custo computacional de cada etapa.
@@ -540,8 +542,12 @@ pode ler a carta, mas somente quem tem o carimbo consegue forjar a assinatura.
 
 **No nosso projeto:** HMAC-SHA256 é usado para:
 
-- autenticar a mensagem da missao;
-- confirmar que as duas pontas derivaram o mesmo segredo ML-KEM.
+- derivar material de chave em alguns pontos internos;
+- confirmar que as duas pontas derivaram o mesmo segredo ML-KEM no comando
+  técnico `PQC_FAULT ... CONFIRM`.
+
+No envio `MISSION`, a autenticação principal da mensagem agora vem do
+AES-128-GCM, que cifra o payload e verifica a tag GCM no recebimento.
 
 ### 5.6 O que o CRC32 faz por dentro
 
@@ -600,12 +606,12 @@ etapas em sequência:
 2. **encap**: encapsula um segredo usando a chave publica (~3.911 us)
 3. **decap**: decapsula o ciphertext com a chave privada (~5.012 us)
 4. **Compara**: verifica se `ss_alice == ss_bob` (`key_match`)
-5. **HMAC tag**: calcula tag de autenticação sobre a mensagem usando o
-   segredo derivado (~435 us)
-6. **HMAC verify**: recalcula e compara a tag (~168 us)
-7. **CRC32 TX**: calcula CRC32 do payload (~5 us)
-8. **CRC32 RX**: recalcula CRC32 e compara (~5 us)
-9. **Total**: ~13.130 us para completar a entrega da mensagem
+5. **KDF**: deriva uma chave AES-128 a partir do segredo ML-KEM
+6. **RNG**: gera nonce GCM aleatório de 12 bytes
+7. **AES-GCM encrypt**: cifra `payload + CRC32` e gera tag GCM de 16 bytes
+8. **AES-GCM decrypt/verify**: só libera o plaintext se a tag for válida
+9. **CRC32 RX**: recalcula CRC32 e compara com o valor protegido
+10. **Total**: deve ser medido novamente na bateria pós-AES-GCM
 
 ```text
   Fluxo no firmware (PQC_CRC32):
@@ -614,19 +620,19 @@ etapas em sequência:
   (3.586 us)    (3.911 us)   (5.012 us)
                                            |
                                            v
-                                     HMAC tag (435 us)
+                                     KDF -> AES key
                                            |
                                            v
-                                     HMAC verify (168 us)
+                                     AES-GCM encrypt
                                            |
                                            v
-                                     CRC32 TX (5 us)
+                                     AES-GCM verify
                                            |
                                            v
                                      CRC32 RX (5 us)
                                            |
                                            v
-                                     DELIVERED (~13.130 us total)
+                                     DELIVERED (tempo pós-AES a medir)
 ```
 
 ### 5.9 Tabela comparativa: criptografia clássica vs PQC
@@ -852,12 +858,12 @@ MISSION PQC_CRC32
 
 O que acontece:
 
-1. `CLASSIC` autentica a mensagem com HMAC-SHA256;
-2. `PQC` executa ML-KEM-512, deriva segredo e autentica a mensagem;
-3. `PQC_CRC32` repete o fluxo PQC e adiciona CRC32 no payload;
+1. `CLASSIC` cifra/autentica a mensagem com AES-128-GCM e chave efêmera;
+2. `PQC` executa ML-KEM-512, deriva chave AES e cifra a mensagem;
+3. `PQC_CRC32` repete o fluxo PQC e protege CRC32 junto do payload;
 4. o console e o overlay de mensagem entregue mostram tempo e bytes;
-5. cada cenário abre um popup próprio; arraste os cartões pelo topo e mantenha `CLASSIC`, `PQC` e `PQC+CRC` lado a lado até clicar no `X`, permitindo comparar tempo, bytes, heap, keygen, encap, decap, HMAC e CRC;
-6. quando dois ou mais popups ficam abertos, o comparador ao vivo aparece no centro inferior e separa payload, HMAC, ciphertext ML-KEM e CRC32;
+5. cada cenário abre um popup próprio; arraste os cartões pelo topo e mantenha `CLASSIC`, `PQC` e `PQC+CRC` lado a lado até clicar no `X`, permitindo comparar tempo, bytes, heap, keygen, encap, decap, AES-GCM e CRC;
+6. quando dois ou mais popups ficam abertos, o comparador ao vivo aparece no centro inferior e separa payload, ML-KEM, nonce, tag GCM e CRC32;
 7. LEDs/bargraph reforçam visualmente o aumento de custo.
 
 Como explicar:
@@ -871,18 +877,18 @@ Como explicar:
 
 Antes de clicar em `ENVIAR MSG`, pergunte:
 
-> O que vocês acham que vai crescer mais quando trocarmos HMAC puro por
-> ML-KEM-512: CPU, bytes transmitidos ou RAM?
+> O que vocês acham que vai crescer mais quando sairmos de AES-GCM puro para
+> ML-KEM-512 + AES-GCM: CPU, bytes transmitidos ou RAM?
 
 Depois dos três envios, use os popups e o comparador:
 
 > A RAM ficou estável, então o gargalo visível não foi memória. O impacto forte
-> apareceu em tempo e tráfego: a mesma mensagem passou de 73 bytes para 841
-> bytes e de menos de 1 ms para cerca de 13 ms.
+> apareceu em tempo e tráfego. Na bateria histórica pré-AES, a mesma mensagem
+> passou de 73 bytes para 841 bytes e de menos de 1 ms para cerca de 13 ms.
 
 Falas curtas para cada cartão:
 
-- `CLASSIC`: "Este é o baseline barato: payload pequeno + tag HMAC."
+- `CLASSIC`: "Este é o baseline barato: payload pequeno cifrado com AES-GCM."
 - `PQC`: "Aqui entra o ciphertext ML-KEM; é por isso que os bytes saltam."
 - `PQC+CRC`: "CRC32 soma só 4 bytes, mas dá uma forma visual de detectar corrupção acidental."
 
@@ -1046,8 +1052,8 @@ Diga:
 
 - "a Wisdom representa um OBC COTS educacional";
 - "simulamos bit-flips manualmente";
-- "CLASSIC e um baseline simetrico de mensagem autenticada";
-- "PQC usa ML-KEM para estabelecer segredo antes de autenticar a mensagem";
+- "CLASSIC e um baseline simetrico com AES-GCM";
+- "PQC usa ML-KEM para estabelecer a chave antes de cifrar/autenticar com AES-GCM";
 - "CRC32 mostra detecção de integridade no payload";
 - "ML-KEM-512 foi executado na placa";
 - "a confirmação de chave é o ponto de detecção operacional";
@@ -1116,9 +1122,10 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 
 ### Explicar a demo
 
-> No envio CLASSIC, a placa usa HMAC-SHA256. No envio PQC, ela executa
-> ML-KEM-512 para chegar a um segredo e autenticar a mensagem. No envio
-> PQC+CRC, ela adiciona CRC32 ao payload. O console do dashboard mostra o
+> No envio CLASSIC, a placa usa AES-128-GCM com chave efêmera. No envio PQC,
+> ela executa ML-KEM-512 para chegar a um segredo e então usa AES-GCM para
+> cifrar/autenticar a mensagem. No envio PQC+CRC, ela adiciona CRC32 ao
+> payload protegido. O console do dashboard mostra o
 > tempo e os bytes de custo individual de cada mensagem enviada, enquanto a
 > faixa superior mostra CPU e RAM para comparar o impacto de recursos.
 
@@ -1131,10 +1138,12 @@ analise o JSON novo da bateria longa e atualize as conclusoes da apresentacao
 
 ### Interpretar resultados
 
-> Na coleta final tivemos 3.074 registros, 0 falhas, 1.800 MISSION runs e 10
-> benchmarks PQC. CLASSIC entrega em 511 us com 73 bytes; PQC custa 13.234 us
-> com 841 bytes; PQC+CRC custa 13.130 us com 845 bytes. PQC é 25,9x mais
-> lento no perfil baseline, mas prepara o sistema para o mundo pós-quântico.
+> Na coleta histórica pré-AES-GCM tivemos 3.074 registros, 0 falhas, 1.800
+> MISSION runs e 10 benchmarks PQC. CLASSIC entregava em 511 us com 73 bytes;
+> PQC custava 13.234 us com 841 bytes; PQC+CRC custava 13.130 us com 845
+> bytes. A versão atual cifra o payload com AES-GCM e precisa de nova bateria
+> para números oficiais, mas a conclusão de custo do ML-KEM continua sendo o
+> centro do experimento.
 > No payload, CRC32 detecta a alteração (600/600 DETECTED_GUARD); no ML-KEM, a
 > confirmação de chave rejeita a sessão divergente.
 
@@ -1178,11 +1187,11 @@ Experimento:
   Wisdom/ESP32 + dashboard Python.
 
 Demo:
-  CLASSIC: HMAC-SHA256 -> baseline classico (511 us, 73 bytes).
-  PQC: ML-KEM-512 + HMAC -> custo pos-quantico (13.234 us, 841 bytes).
-  PQC+CRC: ML-KEM + HMAC + CRC32 -> integridade adicional (13.130 us, 845 bytes).
+  CLASSIC: AES-128-GCM -> baseline classico simetrico cifrado.
+  PQC: ML-KEM-512 + AES-GCM -> chave pos-quantica + mensagem cifrada.
+  PQC+CRC: ML-KEM + AES-GCM + CRC32 -> integridade didatica adicional.
   A/B bit-flip: sem CRC32 -> silencioso; com CRC32 -> detectado.
-  PQC e 25,9x mais lento e 11,5x mais pesado que CLASSIC.
+  A bateria historica pre-AES mostrou PQC 25,9x mais lento que CLASSIC.
 
 PQC:
   ML-KEM-512 real na placa.
@@ -1194,7 +1203,8 @@ Resultado:
   600/600 DETECTED_GUARD em payload CRC32.
   PQC_KAT passou.
   Benchmarks em 240 MHz e 80 MHz medidos.
-  CLASSIC=511 us / PQC=13.234 us / PQC_CRC32=13.130 us.
+  Numeros antigos: CLASSIC=511 us / PQC=13.234 us / PQC_CRC32=13.130 us.
+  Numeros atuais com AES-GCM precisam de nova bateria oficial.
 
 Limites:
   Nao e radiacao fisica.

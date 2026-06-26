@@ -79,7 +79,8 @@ MISSION PQC_CRC32 5051432D5341547C533D34327C...
 ```
 
 O firmware mede normalmente `bytes_payload`, `bytes_crypto`,
-`bytes_checksum`, `bytes_total`, `elapsed_us`, heap e flags de validação. O
+`bytes_checksum`, `bytes_total`, `cipher=AES-128-GCM`, `elapsed_us`, heap e
+flags de validação. O
 dashboard guarda também os metadados locais do payload vivo no popup e no JSON:
 
 | Campo local | Significado |
@@ -109,9 +110,9 @@ processamento e custo relativo.
 
 | Uso | Significado |
 |---|---|
-| `MISSION CLASSIC` | Payload autenticado por HMAC-SHA256 clássico simétrico. |
-| `MISSION PQC` | ML-KEM-512 estabelece segredo; HMAC-SHA256 autentica a mensagem. |
-| `MISSION PQC_CRC32` | Mesmo fluxo PQC com CRC32 adicional no payload. |
+| `MISSION CLASSIC` | Payload cifrado/autenticado por AES-128-GCM com chave efêmera gerada na placa. |
+| `MISSION PQC` | ML-KEM-512 estabelece segredo; AES-128-GCM cifra e autentica a mensagem. |
+| `MISSION PQC_CRC32` | Mesmo fluxo PQC com CRC32 inserido no material protegido antes da cifragem. |
 | `MISSION CLASSIC payload_hex` | Executa o cenário clássico com payload hexadecimal escolhido. |
 | `MISSION PQC payload_hex` | Executa PQC com payload hexadecimal escolhido. |
 | `MISSION PQC_CRC32 payload_hex` | Executa PQC+CRC32 com payload hexadecimal escolhido. |
@@ -122,16 +123,22 @@ Campos retornados:
 |---|---|
 | `scenario` | `CLASSIC`, `PQC` ou `PQC_CRC32`. |
 | `result` | `DELIVERED` ou `REJECTED`. |
-| `crypto` | `HMAC-SHA256` ou `ML-KEM-512`. |
+| `crypto` | `AES-128-GCM` no clássico; `ML-KEM-512` nos cenários PQC. |
+| `cipher` | Cifra AEAD usada no payload: `AES-128-GCM`. |
 | `checksum` | `NONE` ou `CRC32`. |
+| `key_source` | `RANDOM_SESSION` no clássico; `ML-KEM-512` no PQC. |
 | `key_match` | Segredos ML-KEM bateram; sempre verdadeiro no clássico. |
-| `tag_match` | Autenticação da mensagem foi aceita. |
+| `aead_match` / `tag_match` | A tag AES-GCM foi aceita e o plaintext verificado. `tag_match` fica como alias para compatibilidade. |
 | `crc_match` | CRC32 bateu quando checksum está ativo. |
-| `bytes_total` | Payload + material criptográfico + checksum. |
+| `bytes_total` | Ciphertext do payload + ciphertext ML-KEM quando houver + nonce + tag GCM + CRC quando ativo. |
 | `elapsed_us` | Tempo total da entrega medida na placa. |
 | `keygen_us`, `encap_us`, `decap_us` | Subtempos ML-KEM; zero no cenário clássico. |
-| `tag_us`, `verify_us`, `crc_us` | Custo da autenticação e do checksum. |
+| `rng_us`, `kdf_us`, `encrypt_us`, `decrypt_us`, `crc_us` | Custo de RNG, derivação, cifragem, decifragem/verificação e checksum. |
 | `heap`, `min_heap`, `cpu_mhz`, `profile` | Métricas do ESP32 no cenário. |
+
+`PQC_FAULT ... CONFIRM` continua usando HMAC-SHA256 como confirmação técnica
+de chave derivada para demonstrar `PROTOCOL_REJECT`. Isso é separado do fluxo
+`MISSION`, onde a autenticação da mensagem vem do AES-GCM.
 
 ## Comandos PQC de bancada
 

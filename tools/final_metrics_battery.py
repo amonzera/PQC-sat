@@ -42,6 +42,10 @@ NUMERIC_FIELDS = {
     "keygen_us",
     "encap_us",
     "decap_us",
+    "rng_us",
+    "kdf_us",
+    "encrypt_us",
+    "decrypt_us",
     "tag_us",
     "verify_us",
     "crc_us",
@@ -307,6 +311,10 @@ def summarize_missions(records: list[dict[str, object]]) -> dict[str, object]:
                 "keygen_us",
                 "encap_us",
                 "decap_us",
+                "rng_us",
+                "kdf_us",
+                "encrypt_us",
+                "decrypt_us",
                 "tag_us",
                 "verify_us",
                 "crc_us",
@@ -315,7 +323,7 @@ def summarize_missions(records: list[dict[str, object]]) -> dict[str, object]:
                 "cpu_mhz",
             ):
                 scenario_summary[field] = stats(payload.get(field) for payload in payloads)
-            for field in ("key_match", "tag_match", "crc_match"):
+            for field in ("key_match", "aead_match", "tag_match", "crc_match"):
                 present = [payload.get(field) for payload in payloads if field in payload]
                 scenario_summary[f"{field}_rate_pct"] = (
                     round(100.0 * sum(1 for value in present if str(value) in {"1", "true", "True"}) / len(present), 2)
