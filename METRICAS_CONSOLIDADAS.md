@@ -155,7 +155,117 @@ perceber o crescimento de custo.
 
 ## 4.5. Resultados reais consolidados
 
-Fonte principal:
+Fonte exibida atualmente na aba `RESULTADOS` do dashboard:
+
+```text
+logs/20260626T051412Z_aes_gcm_metrics_dev-ttyusb0.json
+```
+
+Essa é a primeira bateria oficial pós-AES-GCM consolidada no dashboard. A
+placa respondeu todos os `MISSION` com `cipher=AES-128-GCM`, `nonce_bytes=12`,
+`gcm_tag_bytes=16`, `aead_match=1` e `decrypt_ok=1`.
+
+Resumo da bateria mais recente:
+
+- 1.038 registros;
+- 0 falhas de comando;
+- 600 `MISSION runs`;
+- 400 testes `FAULT`;
+- 6 execuções `PQC_BENCH 100`;
+- duração de 343,16 s;
+- `summary.aes_gcm.checks.official_candidate=true`;
+- `non_aes_gcm_records=0`;
+- `missing_required_fields=0`;
+- `aead_failures=0`;
+- `nonce_crc32_duplicates=0`.
+
+Validação AES-GCM:
+
+- `cipher=AES-128-GCM`: 600/600 `MISSION`;
+- `aead_match=1`: 600/600 `MISSION`;
+- `decrypt_ok=1`: 600/600 `MISSION`;
+- `nonce_crc32`: 600 valores únicos em 600 mensagens;
+- `ciphertext_crc32`: 600 valores únicos em 600 mensagens;
+- `gcm_tag_crc32`: 600 valores únicos em 600 mensagens.
+
+Isso confirma que o payload fixo foi cifrado com nonce aleatório por mensagem:
+mesmo com o mesmo plaintext, nonce, ciphertext e tag GCM variaram nas 600
+execuções.
+
+### MISSION AES-GCM — BASELINE (240 MHz, 100 amostras por cenário)
+
+| Campo | CLASSIC | PQC | PQC_CRC32 |
+|---|---:|---:|---:|
+| `elapsed_us` (avg) | 624 | 14.075 | 14.034 |
+| `bytes_total` | 62 | 830 | 834 |
+| `bytes_payload` | 34 | 34 | 34 |
+| `bytes_crypto` | 28 | 796 | 796 |
+| `bytes_checksum` | 0 | 0 | 4 |
+| `bytes_ciphertext` | 34 | 34 | 38 |
+| `encrypt_us` (avg) | 374 | 383 | 394 |
+| `decrypt_us` (avg) | 116 | 108 | 108 |
+| `rng_us` (avg) | 29 | 18 | 17 |
+| `kdf_us` (avg) | 0 | 820 | 778 |
+| `keygen_us` (avg) | 0 | 3.709 | 3.695 |
+| `encap_us` (avg) | 0 | 3.939 | 3.925 |
+| `decap_us` (avg) | 0 | 5.022 | 5.022 |
+| `crc_us` (avg) | 0 | 0 | 21 |
+| `result` | DELIVERED | DELIVERED | DELIVERED |
+
+### MISSION AES-GCM — OBC-1U-LIMITED (80 MHz, 100 amostras por cenário)
+
+| Campo | CLASSIC | PQC | PQC_CRC32 |
+|---|---:|---:|---:|
+| `elapsed_us` (avg) | 1.038 | 39.965 | 40.005 |
+| `bytes_total` | 62 | 830 | 834 |
+| `bytes_payload` | 34 | 34 | 34 |
+| `bytes_crypto` | 28 | 796 | 796 |
+| `bytes_checksum` | 0 | 0 | 4 |
+| `bytes_ciphertext` | 34 | 34 | 38 |
+| `encrypt_us` (avg) | 562 | 578 | 585 |
+| `decrypt_us` (avg) | 303 | 295 | 295 |
+| `rng_us` (avg) | 40 | 23 | 22 |
+| `kdf_us` (avg) | 0 | 1.488 | 1.445 |
+| `keygen_us` (avg) | 0 | 10.441 | 10.446 |
+| `encap_us` (avg) | 0 | 11.823 | 11.835 |
+| `decap_us` (avg) | 0 | 15.212 | 15.230 |
+| `crc_us` (avg) | 0 | 0 | 40 |
+| `result` | DELIVERED | DELIVERED | DELIVERED |
+
+Razões observadas na bateria AES-GCM:
+
+| Comparação | BASELINE | OBC-1U-LIMITED |
+|---|---:|---:|
+| PQC / CLASSIC em tempo | 22,6x | 38,5x |
+| PQC+CRC / CLASSIC em tempo | 22,5x | 38,6x |
+| PQC / CLASSIC em bytes | 13,4x | 13,4x |
+| bytes extras do CRC32 | +4 B | +4 B |
+
+Falhas na bateria AES-GCM:
+
+- `FAULT NONE`: 200/200 resultados `SILENT`;
+- `FAULT CRC32`: 200/200 resultados `DETECTED_GUARD`.
+
+`PQC_BENCH 100` na bateria AES-GCM:
+
+| Perfil | keygen avg | encap avg | decap avg |
+|---|---:|---:|---:|
+| `BASELINE` 240 MHz | 3.323 us | 3.878 us | 5.001 us |
+| `OBC-1U-LIMITED` 80 MHz | 10.079 us | 11.794 us | 15.222 us |
+
+Bateria diagnóstica anterior:
+
+```text
+logs/20260626T044359Z_aes_gcm_metrics_dev-ttyusb0.json
+```
+
+Essa coleta terminou sem falhas de comando, mas foi rejeitada como fonte
+oficial AES-GCM porque a placa ainda estava com firmware antigo: os `MISSION`
+voltaram sem `cipher=AES-128-GCM`, sem `nonce_crc32` e sem `gcm_tag_crc32`. Ela
+foi mantida apenas como histórico de diagnóstico do processo de atualização do
+firmware.
+
+Fonte histórica principal pré-AES:
 
 ```text
 logs/20260625T005330Z_final_metrics_dev-ttyusb0.json
@@ -363,8 +473,60 @@ Baterias longas não devem ser iniciadas pelo agente. Se a montagem física
 mudar e for necessário repetir a coleta, o operador roda no terminal e depois
 chama o agente para analisar o JSON.
 
-Para consolidar um resultado novo e mais sólido para a seção `RESULTADOS`, use
-o runner dedicado:
+Para consolidar um resultado novo e mais sólido para a seção `RESULTADOS` com
+o fluxo atual, isto é, `MISSION` já cifrando payload com `AES-128-GCM`, use o
+runner dedicado pós-AES:
+
+```bash
+python3 tools/aes_gcm_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 100 --pause 0.25 --bench-repeats 3 --bench-rounds 100
+```
+
+Esse comando executa, em `BASELINE` 240 MHz e `OBC-1U-LIMITED` 80 MHz:
+
+- 100 ciclos por perfil;
+- 300 `MISSION` por perfil, sendo 100 `CLASSIC`, 100 `PQC` e 100
+  `PQC_CRC32`;
+- todos os `MISSION` com o mesmo payload hexadecimal fixo, para evidenciar que
+  `nonce_crc32`, `ciphertext_crc32` e `gcm_tag_crc32` mudam mesmo quando o
+  plaintext é igual;
+- 200 testes de falha por perfil, alternando `FAULT NONE` e `FAULT CRC32`;
+- 3 execuções `PQC_BENCH 100` por perfil;
+- validações específicas em `summary.aes_gcm`, incluindo `cipher=AES-128-GCM`,
+  `nonce_bytes=12`, `gcm_tag_bytes=16`, `aead_match=1`, `decrypt_ok=1`,
+  `tag_match=1` e contagem de duplicatas de `nonce_crc32`.
+
+Resultado esperado no terminal:
+
+```text
+aes_gcm_metrics_json=logs/YYYYMMDDTHHMMSSZ_aes_gcm_metrics_dev-ttyusb0.json
+summary={"aead_failures": 0, "failed": 0, "mission_runs": 600, "non_aes_gcm_records": 0, "official_candidate": true, ...}
+```
+
+Antes de iniciar a coleta real, confira o plano sem abrir a porta serial:
+
+```bash
+python3 tools/aes_gcm_metrics_battery.py --dry-run --cycles 100 --bench-repeats 3 --bench-rounds 100
+```
+
+Para uma coleta curta de validação antes da bateria longa:
+
+```bash
+python3 tools/aes_gcm_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 10 --pause 0.2 --bench-repeats 1 --bench-rounds 20
+```
+
+Depois que o JSON for gerado, chame o agente para consolidar o arquivo novo em
+tabelas. Os campos principais para atualização da apresentação são:
+
+- `summary.aes_gcm.checks.official_candidate`;
+- `summary.aes_gcm.profiles.<perfil>.scenarios.<cenário>.encrypt_us`;
+- `summary.aes_gcm.profiles.<perfil>.scenarios.<cenário>.decrypt_us`;
+- `summary.aes_gcm.profiles.<perfil>.scenarios.<cenário>.nonce_crc32`;
+- `summary.mission.<perfil>.ratios`;
+- `summary.pqc_bench`;
+- `summary.faults`.
+
+O runner antigo abaixo continua útil como bateria geral, mas para os números
+oficiais da versão cifrada prefira `tools/aes_gcm_metrics_battery.py`:
 
 ```bash
 python3 tools/final_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 100 --pause 0.25 --bench-repeats 3 --bench-rounds 100

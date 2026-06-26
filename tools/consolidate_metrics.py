@@ -11,6 +11,20 @@ from pathlib import Path
 REPO_DIR = Path(__file__).resolve().parents[1]
 DASHBOARD_PATH = REPO_DIR / "dashboard.py"
 LOGS_DIR = REPO_DIR / "logs"
+MISSION_SCENARIOS = ("CLASSIC", "PQC", "PQC_CRC32")
+AES_REQUIRED_FIELDS = (
+    "cipher",
+    "nonce_bytes",
+    "gcm_tag_bytes",
+    "nonce_crc32",
+    "ciphertext_crc32",
+    "gcm_tag_crc32",
+    "encrypt_us",
+    "decrypt_us",
+    "aead_match",
+    "decrypt_ok",
+    "tag_match",
+)
 
 
 def parse_args():
@@ -19,7 +33,7 @@ def parse_args():
     )
     parser.add_argument(
         "--file",
-        help="Path to the JSON log file. If omitted, uses the latest *_final_metrics_*.json file in logs/",
+        help="Path to the JSON log file. If omitted, uses the latest metrics JSON file in logs/",
     )
     return parser.parse_args()
 
@@ -43,6 +57,89 @@ def safe_mean(values) -> float:
     return sum(parsed) / len(parsed) if parsed else 0.0
 
 
+def payload_of(record):
+    payload = record.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def mission_scenario_of(record) -> str | None:
+    payload = payload_of(record)
+    scenario = str(payload.get("scenario") or "").strip().upper()
+    if scenario in MISSION_SCENARIOS:
+        return scenario
+    parts = str(record.get("command", "")).split()
+    if len(parts) >= 2 and parts[0] == "MISSION" and parts[1] in MISSION_SCENARIOS:
+        return parts[1]
+    return None
+
+
+def records_for_profile(records, profile):
+    return [
+        record for record in records
+        if record.get("profile_requested") == profile or payload_of(record).get("profile") == profile
+    ]
+
+
+def first_non_empty(payloads, *fields, default=""):
+    for payload in payloads:
+        for field in fields:
+            value = payload.get(field)
+            if value not in {None, ""}:
+                return str(value)
+    return default
+
+
+def aes_checks(data, mission_records):
+    missing_required = sum(
+        1
+        for record in mission_records
+        for field in AES_REQUIRED_FIELDS
+        if field not in payload_of(record)
+    )
+    non_aes = sum(1 for record in mission_records if payload_of(record).get("cipher") != "AES-128-GCM")
+    aead_failures = sum(
+        1 for record in mission_records
+        if str(payload_of(record).get("aead_match")) not in {"1", "true", "True"}
+    )
+    checks = {
+        "mission_records": len(mission_records),
+        "missing_required_fields": missing_required,
+        "non_aes_gcm_records": non_aes,
+        "aead_failures": aead_failures,
+        "nonce_crc32_duplicates": 0,
+        "official_candidate": bool(mission_records) and missing_required == 0 and non_aes == 0 and aead_failures == 0,
+    }
+    original_checks = data.get("summary", {}).get("aes_gcm", {}).get("checks")
+    if isinstance(original_checks, dict) and original_checks != checks:
+        checks["recomputed_from_records"] = True
+    return checks
+
+
+def metrics_status(data, checks) -> str:
+    if data.get("schema_version") == "pqc-sat-aes-gcm-metrics-v1":
+        if checks.get("official_candidate"):
+            return "versão cifrada oficial com AES-128-GCM"
+        return "bateria AES-GCM rejeitada: firmware retornou HMAC-SHA256 legado"
+    return "bateria histórica pré-AES-GCM"
+
+
+def crypto_label(scenario, payloads):
+    cipher = first_non_empty(payloads, "cipher")
+    crypto = first_non_empty(payloads, "crypto")
+    confirmation = first_non_empty(payloads, "confirmation")
+    if cipher == "AES-128-GCM":
+        return "AES-128-GCM" if scenario == "CLASSIC" else "ML-KEM-512 + AES-GCM"
+    if scenario == "CLASSIC" and crypto:
+        return f"{crypto} (legado)"
+    if scenario == "PQC_CRC32" and crypto:
+        suffix = f" + {confirmation}" if confirmation and confirmation != crypto else ""
+        return f"{crypto}{suffix} + CRC32 (legado)"
+    if crypto:
+        suffix = f" + {confirmation}" if confirmation and confirmation != crypto else ""
+        return f"{crypto}{suffix} (legado)"
+    return "sem dados"
+
+
 def main():
     args = parse_args()
 
@@ -51,7 +148,7 @@ def main():
         log_path = Path(args.file)
     else:
         log_files = sorted(
-            LOGS_DIR.glob("*_final_metrics_*.json"),
+            list(LOGS_DIR.glob("*_aes_gcm_metrics_*.json")) + list(LOGS_DIR.glob("*_final_metrics_*.json")),
             key=lambda p: p.name,
             reverse=True,
         )
@@ -82,6 +179,8 @@ def main():
 
     mission_records = [r for r in records if r.get("command", "").startswith("MISSION ")]
     mission_runs = len(mission_records)
+    checks = aes_checks(data, mission_records)
+    status = metrics_status(data, checks)
 
     bench_records = [r for r in records if r.get("command", "").startswith("PQC_BENCH ")]
     pqc_bench_runs = len(bench_records)
@@ -120,9 +219,9 @@ def main():
         baseline_mission_records = mission_records
 
     baseline_stats = {}
-    for scenario in ("CLASSIC", "PQC", "PQC_CRC32"):
-        scenario_records = [r for r in baseline_mission_records if r.get("command") == f"MISSION {scenario}"]
-        payloads = [r.get("payload", {}) for r in scenario_records]
+    for scenario in MISSION_SCENARIOS:
+        scenario_records = [r for r in baseline_mission_records if mission_scenario_of(r) == scenario]
+        payloads = [payload_of(r) for r in scenario_records]
 
         # Extract values
         elapsed_us = int(round(safe_mean(p.get("elapsed_us") for p in payloads)))
@@ -130,8 +229,6 @@ def main():
         bytes_payload = int(round(safe_mean(p.get("bytes_payload") for p in payloads)))
         bytes_checksum = int(round(safe_mean(p.get("bytes_checksum") for p in payloads)))
         bytes_crypto = int(round(safe_mean(p.get("bytes_crypto") for p in payloads)))
-        if bytes_payload == 0:
-            bytes_payload = 41
         if bytes_total > 0 and bytes_crypto == 0:
             bytes_crypto = bytes_total - bytes_payload - bytes_checksum
 
@@ -156,16 +253,14 @@ def main():
         # Labels & setup
         if scenario == "CLASSIC":
             label = "CLASSIC"
-            crypto = "AES-128-GCM"
             checksum = "NONE"
         elif scenario == "PQC":
             label = "PQC (ML-KEM)"
-            crypto = "ML-KEM-512 + AES-GCM"
             checksum = "NONE"
         else:
             label = "PQC + CRC32"
-            crypto = "ML-KEM-512"
             checksum = "CRC32"
+        crypto = crypto_label(scenario, payloads)
 
         baseline_stats[scenario] = {
             "label": label,
@@ -235,8 +330,8 @@ def main():
         r for r in mission_records
         if r.get("profile_requested") == "OBC-1U-LIMITED" or r.get("payload", {}).get("profile") == "OBC-1U-LIMITED"
     ]
-    limited_classic = [r for r in limited_mission_records if r.get("command") == "MISSION CLASSIC"]
-    limited_pqc = [r for r in limited_mission_records if r.get("command") == "MISSION PQC"]
+    limited_classic = [r for r in limited_mission_records if mission_scenario_of(r) == "CLASSIC"]
+    limited_pqc = [r for r in limited_mission_records if mission_scenario_of(r) == "PQC"]
 
     avg_l_classic = safe_mean(r.get("payload", {}).get("elapsed_us") for r in limited_classic)
     avg_l_pqc = safe_mean(r.get("payload", {}).get("elapsed_us") for r in limited_pqc)
@@ -244,30 +339,16 @@ def main():
     limited_pqc_vs_classic_elapsed = avg_l_pqc / avg_l_classic if avg_l_classic > 0 else 34.1
 
     # Formatting structure block
-    formatted_summary = json.dumps(summary_dict, indent=4, sort_keys=True)
-    # indent dictionary formatting nicely
-    formatted_summary = formatted_summary.replace("\n", "\n    ").replace("}", "    }")
-
-    # Format baseline missions dictionary
-    formatted_mission_baseline = "{\n"
-    for scenario in ("CLASSIC", "PQC", "PQC_CRC32"):
-        formatted_mission_baseline += f'    "{scenario}": {{\n'
-        for k, v in baseline_stats[scenario].items():
-            if isinstance(v, str):
-                formatted_mission_baseline += f'        "{k}": "{v}",\n'
-            else:
-                formatted_mission_baseline += f'        "{k}": {v},\n'
-        formatted_mission_baseline += "    },\n"
-    formatted_mission_baseline += "}"
-    # indent nicely
-    formatted_mission_baseline = formatted_mission_baseline.replace("\n", "\n    ").replace("}", "    }")
-
-    # Format pqc bench tuple
+    formatted_summary = json.dumps(summary_dict, indent=4, ensure_ascii=False, sort_keys=True)
+    formatted_aes_checks = repr(dict(sorted(checks.items())))
+    formatted_mission_baseline = json.dumps(baseline_stats, indent=4, ensure_ascii=False)
     formatted_pqc_bench = "(\n"
     for item in pqc_bench_tuples:
-        formatted_pqc_bench += f'    ("{item[0]}", "{item[1]}", "{item[2]}", "{item[3]}"),\n'
+        formatted_pqc_bench += (
+            f"    ({json.dumps(item[0], ensure_ascii=False)}, "
+            f"{json.dumps(item[1])}, {json.dumps(item[2])}, {json.dumps(item[3])}),\n"
+        )
     formatted_pqc_bench += ")"
-    formatted_pqc_bench = formatted_pqc_bench.replace("\n", "\n    ").replace(")", "    )")
 
     # Read dashboard.py
     with DASHBOARD_PATH.open("r", encoding="utf-8") as f:
@@ -278,8 +359,9 @@ def main():
     
     new_constants_block = f"""CONSOLIDATED_ACCEPTANCE_LOG = "{log_path_relative}"
 CONSOLIDATED_ACCEPTANCE_LABEL = "{log_label}"
-CONSOLIDATED_METRICS_STATUS = "versão cifrada oficial com AES-128-GCM"
+CONSOLIDATED_METRICS_STATUS = "{status}"
 CONSOLIDATED_SUMMARY = {formatted_summary}
+CONSOLIDATED_AES_GCM_CHECKS = {formatted_aes_checks}
 CONSOLIDATED_MISSION_BASELINE = {formatted_mission_baseline}
 CONSOLIDATED_PQC_BENCH = {formatted_pqc_bench}
 
@@ -294,17 +376,32 @@ CONSOLIDATED_PQC_BENCH = {formatted_pqc_bench}
         print("Error: Could not locate CONSOLIDATED_ACCEPTANCE_LOG constants block in dashboard.py", file=sys.stderr)
         return 1
 
-    # Replacement 2: Replace title "CUSTO HISTÓRICO (pré AES-GCM)"
-    content = content.replace('"CUSTO HISTÓRICO (pré AES-GCM)"', '"DESEMPENHO DA MISSÃO (AES-GCM)"')
+    title = "DESEMPENHO DA MISSÃO (AES-GCM)" if checks.get("official_candidate") else "DESEMPENHO MEDIDO (firmware legado)"
+    content = content.replace('"CUSTO HISTÓRICO (pré AES-GCM)"', f'"{title}"')
+    content = content.replace('"DESEMPENHO DA MISSÃO (AES-GCM)"', f'"{title}"')
+    content = content.replace('"DESEMPENHO MEDIDO (firmware legado)"', f'"{title}"')
 
     # Replacement 3: Replace notes array block
     formatted_heap = f"{heap_baseline:,}".replace(",", ".")
-    new_notes = f"""notes = (
+    if checks.get("official_candidate"):
+        note_lines = (
             "Resultados oficiais com cifragem AES-GCM ativa nas missões.",
-            "PQC foi {pqc_vs_classic_elapsed:.1f}x mais lento e {pqc_vs_classic_bytes:.1f}x maior em bytes que CLASSIC.",
-            "PQC+CRC32 adicionou {crc32_extra_bytes:.0f} bytes ao pacote, com verificação ativa de integridade.",
-            "Heap médio estável em {formatted_heap} B no baseline de 240 MHz.",
-            "A 80 MHz (limited), PQC subiu para {limited_pqc_ms:.1f} ms ({limited_pqc_vs_classic_elapsed:.1f}x o clássico).",
+            f"PQC foi {pqc_vs_classic_elapsed:.1f}x mais lento e {pqc_vs_classic_bytes:.1f}x maior em bytes que CLASSIC.",
+            f"PQC+CRC32 adicionou {crc32_extra_bytes:.0f} bytes ao pacote, com verificação ativa de integridade.",
+            f"Heap médio estável em {formatted_heap} B no baseline de 240 MHz.",
+            f"A 80 MHz (limited), PQC subiu para {limited_pqc_ms:.1f} ms ({limited_pqc_vs_classic_elapsed:.1f}x o clássico).",
+        )
+    else:
+        note_lines = (
+            "Bateria executou sem falhas, mas não valida a versão AES-GCM.",
+            "MISSION retornou HMAC-SHA256 legado; faltaram cipher, nonce e tag GCM.",
+            f"Números abaixo valem como regressão: PQC foi {pqc_vs_classic_elapsed:.1f}x mais lento e {pqc_vs_classic_bytes:.1f}x maior.",
+            f"CRC32 acrescentou {crc32_extra_bytes:.0f} bytes e manteve a detecção didática de bit-flip.",
+            "Próximo passo: regravar firmware AES-GCM e repetir este runner.",
+        )
+    notes_body = "\n".join(f'            "{line}",' for line in note_lines)
+    new_notes = f"""notes = (
+{notes_body}
         )"""
 
     pattern_notes = re.compile(r'\bnotes\s*=\s*\(.*?\n\s*\)', re.DOTALL)

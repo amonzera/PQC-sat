@@ -6,6 +6,7 @@ import sys
 import unittest
 from unittest import mock
 
+from tools import aes_gcm_metrics_battery
 from tools import final_metrics_battery
 from tools import serial_console
 from tools import stage8_acceptance
@@ -254,6 +255,144 @@ class SerialProtocolTests(unittest.TestCase):
         self.assertEqual(ratios["crc32_avg_us"], 7.0)
         faults = summary["faults"]["BASELINE"]["guards"]["CRC32"]["results"]
         self.assertEqual(faults["DETECTED_GUARD"], 1)
+
+    def test_final_metrics_battery_summarizes_payload_hex_missions_by_scenario(self):
+        payload_hex = aes_gcm_metrics_battery.DEFAULT_AES_PAYLOAD_HEX
+        records = [
+            {
+                "ok": True,
+                "command": f"MISSION CLASSIC {payload_hex}",
+                "profile_requested": "BASELINE",
+                "payload": {"profile": "BASELINE", "scenario": "CLASSIC", "elapsed_us": "100", "bytes_total": "10"},
+            },
+            {
+                "ok": True,
+                "command": f"MISSION PQC {payload_hex}",
+                "profile_requested": "BASELINE",
+                "payload": {"profile": "BASELINE", "scenario": "PQC", "elapsed_us": "500", "bytes_total": "50"},
+            },
+            {
+                "ok": True,
+                "command": f"MISSION PQC_CRC32 {payload_hex}",
+                "profile_requested": "BASELINE",
+                "payload": {
+                    "profile": "BASELINE",
+                    "scenario": "PQC_CRC32",
+                    "elapsed_us": "540",
+                    "bytes_total": "54",
+                    "crc_us": "7",
+                },
+            },
+        ]
+
+        summary = final_metrics_battery.summarize(records, actual_elapsed_s=1.0)
+        scenarios = summary["mission"]["BASELINE"]["scenarios"]
+
+        self.assertEqual(scenarios["CLASSIC"]["runs"], 1)
+        self.assertEqual(scenarios["PQC"]["runs"], 1)
+        self.assertEqual(scenarios["PQC_CRC32"]["runs"], 1)
+        self.assertEqual(summary["mission"]["BASELINE"]["ratios"]["pqc_vs_classic_elapsed"], 5.0)
+
+    def test_aes_gcm_metrics_battery_plans_fixed_payload_missions(self):
+        args = mock.Mock(
+            profiles=["BASELINE"],
+            cycles=2,
+            bench_repeats=1,
+            bench_rounds=5,
+            payload_hex=aes_gcm_metrics_battery.DEFAULT_AES_PAYLOAD_HEX,
+            skip_faults=False,
+        )
+
+        plan = aes_gcm_metrics_battery.planned_commands(args)
+        commands = [command for command, _phase, _profile in plan]
+
+        self.assertIn("PROFILE BASELINE", commands)
+        self.assertEqual(sum(command.startswith("MISSION CLASSIC ") for command in commands), 2)
+        self.assertEqual(sum(command.startswith("MISSION PQC ") for command in commands), 2)
+        self.assertEqual(sum(command.startswith("MISSION PQC_CRC32 ") for command in commands), 2)
+        self.assertTrue(all(aes_gcm_metrics_battery.DEFAULT_AES_PAYLOAD_HEX in command for command in commands if command.startswith("MISSION ")))
+        self.assertEqual(commands.count("PQC_BENCH 5"), 1)
+        self.assertEqual(sum(command.startswith("FAULT NONE ") for command in commands), 2)
+        self.assertEqual(sum(command.startswith("FAULT CRC32 ") for command in commands), 2)
+
+    def test_aes_gcm_metrics_battery_summarizes_aead_fields(self):
+        records = []
+        for index, nonce_crc in enumerate(("0x11111111", "0x22222222"), 1):
+            records.append(
+                {
+                    "ok": True,
+                    "command": "MISSION CLASSIC " + aes_gcm_metrics_battery.DEFAULT_AES_PAYLOAD_HEX,
+                    "profile_requested": "BASELINE",
+                    "payload": {
+                        "profile": "BASELINE",
+                        "scenario": "CLASSIC",
+                        "result": "DELIVERED",
+                        "cipher": "AES-128-GCM",
+                        "nonce_bytes": "12",
+                        "gcm_tag_bytes": "16",
+                        "nonce_crc32": nonce_crc,
+                        "ciphertext_crc32": f"0xC{index}",
+                        "gcm_tag_crc32": f"0xA{index}",
+                        "payload_crc32": "0xPAY",
+                        "key_source": "RANDOM_SESSION",
+                        "encrypt_us": "20",
+                        "decrypt_us": "18",
+                        "rng_us": "4",
+                        "bytes_ciphertext": "36",
+                        "bytes_total": "64",
+                        "aead_match": "1",
+                        "decrypt_ok": "1",
+                        "tag_match": "1",
+                    },
+                }
+            )
+
+        summary = aes_gcm_metrics_battery.summarize_aes_gcm(records)
+        checks = summary["checks"]
+        classic = summary["profiles"]["BASELINE"]["scenarios"]["CLASSIC"]
+
+        self.assertTrue(checks["official_candidate"])
+        self.assertEqual(checks["missing_required_fields"], 0)
+        self.assertEqual(checks["non_aes_gcm_records"], 0)
+        self.assertEqual(checks["aead_failures"], 0)
+        self.assertEqual(classic["cipher_aes_gcm_rate_pct"], 100.0)
+        self.assertEqual(classic["nonce_12_bytes_rate_pct"], 100.0)
+        self.assertEqual(classic["tag_16_bytes_rate_pct"], 100.0)
+        self.assertEqual(classic["aead_match_rate_pct"], 100.0)
+        self.assertEqual(classic["nonce_crc32"]["unique"], 2)
+        self.assertEqual(classic["ciphertext_crc32"]["unique"], 2)
+        self.assertEqual(classic["payload_crc32"]["unique"], 1)
+
+    def test_aes_gcm_metrics_battery_does_not_merge_pqc_and_pqc_crc32(self):
+        def record(scenario):
+            return {
+                "ok": True,
+                "command": f"MISSION {scenario} {aes_gcm_metrics_battery.DEFAULT_AES_PAYLOAD_HEX}",
+                "profile_requested": "BASELINE",
+                "payload": {
+                    "profile": "BASELINE",
+                    "scenario": scenario,
+                    "result": "DELIVERED",
+                    "cipher": "AES-128-GCM",
+                    "nonce_bytes": "12",
+                    "gcm_tag_bytes": "16",
+                    "nonce_crc32": f"0x{scenario[-1:] or '0'}1",
+                    "ciphertext_crc32": f"0x{scenario[-1:] or '0'}2",
+                    "gcm_tag_crc32": f"0x{scenario[-1:] or '0'}3",
+                    "encrypt_us": "20",
+                    "decrypt_us": "18",
+                    "aead_match": "1",
+                    "decrypt_ok": "1",
+                    "tag_match": "1",
+                },
+            }
+
+        summary = aes_gcm_metrics_battery.summarize_aes_gcm([record("PQC"), record("PQC_CRC32")])
+        scenarios = summary["profiles"]["BASELINE"]["scenarios"]
+
+        self.assertEqual(scenarios["PQC"]["runs"], 1)
+        self.assertEqual(scenarios["PQC_CRC32"]["runs"], 1)
+        self.assertTrue(summary["checks"]["official_candidate"])
 
 
 if __name__ == "__main__":

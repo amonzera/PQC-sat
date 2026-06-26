@@ -290,6 +290,17 @@ def command_starts(record: dict[str, object], prefix: str) -> bool:
     return str(record.get("command", "")).startswith(prefix)
 
 
+def mission_scenario_of(record: dict[str, object]) -> str | None:
+    payload = payload_of(record)
+    scenario = str(payload.get("scenario") or "").strip().upper()
+    if scenario in MISSION_SCENARIOS:
+        return scenario
+    parts = str(record.get("command", "")).split()
+    if len(parts) >= 2 and parts[0] == "MISSION" and parts[1] in MISSION_SCENARIOS:
+        return parts[1]
+    return None
+
+
 def summarize_missions(records: list[dict[str, object]]) -> dict[str, object]:
     summary: dict[str, object] = {}
     for profile in sorted({profile_of(record) for record in records if command_starts(record, "MISSION")}):
@@ -297,7 +308,7 @@ def summarize_missions(records: list[dict[str, object]]) -> dict[str, object]:
         scenarios: dict[str, object] = {}
         for scenario in MISSION_SCENARIOS:
             scenario_records = [
-                record for record in profile_records if str(record.get("command", "")) == f"MISSION {scenario}"
+                record for record in profile_records if mission_scenario_of(record) == scenario
             ]
             payloads = [payload_of(record) for record in scenario_records]
             scenario_summary: dict[str, object] = {

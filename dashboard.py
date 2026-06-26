@@ -82,79 +82,80 @@ MISSION_PRESET_COMMANDS = {
     "SET_PRESET_PQC_CRC32": "PQC_CRC32",
 }
 MISSION_OVERLAY_SCENARIOS = ("CLASSIC", "PQC", "PQC_CRC32")
-CONSOLIDATED_ACCEPTANCE_LOG = "logs/20260625T005330Z_final_metrics_dev-ttyusb0.json"
-CONSOLIDATED_ACCEPTANCE_LABEL = "20260625T005330Z"
+CONSOLIDATED_ACCEPTANCE_LOG = "logs/20260626T051412Z_aes_gcm_metrics_dev-ttyusb0.json"
+CONSOLIDATED_ACCEPTANCE_LABEL = "20260626T051412Z"
 CONSOLIDATED_METRICS_STATUS = "versão cifrada oficial com AES-128-GCM"
 CONSOLIDATED_SUMMARY = {
-        "crc_acceptance": "600/600",
-        "demo_crc_detected": "600/600",
-        "demo_none_silent": "600/600",
-        "elapsed_s": 1681.24,
-        "failed": 0,
-        "mission_runs": 1800,
-        "pqc_bench_runs": 10,
-        "records": 3074
-        }
+    "crc_acceptance": "200/200",
+    "demo_crc_detected": "200/200",
+    "demo_none_silent": "200/200",
+    "elapsed_s": 343.16,
+    "failed": 0,
+    "mission_runs": 600,
+    "pqc_bench_runs": 6,
+    "records": 1038
+}
+CONSOLIDATED_AES_GCM_CHECKS = {'aead_failures': 0, 'missing_required_fields': 0, 'mission_records': 600, 'non_aes_gcm_records': 0, 'nonce_crc32_duplicates': 0, 'official_candidate': True}
 CONSOLIDATED_MISSION_BASELINE = {
-        "CLASSIC": {
-            "label": "CLASSIC",
-            "crypto": "AES-128-GCM",
-            "checksum": "NONE",
-            "elapsed_us": 511,
-            "bytes_total": 73,
-            "bytes_payload": 41,
-            "bytes_crypto": 32,
-            "bytes_checksum": 0,
-            "keygen_us": 0,
-            "encap_us": 0,
-            "decap_us": 0,
-            "tag_us": 335,
-            "verify_us": 168,
-            "crc_us": 0,
-            "heap": 201412,
-            "result": "DELIVERED",
-            },
-        "PQC": {
-            "label": "PQC (ML-KEM)",
-            "crypto": "ML-KEM-512 + AES-GCM",
-            "checksum": "NONE",
-            "elapsed_us": 13234,
-            "bytes_total": 841,
-            "bytes_payload": 41,
-            "bytes_crypto": 800,
-            "bytes_checksum": 0,
-            "keygen_us": 3684,
-            "encap_us": 3937,
-            "decap_us": 5029,
-            "tag_us": 408,
-            "verify_us": 168,
-            "crc_us": 0,
-            "heap": 201412,
-            "result": "DELIVERED",
-            },
-        "PQC_CRC32": {
-            "label": "PQC + CRC32",
-            "crypto": "ML-KEM-512",
-            "checksum": "CRC32",
-            "elapsed_us": 13130,
-            "bytes_total": 845,
-            "bytes_payload": 41,
-            "bytes_crypto": 800,
-            "bytes_checksum": 4,
-            "keygen_us": 3586,
-            "encap_us": 3911,
-            "decap_us": 5012,
-            "tag_us": 435,
-            "verify_us": 168,
-            "crc_us": 10,
-            "heap": 201412,
-            "result": "DELIVERED",
-            },
-        }
+    "CLASSIC": {
+        "label": "CLASSIC",
+        "crypto": "AES-128-GCM",
+        "checksum": "NONE",
+        "elapsed_us": 624,
+        "bytes_total": 62,
+        "bytes_payload": 34,
+        "bytes_crypto": 28,
+        "bytes_checksum": 0,
+        "keygen_us": 0,
+        "encap_us": 0,
+        "decap_us": 0,
+        "tag_us": 374,
+        "verify_us": 116,
+        "crc_us": 0,
+        "heap": 201412,
+        "result": "DELIVERED"
+    },
+    "PQC": {
+        "label": "PQC (ML-KEM)",
+        "crypto": "ML-KEM-512 + AES-GCM",
+        "checksum": "NONE",
+        "elapsed_us": 14075,
+        "bytes_total": 830,
+        "bytes_payload": 34,
+        "bytes_crypto": 796,
+        "bytes_checksum": 0,
+        "keygen_us": 3709,
+        "encap_us": 3939,
+        "decap_us": 5022,
+        "tag_us": 383,
+        "verify_us": 108,
+        "crc_us": 0,
+        "heap": 201412,
+        "result": "DELIVERED"
+    },
+    "PQC_CRC32": {
+        "label": "PQC + CRC32",
+        "crypto": "ML-KEM-512 + AES-GCM",
+        "checksum": "CRC32",
+        "elapsed_us": 14034,
+        "bytes_total": 834,
+        "bytes_payload": 34,
+        "bytes_crypto": 796,
+        "bytes_checksum": 4,
+        "keygen_us": 3695,
+        "encap_us": 3925,
+        "decap_us": 5022,
+        "tag_us": 394,
+        "verify_us": 108,
+        "crc_us": 21,
+        "heap": 201412,
+        "result": "DELIVERED"
+    }
+}
 CONSOLIDATED_PQC_BENCH = (
-        ("BASELINE 240 MHz", "3.302", "3.866", "4.990"    ),
-        ("LIMITED 80 MHz", "10.066", "11.787", "15.217"    ),
-        )
+    ("BASELINE 240 MHz", "3.323", "3.878", "5.001"),
+    ("LIMITED 80 MHz", "10.079", "11.794", "15.222"),
+)
 
 # --- Paleta de Cores ----------------------------------------------------------
 C_SPACE_BG       = (5, 5, 18)
@@ -876,246 +877,7 @@ def draw_robot_pixel(surface, cx, cy, pixel_size=3, t=0.0):
         pygame.draw.rect(surface, color, (px, py, pixel_size, pixel_size))
 
 
-# --- Pixel Art Scene Toolkit -------------------------------------------------
-# Sprites are ASCII grids; each character maps to a colour. Some characters are
-# resolved at draw time from a per-scene ``accent`` colour so the same sprite
-# can be tinted cyan/orange/purple/green/red and stay on-theme. This powers the
-# lúdico illustrations inside the MISSION and FALHA popups.
-
-def _pix_lighten(color, factor):
-    return tuple(min(255, int(color[i] + (255 - color[i]) * factor)) for i in range(3))
-
-
-def _pix_darken(color, factor):
-    return tuple(max(0, int(color[i] * (1.0 - factor))) for i in range(3))
-
-
-# Fixed palette shared by every sprite. Lowercase = darker variant.
-PIX_BASE_PALETTE = {
-    'K': (3, 6, 14),        # ink outline / shadow
-    'W': (238, 245, 255),   # bright white
-    'w': (180, 196, 226),   # soft grey-white
-    'D': (11, 17, 34),      # deep panel fill
-    'd': (6, 10, 22),       # deepest fill
-    'M': (92, 104, 134),    # brushed metal
-    'm': (52, 62, 90),      # dark metal
-    'g': (226, 196, 86),    # gold (antenna / contacts)
-    'o': (255, 168, 28),    # warm orange
-    'r': (255, 72, 92),     # alarm red
-    'R': (150, 26, 42),     # dark red
-    'b': (0, 122, 255),     # data blue
-    'p': (170, 96, 255),    # lattice purple
-    'n': (0, 232, 150),     # confirm green
-    'c': (0, 224, 255),     # cyan glass
-    'y': (255, 226, 120),   # spark yellow
-    'e': (12, 28, 24),      # dark visor
-}
-
-
-def blit_sprite(surface, rows, ox, oy, unit, accent=(0, 220, 255),
-                overrides=None, alpha=255, flip_x=False):
-    """Render a chunky pixel sprite from an ASCII grid.
-
-    Characters '#', '+', '-' are resolved from ``accent`` (base, light, dark).
-    Space and '.' are transparent. ``overrides`` can remap any character.
-    """
-    palette = dict(PIX_BASE_PALETTE)
-    palette['#'] = accent
-    palette['+'] = _pix_lighten(accent, 0.42)
-    palette['-'] = _pix_darken(accent, 0.40)
-    if overrides:
-        palette.update(overrides)
-    ox = int(ox)
-    oy = int(oy)
-    rows_iter = list(rows)
-    if alpha >= 255:
-        target = surface
-        bx, by = ox, oy
-    else:
-        width = max((len(r) for r in rows_iter), default=0) * unit
-        height = len(rows_iter) * unit
-        if width <= 0 or height <= 0:
-            return
-        target = pygame.Surface((width, height), pygame.SRCALPHA)
-        bx, by = 0, 0
-    for r, row in enumerate(rows_iter):
-        cols = len(row)
-        for c, ch in enumerate(row):
-            color = palette.get(ch)
-            if color is None:
-                continue
-            cc = (cols - 1 - c) if flip_x else c
-            px = bx + cc * unit
-            py = by + r * unit
-            if alpha < 255:
-                color = (*color, alpha)
-            pygame.draw.rect(target, color, (px, py, unit, unit))
-    if alpha < 255:
-        surface.blit(target, (ox, oy))
-
-
-def sprite_size(rows, unit):
-    return max((len(r) for r in rows), default=0) * unit, len(rows) * unit
-
-
 # ----- Sprite atlas ----------------------------------------------------------
-# A friendly onboard robot pilot (the satellite's "operator"). '#' = body shell.
-PIX_ROBOT = [
-    "  g     g  ",
-    "  gK   Kg  ",
-    "  +KKKKK+  ",
-    " K#######K ",
-    " KWWW#WWWK ",   # eye whites
-    " KWcW#WcWK ",   # cyan pupils
-    " K#######K ",
-    " K#KWWWK#K ",   # smile ends up
-    " K#WKKKW#K ",   # smile
-    "  KK###KK  ",
-]
-
-# Same robot, focused/working (eyes narrowed, mouth a small "o").
-PIX_ROBOT_WORK = [
-    "  g     g  ",
-    "  gK   Kg  ",
-    "  +KKKKK+  ",
-    " K#######K ",
-    " K#######K ",
-    " KWWc#cWWK ",   # narrowed eyes
-    " K#######K ",
-    " K##KKK##K ",
-    " K##KWK##K ",   # focused mouth
-    "  KK###KK  ",
-]
-
-# Robot worried (no guard / danger).
-PIX_ROBOT_WORRY = [
-    "  r     r  ",
-    "  r     r  ",
-    "  oKKKKKo  ",
-    " KoooooooK ",
-    " Ko-----oK ",
-    " KeWeeeWeK ",
-    " Ko-----oK ",
-    " Ko-WWW-oK ",   # frown
-    " KW-----WK ",
-    " KoKoKoKoK ",
-]
-
-# Ground-station dish + mast (receiver).
-PIX_DISH = [
-    "    +++    ",
-    "  ++###++  ",
-    " +#######+ ",
-    " +#-WWW-#+ ",
-    " +#-WWW-#+ ",
-    "  +#---#+  ",
-    "   K+++K   ",
-    "    KgK    ",
-    "    KgK    ",
-    "  KKMMMKK  ",
-]
-
-# Closed padlock.
-PIX_LOCK_CLOSED = [
-    "  +KKK+  ",
-    " K+   +K ",
-    " K+   +K ",
-    " K+   +K ",
-    "KKKKKKKKK",
-    "K#######K",
-    "K##KKK##K",
-    "K##KdK##K",
-    "K###K###K",
-    "KKKKKKKKK",
-]
-
-# Open padlock (shackle swung up).
-PIX_LOCK_OPEN = [
-    "  +KKK+ K",
-    " K+   +KK",
-    " K+   + K",
-    " K+    KK",
-    "KKKKKKKKK",
-    "K#######K",
-    "K##nnn##K",
-    "K##nKn##K",
-    "K###K###K",
-    "KKKKKKKKK",
-]
-
-# A key.
-PIX_KEY = [
-    " KKK     ",
-    "K+++K    ",
-    "K+K+K    ",
-    "K+++KKKKK",
-    " KKK+++++",
-    "    KKKKK",
-    "      K K",
-    "      KKK",
-]
-
-# Lattice crystal / gem (ML-KEM).
-PIX_CRYSTAL = [
-    "   K+K   ",
-    "  K+++K  ",
-    " K+###+K ",
-    "K+#####+K",
-    "K#######K",
-    " K#####K ",
-    "  K###K  ",
-    "   K#K   ",
-]
-
-# Shield (CRC32 guardian) with a check mark.
-PIX_SHIELD = [
-    " KKKKKKK ",
-    "K+++++++K",
-    "K+#####+K",
-    "K+###W#+K",
-    "K+#W#W#+K",
-    "K+#WKW#+K",
-    " K+WKW+K ",
-    "  K+#+K  ",
-    "   K+K   ",
-]
-
-# Shield cracked (breach).
-PIX_SHIELD_CRACK = [
-    " KKKKKKK ",
-    "K+++r+++K",
-    "K+##r##+K",
-    "K+#rr##+K",
-    "K+##rr#+K",
-    "K+#rr##+K",
-    " K+#r#+K ",
-    "  K+r+K  ",
-    "   KrK   ",
-]
-
-# Skull (silent / dangerous failure).
-PIX_SKULL = [
-    " KKKKKKK ",
-    "KWWWWWWWK",
-    "KWKKWKKWK",
-    "KWKKWKKWK",
-    "KWWWKWWWK",
-    "KWWWWWWWK",
-    " KWWWWWK ",
-    " KWKWKWK ",
-    "  K K K  ",
-]
-
-# Cosmic-ray "sun" emitter in the corner.
-PIX_RAY_STAR = [
-    "K  K  K",
-    " K r K ",
-    "Krrrrk ",
-    " rrrrr ",
-    "Krrrrrk",
-    " K r K ",
-    "K  K  K",
-]
 
 
 class DashboardSerialClient:
@@ -3968,140 +3730,6 @@ class DashboardPanel:
         pygame.draw.line(surface, accent, (rect.x, rect.y + 24), (rect.right, rect.y + 24), 1)
         surface.blit(self._render_clipped(FONT_LABEL, title, C_TEXT_PRIMARY, rect.width - 16), (rect.x + 8, rect.y + 5))
 
-    def _draw_transform_segments(self, surface, segments, area, reveal=1.0, active=None):
-        if not segments:
-            return
-        gap = 5
-        count = len(segments)
-        seg_w = max(38, (area.width - gap * (count - 1)) // count)
-        for index, segment in enumerate(segments):
-            x = area.x + index * (seg_w + gap)
-            width = seg_w if index < count - 1 else max(30, area.right - x)
-            rect = pygame.Rect(x, area.y, width, area.height)
-            color = segment.get("color", C_ACCENT_CYAN)
-            fill_w = max(4, int(rect.width * max(0.08, min(1.0, reveal))))
-            pygame.draw.rect(surface, (8, 12, 26), rect, border_radius=5)
-            pygame.draw.rect(surface, color, (rect.x, rect.y, fill_w, rect.height), border_radius=5)
-            border_w = 2 if segment.get("label") == active else 1
-            pygame.draw.rect(surface, C_TEXT_PRIMARY if border_w == 2 else color, rect, width=border_w, border_radius=5)
-            label = str(segment.get("label", ""))
-            sub = str(segment.get("sub", ""))
-            surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, rect.width - 8), (rect.x + 5, rect.y + 7))
-            if sub:
-                surface.blit(self._render_clipped(FONT_LABEL, sub, (230, 238, 255), rect.width - 8), (rect.x + 5, rect.y + 23))
-
-    def _draw_transform_beam(self, surface, start, end, color, progress, t):
-        pygame.draw.line(surface, (54, 74, 128), start, end, 3)
-        active_x = start[0] + int((end[0] - start[0]) * max(0.0, min(1.0, progress)))
-        active_y = start[1] + int((end[1] - start[1]) * max(0.0, min(1.0, progress)))
-        pygame.draw.line(surface, color, start, (active_x, active_y), 4)
-        for index in range(4):
-            phase = (progress + index * 0.22 + t * 0.08) % 1.0
-            px = start[0] + int((end[0] - start[0]) * phase)
-            py = start[1] + int((end[1] - start[1]) * phase)
-            pygame.draw.circle(surface, color, (px, py), 3)
-        arrow = ((end[0] - 8, end[1] - 5), (end[0], end[1]), (end[0] - 8, end[1] + 5))
-        pygame.draw.polygon(surface, color, arrow)
-
-    def _draw_process_node(self, surface, center, kind, label, sub, color, progress, t):
-        """Single self-explanatory element for the processing zone.
-
-        Draws a compact chip (72×52) with an integrated mini-icon specific to
-        the ``kind``, the operation label/sub text, and a thin progress bar at
-        the bottom.  Replaces the old ``_draw_operation_core`` + separate icon
-        approach, ensuring nothing overlaps.
-        """
-        progress = max(0.0, min(1.0, progress))
-        cw, ch = 72, 60
-        chip = pygame.Rect(center[0] - cw // 2, center[1] - ch // 2, cw, ch)
-
-        # -- subtle glow behind chip --
-        self._draw_soft_glow(surface, center, 14, color, 22)
-
-        # -- chip background --
-        pygame.draw.rect(surface, (5, 8, 18), chip, border_radius=7)
-
-        # -- progress fill (left→right wipe) --
-        if progress > 0.01:
-            fill_w = max(4, int(cw * progress))
-            fill_surf = pygame.Surface((fill_w, ch), pygame.SRCALPHA)
-            pygame.draw.rect(fill_surf, (*self._mix_color((12, 18, 38), color, 0.45), 60),
-                             (0, 0, fill_w, ch), border_radius=7)
-            surface.blit(fill_surf, chip.topleft)
-
-        # -- animated border --
-        pulse = 0.65 + 0.35 * math.sin(t * 4 + progress * math.pi)
-        border_c = self._mix_color((30, 42, 78), color, max(0.0, min(1.0, pulse)))
-        pygame.draw.rect(surface, border_c, chip, width=2, border_radius=7)
-
-        # -- mini-icon (16×16 conceptual area, top-center of chip) --
-        ix, iy = center[0], chip.y + 16
-        kind_lower = kind.lower() if isinstance(kind, str) else ""
-
-        if kind_lower == "crc":
-            # small shield outline
-            sh_pts = [
-                (ix, iy - 7), (ix + 7, iy - 4), (ix + 5, iy + 5),
-                (ix, iy + 8), (ix - 5, iy + 5), (ix - 7, iy - 4),
-            ]
-            pygame.draw.polygon(surface, color, sh_pts, 2)
-            pygame.draw.line(surface, color, (ix - 3, iy + 1), (ix, iy + 4), 2)
-            pygame.draw.line(surface, color, (ix, iy + 4), (ix + 4, iy - 3), 2)
-        elif kind_lower in {"aead", "rng"}:
-            # small padlock
-            pygame.draw.arc(surface, color,
-                            (ix - 5, iy - 8, 10, 12), math.pi, math.tau, 2)
-            pygame.draw.rect(surface, color, (ix - 6, iy, 12, 8), width=2,
-                             border_radius=2)
-            pygame.draw.circle(surface, color, (ix, iy + 3), 1)
-        elif kind_lower == "verify":
-            # small open padlock with checkmark
-            pygame.draw.arc(surface, color,
-                            (ix - 5, iy - 8, 10, 12), math.pi, math.tau, 2)
-            pygame.draw.line(surface, color, (ix + 5, iy - 3), (ix + 8, iy - 6), 2)
-            pygame.draw.rect(surface, color, (ix - 6, iy, 12, 8), width=2,
-                             border_radius=2)
-            pygame.draw.line(surface, C_ACCENT_GREEN, (ix - 2, iy + 3), (ix, iy + 5), 2)
-            pygame.draw.line(surface, C_ACCENT_GREEN, (ix, iy + 5), (ix + 4, iy - 1), 2)
-        elif kind_lower in {"keygen", "mlkem", "decap"}:
-            # small diamond (crystal lattice)
-            diamond = [(ix, iy - 7), (ix + 7, iy), (ix, iy + 7), (ix - 7, iy)]
-            pygame.draw.polygon(surface, color, diamond, 2)
-            # inner lattice dots
-            for dx, dy in ((-3, 0), (3, 0), (0, -3), (0, 3)):
-                pygame.draw.circle(surface, color, (ix + dx, iy + dy), 1)
-        elif kind_lower == "kdf":
-            # small key
-            pygame.draw.circle(surface, color, (ix - 3, iy), 4, 2)
-            pygame.draw.line(surface, color, (ix + 1, iy), (ix + 8, iy), 2)
-            pygame.draw.line(surface, color, (ix + 6, iy), (ix + 6, iy + 3), 2)
-        elif kind_lower == "payload":
-            # three horizontal lines (data/list)
-            for dy in (-4, 0, 4):
-                pygame.draw.line(surface, color, (ix - 6, iy + dy), (ix + 6, iy + dy), 2)
-        else:
-            # default: checkmark in circle
-            pygame.draw.circle(surface, color, (ix, iy), 7, 2)
-            pygame.draw.line(surface, color, (ix - 3, iy), (ix - 1, iy + 3), 2)
-            pygame.draw.line(surface, color, (ix - 1, iy + 3), (ix + 4, iy - 3), 2)
-
-        # -- label text (centered below icon) --
-        lbl_surf = self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, cw - 8)
-        surface.blit(lbl_surf, (center[0] - lbl_surf.get_width() // 2, chip.y + 28))
-        if sub:
-            sub_surf = self._render_clipped(FONT_LABEL, sub, (200, 215, 245), cw - 8)
-            surface.blit(sub_surf, (center[0] - sub_surf.get_width() // 2, chip.y + 41))
-
-        # -- thin progress bar at bottom edge --
-        bar_y = chip.bottom - 4
-        bar_w = cw - 8
-        pygame.draw.rect(surface, (14, 20, 38), (chip.x + 4, bar_y, bar_w, 3),
-                         border_radius=1)
-        if progress > 0.01:
-            pygame.draw.rect(surface, color,
-                             (chip.x + 4, bar_y, max(2, int(bar_w * progress)), 3),
-                             border_radius=1)
-
     def _mix_color(self, base, color, amount):
         amount = max(0.0, min(1.0, amount))
         return tuple(int(base[i] * (1.0 - amount) + color[i] * amount) for i in range(3))
@@ -4116,293 +3744,9 @@ class DashboardPanel:
             pygame.draw.circle(glow, (*color, layer_alpha), origin, layer_radius)
         surface.blit(glow, (center[0] - size // 2, center[1] - size // 2))
 
-    def _draw_circuit_background(self, surface, rect, color, t):
-        pygame.draw.rect(surface, (4, 8, 18), rect, border_radius=5)
-        step = 42
-        for x in range(rect.x + 8, rect.right, step):
-            pygame.draw.line(surface, (10, 16, 34), (x, rect.y + 4), (x, rect.bottom - 4), 1)
-        for y in range(rect.y + 8, rect.bottom, step):
-            pygame.draw.line(surface, (10, 16, 34), (rect.x + 4, y), (rect.right - 4, y), 1)
-        pygame.draw.rect(surface, self._mix_color(C_PANEL_BORDER, color, 0.25), rect, width=1, border_radius=5)
-
-    def _draw_crypto_capsule(self, surface, rect, label, sub, color, fill=1.0, active=False):
-        fill = max(0.0, min(1.0, fill))
-        pygame.draw.rect(surface, (8, 13, 28), rect, border_radius=5)
-        if fill > 0:
-            fill_rect = pygame.Rect(rect.x, rect.y, max(4, int(rect.width * fill)), rect.height)
-            pygame.draw.rect(surface, self._mix_color((9, 14, 30), color, 0.42), fill_rect, border_radius=5)
-        pygame.draw.rect(surface, color if active else self._mix_color(C_PANEL_BORDER, color, 0.45), rect, width=2 if active else 1, border_radius=5)
-        surface.blit(self._render_clipped(FONT_LABEL, str(label), C_TEXT_PRIMARY, rect.width - 8), (rect.x + 5, rect.y + 6))
-        if sub:
-            surface.blit(self._render_clipped(FONT_LABEL, str(sub), (196, 214, 246), rect.width - 8), (rect.x + 5, rect.y + 22))
-
-    def _draw_capsule_row(self, surface, segments, area, reveal=1.0, active_index=None):
-        if not segments:
-            return
-        gap = 6
-        count = len(segments)
-        capsule_w = max(54, min(112, (area.width - gap * (count - 1)) // count))
-        start_x = area.x + max(0, (area.width - (capsule_w * count + gap * (count - 1))) // 2)
-        y = area.centery - 21
-        for index, segment in enumerate(segments):
-            rect = pygame.Rect(start_x + index * (capsule_w + gap), y, capsule_w, 42)
-            seg_reveal = reveal if active_index is None or index <= active_index else 0.18
-            self._draw_crypto_capsule(
-                surface,
-                rect,
-                segment.get("label", ""),
-                segment.get("sub", ""),
-                segment.get("color", C_ACCENT_CYAN),
-                fill=seg_reveal,
-                active=index == active_index,
-            )
-
-    def _draw_byte_stream(self, surface, start, end, color, progress, t, labels=None):
-        progress = max(0.0, min(1.0, progress))
-        sx, sy = start
-        ex, ey = end
-        dx = ex - sx
-        dy = ey - sy
-        distance = math.hypot(dx, dy) or 1.0
-        nx = -dy / distance
-        ny = dx / distance
-        labels = labels or ("7A", "C3", "01", "AF", "42", "E8")
-        pygame.draw.line(surface, (34, 48, 92), start, end, 2)
-        pygame.draw.line(surface, color, start, (sx + int(dx * progress), sy + int(dy * progress)), 3)
-        for index, label in enumerate(labels):
-            phase = progress * 1.25 - index * 0.13
-            if phase < -0.2 or phase > 1.05:
-                continue
-            phase = max(0.0, min(1.0, phase))
-            px = sx + dx * phase + nx * math.sin(t * 5 + index) * 5
-            py = sy + dy * phase + ny * math.sin(t * 5 + index) * 5
-            tile = pygame.Rect(int(px) - 13, int(py) - 10, 26, 20)
-            pygame.draw.rect(surface, (7, 13, 28), tile, border_radius=4)
-            pygame.draw.rect(surface, color, tile, width=1, border_radius=4)
-            txt = FONT_LABEL.render(str(label), True, C_TEXT_PRIMARY)
-            surface.blit(txt, (tile.centerx - txt.get_width() // 2, tile.centery - txt.get_height() // 2))
-        arrow = ((ex - 8, ey - 5), (ex, ey), (ex - 8, ey + 5))
-        if abs(dy) > abs(dx):
-            arrow = ((ex - 5, ey - 8), (ex, ey), (ex + 5, ey - 8))
-        pygame.draw.polygon(surface, color, arrow)
-
-    def _draw_clean_arrow(self, surface, start, end, color, progress):
-        progress = max(0.0, min(1.0, progress))
-        sx, sy = start
-        ex, ey = end
-        active = (sx + int((ex - sx) * progress), sy + int((ey - sy) * progress))
-        pygame.draw.line(surface, (36, 48, 86), start, end, 2)
-        pygame.draw.line(surface, color, start, active, 3)
-        if progress <= 0.02:
-            return
-        dx = ex - sx
-        dy = ey - sy
-        distance = math.hypot(dx, dy) or 1.0
-        ux = dx / distance
-        uy = dy / distance
-        nx = -uy
-        ny = ux
-        tip = active
-        back = (tip[0] - int(9 * ux), tip[1] - int(9 * uy))
-        arrow = (
-            tip,
-            (back[0] + int(5 * nx), back[1] + int(5 * ny)),
-            (back[0] - int(5 * nx), back[1] - int(5 * ny)),
-        )
-        pygame.draw.polygon(surface, color, arrow)
-
-    def _draw_sensor_nodes(self, surface, area, progress, t, live):
-        labels = ("TEMP", "ACCEL", "POT") if live else ("ASCII", "SEQ", "MSG")
-        colors = (C_ACCENT_CYAN, C_ACCENT_PURPLE, C_ACCENT_ORANGE)
-        output = (area.right - 12, area.centery)
-        for index, label in enumerate(labels):
-            y = area.y + 14 + int(index * max(1, area.height - 28) / max(1, len(labels) - 1))
-            center = (area.x + 38, y)
-            pulse = 3 + int(2 * math.sin(t * 4 + index))
-            pygame.draw.line(surface, (34, 48, 92), center, output, 1)
-            pygame.draw.line(surface, colors[index], center, (center[0] + int((output[0] - center[0]) * progress), center[1] + int((output[1] - center[1]) * progress)), 2)
-            self._draw_soft_glow(surface, center, 12 + pulse, colors[index], 30)
-            pygame.draw.circle(surface, (8, 14, 30), center, 13 + pulse)
-            pygame.draw.circle(surface, colors[index], center, 13 + pulse, 2)
-            surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, 64), (center[0] + 18, center[1] - 8))
-        pygame.draw.rect(surface, (8, 13, 28), (output[0] - 28, output[1] - 16, 56, 32), border_radius=5)
-        pygame.draw.rect(surface, C_ACCENT_BLUE, (output[0] - 28, output[1] - 16, 56, 32), 1, border_radius=5)
-        surface.blit(self._render_clipped(FONT_LABEL, "PAY", C_TEXT_PRIMARY, 48), (output[0] - 20, output[1] - 7))
-
-    def _draw_lattice_effect(self, surface, area, color, progress, t):
-        cols = 5
-        rows = 3
-        points = []
-        for row in range(rows):
-            for col in range(cols):
-                jitter = math.sin(t * 3.0 + row * 1.4 + col) * 2
-                x = area.x + 12 + int(col * (area.width - 24) / max(1, cols - 1))
-                y = area.y + 12 + int(row * (area.height - 24) / max(1, rows - 1) + jitter)
-                points.append((x, y))
-                pygame.draw.circle(surface, color, (x, y), 2)
-        limit = int(len(points) * max(0.15, progress))
-        for index in range(max(0, limit - 1)):
-            pygame.draw.line(surface, self._mix_color((24, 30, 60), color, 0.52), points[index], points[index + 1], 1)
-        pygame.draw.rect(surface, color, area, width=1, border_radius=4)
-
-    def _draw_lock_symbol(self, surface, center, color, progress, open_lock=False, scale=1.0):
-        progress = max(0.0, min(1.0, progress))
-        s = max(0.3, min(1.0, scale))
-        bw = int(48 * s)
-        bh = int(32 * s)
-        body = pygame.Rect(center[0] - bw // 2, center[1] - int(2 * s), bw, bh)
-        sw = int(36 * s)
-        sh = int(38 * s)
-        shackle = pygame.Rect(center[0] - sw // 2, center[1] - int(28 * s), sw, sh)
-        pygame.draw.arc(surface, color, shackle, math.pi, math.tau, max(2, int(4 * s)))
-        if open_lock:
-            offset = int(14 * s * progress)
-            arm_x = center[0] + sw // 2
-            pygame.draw.line(surface, color, (arm_x, center[1] - int(10 * s)), (arm_x + offset, center[1] - int(18 * s)), max(2, int(3 * s)))
-        pygame.draw.rect(surface, (7, 13, 28), body, border_radius=max(3, int(5 * s)))
-        pygame.draw.rect(surface, color, body, width=max(1, int(2 * s)), border_radius=max(3, int(5 * s)))
-        pygame.draw.circle(surface, color, center, max(2, int(4 * s)))
-        pygame.draw.line(surface, color, (center[0], center[1] + int(4 * s)), (center[0], center[1] + int(14 * s)), max(1, int(2 * s)))
-
-    def _draw_shield_symbol(self, surface, center, color, progress, breached=False, scale=1.0):
-        progress = max(0.0, min(1.0, progress))
-        s = max(0.3, min(1.0, scale))
-        points = [
-            (center[0], center[1] - int(31 * s)),
-            (center[0] + int(28 * s), center[1] - int(18 * s)),
-            (center[0] + int(21 * s), center[1] + int(22 * s)),
-            (center[0], center[1] + int(35 * s)),
-            (center[0] - int(21 * s), center[1] + int(22 * s)),
-            (center[0] - int(28 * s), center[1] - int(18 * s)),
-        ]
-        pygame.draw.polygon(surface, (7, 13, 28), points)
-        pygame.draw.polygon(surface, color, points, width=max(1, int(2 * s)))
-        if breached:
-            crack = [
-                (center[0] - int(2 * s), center[1] - int(22 * s)),
-                (center[0] + int(6 * s), center[1] - int(4 * s)),
-                (center[0] - int(4 * s), center[1] + int(10 * s)),
-                (center[0] + int(4 * s), center[1] + int(28 * s)),
-            ]
-            pygame.draw.lines(surface, C_ACCENT_RED, False, crack, max(2, int(3 * s)))
-            return
-        check_end = int(1 + 2 * progress)
-        check = [
-            (center[0] - int(13 * s), center[1] + int(2 * s)),
-            (center[0] - int(3 * s), center[1] + int(14 * s)),
-            (center[0] + int(16 * s), center[1] - int(10 * s)),
-        ]
-        if check_end >= 2:
-            pygame.draw.line(surface, color, check[0], check[1], max(2, int(3 * s)))
-        if check_end >= 3:
-            pygame.draw.line(surface, color, check[1], check[2], max(2, int(3 * s)))
-
-    def _draw_radiation_strike(self, surface, rect, target, color, progress, t):
-        progress = max(0.0, min(1.0, progress))
-        source = (rect.x + 26, rect.y + 12)
-        hit = (source[0] + int((target[0] - source[0]) * progress), source[1] + int((target[1] - source[1]) * progress))
-        pygame.draw.line(surface, color, source, hit, 2)
-        pygame.draw.circle(surface, color, hit, 4 + int(2 * math.sin(t * 8) ** 2))
-        pygame.draw.circle(surface, color, target, int(8 + 10 * progress), 1)
-
-    def _mission_visual_scene(self, scenario, mission, step):
-        kind = str(step.get("kind", "")).lower()
-        payload = self._mission_int(mission, "bytes_payload")
-        checksum = self._mission_int(mission, "bytes_checksum")
-        mlkem = self._mission_int(mission, "bytes_mlkem")
-        nonce = self._mission_int(mission, "bytes_nonce", self._mission_int(mission, "nonce_bytes"))
-        gcm = self._mission_int(mission, "bytes_gcm_tag", self._mission_int(mission, "gcm_tag_bytes"))
-        total = self._mission_int(mission, "bytes_total")
-        protected = payload + checksum
-        live = str(mission.get("payload_mode", "")).upper() == "LIVE"
-
-        if kind == "payload":
-            return {
-                "title": "COLETA E SERIALIZAÇÃO DO PAYLOAD",
-                "left": ({"label": "TEMP", "sub": "sensor", "color": C_ACCENT_CYAN}, {"label": "ACCEL", "sub": "sensor", "color": C_ACCENT_PURPLE}, {"label": "POT", "sub": "analógico", "color": C_ACCENT_ORANGE}) if live else ({"label": "ASCII", "sub": "mensagem", "color": C_ACCENT_BLUE},),
-                "op": ("FORMATA", "payload"),
-                "right": ({"label": "PAYLOAD", "sub": f"{payload} B", "color": C_ACCENT_BLUE},),
-                "note": "Bytes de telemetria ainda estão em claro; nada foi cifrado.",
-            }
-        if kind == "crc":
-            return {
-                "title": "CRC32 É ANEXADO ANTES DA CIFRAGEM",
-                "left": ({"label": "PAYLOAD", "sub": f"{payload} B", "color": C_ACCENT_BLUE},),
-                "op": ("CRC32", "detecta"),
-                "right": ({"label": "PAYLOAD", "sub": f"{payload} B", "color": C_ACCENT_BLUE}, {"label": "CRC", "sub": f"+{checksum} B", "color": C_ACCENT_GREEN}),
-                "note": "O checksum vira parte do material protegido por AES-GCM.",
-            }
-        if kind == "keygen":
-            return {
-                "title": "ML-KEM GERA O PAR DE CHAVES LOCAL",
-                "left": ({"label": "RNG", "sub": "entropia", "color": C_ACCENT_CYAN}, {"label": "CPU", "sub": "lattice", "color": C_ACCENT_PURPLE}),
-                "op": ("KEYGEN", "ML-KEM"),
-                "right": ({"label": "pk", "sub": "pública", "color": C_ACCENT_PURPLE}, {"label": "sk", "sub": "local", "color": C_ACCENT_RED}),
-                "note": "Custo de CPU/RAM aparece aqui; o payload ainda não cresceu.",
-            }
-        if kind == "mlkem":
-            return {
-                "title": "ENCAPSULAMENTO ADICIONA O CIPHERTEXT ML-KEM",
-                "left": ({"label": "pk", "sub": "800 B", "color": C_ACCENT_PURPLE}, {"label": "RNG", "sub": "secreto", "color": C_ACCENT_CYAN}),
-                "op": ("ENCAP", "ss"),
-                "right": ({"label": "CT-KEM", "sub": f"+{mlkem} B", "color": C_ACCENT_PURPLE}, {"label": "ss", "sub": "32 B", "color": C_ACCENT_GREEN}),
-                "note": "ML-KEM cria segredo compartilhado; ele não cifra a mensagem.",
-            }
-        if kind == "decap":
-            return {
-                "title": "RECEPTOR RECUPERA O MESMO SEGREDO",
-                "left": ({"label": "CT-KEM", "sub": f"{mlkem} B", "color": C_ACCENT_PURPLE}, {"label": "sk", "sub": "local", "color": C_ACCENT_RED}),
-                "op": ("DECAP", "ss_rx"),
-                "right": ({"label": "ss_tx", "sub": "32 B", "color": C_ACCENT_GREEN}, {"label": "ss_rx", "sub": "match", "color": C_ACCENT_GREEN}),
-                "note": "Se o ciphertext PQC muda, o segredo recuperado pode divergir.",
-            }
-        if kind == "kdf":
-            return {
-                "title": "SEGREDO ML-KEM VIRA CHAVE AES-128",
-                "left": ({"label": "ss", "sub": "32 B", "color": C_ACCENT_GREEN}, {"label": "contexto", "sub": scenario, "color": C_TEXT_PRIMARY}),
-                "op": ("KDF", "HMAC"),
-                "right": ({"label": "AES-128", "sub": "16 B", "color": C_ACCENT_CYAN},),
-                "note": "A chave de sessão é derivada e o digest temporário é apagado.",
-            }
-        if kind == "rng":
-            return {
-                "title": "BASELINE CLÁSSICO GERA CHAVE EFÊMERA",
-                "left": ({"label": "RNG", "sub": "placa", "color": C_ACCENT_CYAN},),
-                "op": ("KEY", "AES"),
-                "right": ({"label": "AES-128", "sub": "16 B", "color": C_ACCENT_CYAN}, {"label": "NONCE", "sub": f"{nonce} B", "color": C_TEXT_PRIMARY}),
-                "note": "Sem troca assimétrica: é o caminho simétrico barato da comparação.",
-            }
-        if kind == "aead":
-            return {
-                "title": "AES-GCM CIFRA E AUTENTICA O MATERIAL PROTEGIDO",
-                "left": ({"label": "PLAIN", "sub": f"{protected} B", "color": C_ACCENT_BLUE}, {"label": "AESKEY", "sub": "128 bit", "color": C_ACCENT_CYAN}),
-                "op": ("AES-GCM", "cifra"),
-                "right": ({"label": "CIPHER", "sub": f"{protected} B", "color": C_ACCENT_BLUE}, {"label": "NONCE", "sub": f"+{nonce} B", "color": C_TEXT_PRIMARY}, {"label": "TAG", "sub": f"+{gcm} B", "color": C_ACCENT_ORANGE}),
-                "note": "A tag GCM autentica AAD, nonce e ciphertext na verificação.",
-            }
-        if kind == "verify":
-            return {
-                "title": "DECIFRAGEM SÓ LIBERA PLAINTEXT SE A TAG BATER",
-                "left": ({"label": "CIPHER", "sub": f"{protected} B", "color": C_ACCENT_BLUE}, {"label": "TAG", "sub": "GCM", "color": C_ACCENT_ORANGE}),
-                "op": ("AUTH", "DEC"),
-                "right": ({"label": "PLAIN", "sub": "ok", "color": C_ACCENT_GREEN}, {"label": "CRC", "sub": "ok" if checksum else "NA", "color": C_ACCENT_GREEN if checksum else C_TEXT_PRIMARY}),
-                "note": "Sem tag válida, a mensagem não deveria ser aceita.",
-            }
-        return {
-            "title": "RESULTADO DA MISSÃO",
-            "left": ({"label": "FLAGS", "sub": "key/aead/crc", "color": C_ACCENT_GREEN},),
-            "op": ("DECIDE", "OK"),
-            "right": ({"label": "DELIVERED", "sub": f"{total} B", "color": self._scenario_color(scenario)},),
-            "note": "Resumo final: tempo, bytes, heap e confirmações reais da placa.",
-        }
-
     # ===================================================================
     # Pixel-art scene engine (lúdico illustrations for the popups)
     # ===================================================================
-    def _pix_unit(self, stage):
-        """Pick a chunky pixel unit that keeps a ~10-row actor inside the stage."""
-        return max(4, min(7, (stage.height - 24) // 11))
-
     def _pix_stage(self, surface, rect, accent, t, theme="space"):
         """Draw a starlit backdrop and return the usable inner play area."""
         pygame.draw.rect(surface, (5, 8, 18), rect, border_radius=5)
@@ -4435,105 +3779,9 @@ class DashboardPanel:
         for off, col in ((0, (18, 40, 78)), (3, (26, 60, 110)), (6, (12, 26, 52))):
             pygame.draw.circle(surface, col, (cx, cy), radius - off, 1)
 
-    def _pix_blit_center(self, surface, rows, cx, cy, unit, accent,
-                         overrides=None, alpha=255, flip_x=False, bob=0):
-        w, h = sprite_size(rows, unit)
-        x = int(cx - w / 2)
-        y = int(cy - h / 2 + bob)
-        blit_sprite(surface, rows, x, y, unit, accent=accent,
-                    overrides=overrides, alpha=alpha, flip_x=flip_x)
-        return pygame.Rect(x, y, w, h)
-
     def _pix_tag(self, surface, cx, y, text, color, max_w=132):
         s = self._render_clipped(FONT_LABEL, text, color, max_w)
         surface.blit(s, (int(cx - s.get_width() / 2), int(y)))
-
-    def _pix_beam(self, surface, p1, p2, color, progress, t):
-        """An animated stream of data blocks travelling p1 -> p2."""
-        x1, y1 = p1
-        x2, y2 = p2
-        pygame.draw.line(surface, self._mix_color((16, 24, 46), color, 0.35), p1, p2, 2)
-        dx, dy = x2 - x1, y2 - y1
-        progress = max(0.0, min(1.0, progress))
-        for i in range(7):
-            f = (t * 0.45 + i / 7.0) % 1.0
-            if f > max(0.03, progress):
-                continue
-            bx = int(x1 + dx * f)
-            by = int(y1 + dy * f)
-            pygame.draw.rect(surface, color, (bx - 2, by - 2, 4, 4))
-        lx = int(x1 + dx * progress)
-        ly = int(y1 + dy * progress)
-        if progress > 0.02:
-            self._draw_soft_glow(surface, (lx, ly), 6, color, 70)
-            pygame.draw.rect(surface, C_TEXT_PRIMARY, (lx - 3, ly - 3, 6, 6))
-            pygame.draw.rect(surface, color, (lx - 3, ly - 3, 6, 6), 1)
-
-    def _pix_orb(self, surface, cx, cy, r, color, t, glitch=False):
-        """A glowing secret orb."""
-        cx, cy, r = int(cx), int(cy), int(r)
-        self._draw_soft_glow(surface, (cx, cy), r + 3, color, 80)
-        pygame.draw.circle(surface, (6, 10, 22), (cx, cy), r)
-        pygame.draw.circle(surface, color, (cx, cy), r, 2)
-        pygame.draw.circle(surface, self._mix_color((10, 16, 32), color, 0.55), (cx, cy), max(1, r - 3))
-        ang = t * 2.2
-        sx = cx + int((r - 3) * math.cos(ang))
-        sy = cy + int((r - 3) * math.sin(ang))
-        pygame.draw.rect(surface, C_TEXT_PRIMARY, (sx - 1, sy - 1, 2, 2))
-        if glitch:
-            for i in range(3):
-                yy = cy - r + 3 + i * r
-                pygame.draw.line(surface, C_ACCENT_RED,
-                                 (cx - r, yy + int(2 * math.sin(t * 9 + i))), (cx + r, yy), 1)
-
-    def _pix_packet(self, surface, cx, cy, w, h, accent, fill=1.0, sealed=False,
-                    glitch=False, t=0.0):
-        """A data packet drawn as a chunky envelope/box that can be sealed."""
-        rect = pygame.Rect(int(cx - w / 2), int(cy - h / 2), int(w), int(h))
-        pygame.draw.rect(surface, (8, 12, 26), rect, border_radius=3)
-        # data fill blocks
-        fill = max(0.0, min(1.0, fill))
-        cell = max(3, h // 4)
-        rows = max(1, (rect.height - 6) // cell)
-        cols = max(1, (rect.width - 6) // cell)
-        total = rows * cols
-        shown = int(total * fill)
-        for idx in range(shown):
-            r = idx // cols
-            c = idx % cols
-            bx = rect.x + 3 + c * cell
-            by = rect.y + 3 + r * cell
-            shade = self._mix_color((12, 18, 38), accent, 0.5 + 0.3 * ((idx % 3) / 2.0))
-            pygame.draw.rect(surface, shade, (bx, by, cell - 1, cell - 1))
-        pygame.draw.rect(surface, accent, rect, width=2, border_radius=3)
-        # envelope flap
-        pygame.draw.line(surface, accent, rect.topleft, (rect.centerx, rect.centery), 2)
-        pygame.draw.line(surface, accent, rect.topright, (rect.centerx, rect.centery), 2)
-        if sealed:
-            sr = max(4, h // 5)
-            pygame.draw.circle(surface, C_ACCENT_ORANGE, rect.center, sr)
-            pygame.draw.circle(surface, (120, 70, 0), rect.center, sr, 1)
-        if glitch:
-            for i in range(3):
-                yy = rect.y + 5 + i * (h // 3)
-                jitter = int(2 * math.sin(t * 11 + i * 1.7))
-                pygame.draw.line(surface, C_ACCENT_RED, (rect.x + 2, yy + jitter), (rect.right - 2, yy), 1)
-        return rect
-
-    def _pix_token(self, surface, cx, cy, text, color, t=0.0, pulse=False, w=None):
-        """A small glowing labelled chip (keys, nonce, AES, flags...)."""
-        pad = 6
-        tw = FONT_LABEL.size(text)[0]
-        box_w = w if w is not None else tw + pad * 2
-        box_h = 20
-        rect = pygame.Rect(int(cx - box_w / 2), int(cy - box_h / 2), int(box_w), box_h)
-        glow_a = 70 if pulse else 36
-        self._draw_soft_glow(surface, rect.center, 10, color, int(glow_a * (0.7 + 0.3 * math.sin(t * 4)) if pulse else glow_a))
-        pygame.draw.rect(surface, (9, 14, 30), rect, border_radius=4)
-        pygame.draw.rect(surface, color, rect, width=1, border_radius=4)
-        s = self._render_clipped(FONT_LABEL, text, C_TEXT_PRIMARY, box_w - 6)
-        surface.blit(s, (rect.centerx - s.get_width() // 2, rect.centery - s.get_height() // 2))
-        return rect
 
     def _pix_bits(self, surface, cx, cy, value, flip_mask, color, u=None):
         """Eight chunky bit cells centred at (cx, cy); flipped bit glows red."""
@@ -4555,83 +3803,170 @@ class DashboardPanel:
             surface.blit(txt, (bx + (cell - txt.get_width()) // 2, y0 + (cell - txt.get_height()) // 2))
         return pygame.Rect(x0, y0, total_w, cell)
 
-    def _pix_check(self, surface, cx, cy, s, color):
-        cx, cy = int(cx), int(cy)
-        pygame.draw.line(surface, color, (cx - s, cy), (cx - s // 3, cy + s), max(2, s // 3))
-        pygame.draw.line(surface, color, (cx - s // 3, cy + s), (cx + s, cy - s), max(2, s // 3))
+    # ---- Technical schematic primitives -----------------------------------
+    # ---- Technical layer ---------------------------------------------------
+    # ---- Clean didactic step diagram --------------------------------------
+    def _clean_node(self, surface, rect, node, base_color, emphasis, progress, t):
+        nc = node.get("color", base_color)
+        if emphasis:
+            self._draw_soft_glow(surface, rect.center, max(10, rect.height // 3), nc, 20)
+        pygame.draw.rect(surface, (10, 16, 32), rect, border_radius=6)
+        pygame.draw.rect(surface, nc, rect, 2 if emphasis else 1, border_radius=6)
+        title = str(node.get("title", ""))
+        sub = str(node.get("sub", ""))
+        tfont = FONT_SMALL if emphasis else FONT_LABEL
+        ts = self._render_clipped(tfont, title, nc if emphasis else C_TEXT_PRIMARY, rect.width - 8)
+        block_h = ts.get_height() + (15 if sub else 0)
+        ty = rect.centery - block_h // 2
+        surface.blit(ts, (rect.centerx - ts.get_width() // 2, ty))
+        if sub:
+            ss = self._render_clipped(FONT_LABEL, sub, C_TEXT_DIM, rect.width - 8)
+            surface.blit(ss, (rect.centerx - ss.get_width() // 2, ty + ts.get_height() + 3))
+        if emphasis:
+            bar = pygame.Rect(rect.x + 6, rect.bottom - 6, rect.width - 12, 3)
+            pygame.draw.rect(surface, (22, 30, 52), bar)
+            pygame.draw.rect(surface, nc, (bar.x, bar.y, int(bar.width * max(0.0, min(1.0, progress))), bar.height))
 
-    def _pix_cross(self, surface, cx, cy, s, color):
-        cx, cy = int(cx), int(cy)
-        pygame.draw.line(surface, color, (cx - s, cy - s), (cx + s, cy + s), max(2, s // 3))
-        pygame.draw.line(surface, color, (cx - s, cy + s), (cx + s, cy - s), max(2, s // 3))
+    def _clean_arrow_h(self, surface, x1, x2, y, color, progress):
+        if x2 <= x1:
+            return
+        pygame.draw.line(surface, self._mix_color((26, 34, 58), color, 0.4), (x1, y), (x2, y), 2)
+        px = int(x1 + (x2 - x1) * max(0.06, min(1.0, progress)))
+        pygame.draw.line(surface, color, (x1, y), (px, y), 3)
+        pygame.draw.polygon(surface, color, [(x2, y), (x2 - 7, y - 5), (x2 - 7, y + 5)])
+        pygame.draw.circle(surface, C_TEXT_PRIMARY, (px, y), 3)
 
-    def _pix_bolt(self, surface, p1, p2, color, t, jag=5):
-        """A jagged cosmic-ray bolt from p1 to p2."""
-        x1, y1 = p1
-        x2, y2 = p2
-        pts = [(x1, y1)]
-        for i in range(1, jag):
-            f = i / jag
-            mx = x1 + (x2 - x1) * f
-            my = y1 + (y2 - y1) * f
-            off = (1 if i % 2 else -1) * (6 + 4 * math.sin(t * 14 + i))
-            pts.append((mx + off, my))
-        pts.append((x2, y2))
-        pygame.draw.lines(surface, color, False, pts, 3)
-        pygame.draw.lines(surface, C_TEXT_PRIMARY, False, pts, 1)
+    def _draw_clean_flow(self, surface, area, nodes, color, progress, t):
+        n = len(nodes)
+        if n == 0:
+            return
+        if n == 1:
+            w = min(area.width, 260)
+            h = min(area.height - 8, 90)
+            r = pygame.Rect(area.centerx - w // 2, area.centery - h // 2, w, h)
+            self._clean_node(surface, r, nodes[0], color, True, progress, t)
+            return
+        gap = 30 if area.width >= 360 else 18
+        node_w = (area.width - gap * (n - 1)) // n
+        node_h = min(86, area.height - 6)
+        y = area.centery - node_h // 2
+        rects = []
+        mid = n // 2
+        for i, nd in enumerate(nodes):
+            r = pygame.Rect(area.x + i * (node_w + gap), y, node_w, node_h)
+            self._clean_node(surface, r, nd, self._mix_color(C_PANEL_BORDER, color, 0.6), i == mid, progress, t)
+            rects.append(r)
+        for i in range(n - 1):
+            self._clean_arrow_h(surface, rects[i].right + 3, rects[i + 1].left - 3, area.centery, color, progress)
 
-    def _pix_spark(self, surface, cx, cy, color, progress, t):
-        cx, cy = int(cx), int(cy)
-        n = 8
-        radius = 6 + int(18 * progress)
-        for i in range(n):
-            ang = (i / n) * math.tau + t * 3
-            ex = cx + int(radius * math.cos(ang))
-            ey = cy + int(radius * math.sin(ang))
-            pygame.draw.line(surface, color, (cx, cy), (ex, ey), 2)
-            pygame.draw.rect(surface, (255, 226, 120), (ex - 1, ey - 1, 3, 3))
+    def _clean_bits(self, surface, area, spec, color, progress, t):
+        before, after, mask = spec["before"], spec["after"], spec["mask"]
+        show = after if progress > 0.5 else before
+        live_mask = mask if progress > 0.5 else 0
+        bits = self._pix_bits(surface, area.centerx, area.centery - 2, show, live_mask,
+                              C_ACCENT_CYAN if progress <= 0.5 else C_ACCENT_RED, u=22)
+        top = ("ANTES  byte[%s]" % spec.get("byte_index", "--")) if progress <= 0.5 else "DEPOIS  bit invertido"
+        self._pix_tag(surface, area.centerx, bits.y - 19, top, C_ACCENT_CYAN if progress <= 0.5 else C_ACCENT_RED, area.width)
+        if progress <= 0.5:
+            bottom = "valor 0x%02X" % (before & 0xFF)
+        else:
+            bottom = "0x%02X  XOR  0x%02X  =  0x%02X" % (before & 0xFF, mask & 0xFF, after & 0xFF)
+        self._pix_tag(surface, area.centerx, bits.bottom + 9, bottom, C_TEXT_PRIMARY, area.width)
 
-    def _pix_machine(self, surface, cx, cy, w, h, accent, label, t, progress, icon=None):
-        """A chunky processing machine box with a working indicator and gears."""
-        rect = pygame.Rect(int(cx - w / 2), int(cy - h / 2), int(w), int(h))
-        self._draw_soft_glow(surface, rect.center, 12, accent, 26)
-        pygame.draw.rect(surface, (10, 16, 32), rect, border_radius=5)
-        pygame.draw.rect(surface, accent, rect, width=2, border_radius=5)
-        # top status lights
-        for i in range(3):
-            on = (int(t * 4 + i) % 3) == 0
-            lc = accent if on else self._mix_color((20, 28, 50), accent, 0.3)
-            pygame.draw.rect(surface, lc, (rect.x + 6 + i * 8, rect.y + 5, 5, 5))
-        # working bar
-        bar = pygame.Rect(rect.x + 6, rect.bottom - 9, rect.width - 12, 4)
-        pygame.draw.rect(surface, (16, 22, 42), bar)
-        pygame.draw.rect(surface, accent, (bar.x, bar.y, int(bar.width * progress), bar.height))
-        if icon:
-            icon(surface, rect)
-        if label:
-            self._pix_tag(surface, rect.centerx, rect.y - 15, label, accent, rect.width + 30)
-        return rect
+    def _draw_clean_step(self, surface, rect, spec, color, progress, t):
+        self._draw_transform_shell(surface, rect, spec["title"], color)
+        stage_rect = pygame.Rect(rect.x + 9, rect.y + 31, rect.width - 18, rect.height - 31 - 40)
+        stage = self._pix_stage(surface, stage_rect, color, t, spec.get("theme", "lab"))
+        if spec.get("special") == "bits" and spec.get("before") is not None:
+            self._clean_bits(surface, stage, spec, color, progress, t)
+        else:
+            self._draw_clean_flow(surface, stage, spec["nodes"], color, progress, t)
+        self._draw_wrapped_text(surface, FONT_LABEL, spec["theory"], (214, 226, 250),
+                                rect.x + 11, stage_rect.bottom + 7, rect.width - 22,
+                                line_spacing=15, max_lines=2)
 
-    def _pix_dish(self, surface, cx, cy, u, color, t):
-        return self._pix_blit_center(surface, PIX_DISH, cx, cy, u, color, bob=int(math.sin(t * 2) * 1))
-
-    def _pix_robot(self, surface, cx, cy, u, color, t, mood="happy"):
-        rows = {"happy": PIX_ROBOT, "work": PIX_ROBOT_WORK, "worry": PIX_ROBOT_WORRY}.get(mood, PIX_ROBOT)
-        return self._pix_blit_center(surface, rows, cx, cy, u, color, bob=int(math.sin(t * 2.4) * 2))
+    def _mission_scene_spec(self, kind, ctx):
+        g, p, o, c, b = C_ACCENT_GREEN, C_ACCENT_PURPLE, C_ACCENT_ORANGE, C_ACCENT_CYAN, C_ACCENT_BLUE
+        specs = {
+            "payload": {
+                "title": "COLETA E SERIALIZACAO DO PAYLOAD", "theme": "space",
+                "nodes": [{"title": "Sensores", "sub": "/ mensagem"},
+                          {"title": "SERIALIZAR", "sub": "buffer TLV"},
+                          {"title": "PAYLOAD", "sub": f"{ctx['payload']} B", "color": b}],
+                "theory": "O payload e montado em texto claro (TLV ASCII). Ainda nao ha cifra, MAC nem checksum.",
+            },
+            "crc": {
+                "title": "INTEGRIDADE COM CRC-32",
+                "nodes": [{"title": "PAYLOAD", "sub": f"{ctx['payload']} B"},
+                          {"title": "CRC-32", "sub": "poly 0xEDB88320"},
+                          {"title": "+ CRC", "sub": f"{ctx['checksum']} B", "color": g}],
+                "theory": "O CRC-32 detecta corrupcao acidental (ate 1 bit), mas nao autentica contra um atacante.",
+            },
+            "keygen": {
+                "title": "GERACAO DO PAR DE CHAVES ML-KEM",
+                "nodes": [{"title": "seed + ruido", "sub": "amostras"},
+                          {"title": "KEYGEN", "sub": "t = A.s + e"},
+                          {"title": "pk / sk", "sub": "800B / 1632B", "color": p}],
+                "theory": "Par ML-KEM-512 baseado em reticulados (MLWE). Custa CPU e RAM; o pacote ainda nao cresce.",
+            },
+            "mlkem": {
+                "title": "ENCAPSULAMENTO ML-KEM",
+                "nodes": [{"title": "pk + aleatorio", "sub": "m, r"},
+                          {"title": "ENCAPS", "sub": "ML-KEM"},
+                          {"title": "ct + segredo", "sub": f"{ctx['mlkem']}B + 32B", "color": p}],
+                "theory": "Encapsula um segredo: gera o ciphertext ML-KEM e a chave K. O segredo em si nunca trafega.",
+            },
+            "decap": {
+                "title": "RECUPERACAO DO MESMO SEGREDO",
+                "nodes": [{"title": "ct + sk", "sub": f"{ctx['mlkem']} B"},
+                          {"title": "DECAPS", "sub": "+ confere (FO)"},
+                          {"title": "SEGREDO", "sub": "identico", "color": g}],
+                "theory": "O receptor recupera o segredo e re-encapsula para conferir (Fujisaki-Okamoto): so aceita se bater.",
+            },
+            "kdf": {
+                "title": "DERIVACAO DA CHAVE AES",
+                "nodes": [{"title": "SEGREDO", "sub": "32 B"},
+                          {"title": "SHA-256", "sub": "KDF"},
+                          {"title": "CHAVE", "sub": "AES-128", "color": c}],
+                "theory": "O segredo ML-KEM deriva uma chave AES-128 de sessao. Quem cifra a mensagem e o AES-GCM.",
+            },
+            "rng": {
+                "title": "CHAVE EFEMERA (BASELINE CLASSICO)",
+                "nodes": [{"title": "ENTROPIA", "sub": "TRNG"},
+                          {"title": "DRBG", "sub": "CSPRNG"},
+                          {"title": "CHAVE + NONCE", "sub": "128b + 96b", "color": c}],
+                "theory": "Baseline classico: chave AES-128 efemera e nonce, gerados por hardware e unicos por mensagem.",
+            },
+            "aead": {
+                "title": "CIFRA AUTENTICADA AES-GCM",
+                "nodes": [{"title": "PAYLOAD + chave", "sub": "claro"},
+                          {"title": "AES-GCM", "sub": "cifra + tag"},
+                          {"title": "CIPHERTEXT", "sub": f"+ tag {ctx['gcm']}B", "color": o}],
+                "theory": "AES-GCM cifra (modo CTR) e autentica (GHASH) numa passada. O nonce nao pode repetir com a chave.",
+            },
+            "verify": {
+                "title": "VERIFICACAO NO RECEPTOR",
+                "nodes": [{"title": "CIPHERTEXT", "sub": "+ tag"},
+                          {"title": "AES-GCM", "sub": "confere a tag"},
+                          {"title": "PAYLOAD", "sub": "liberado", "color": g}],
+                "theory": "So libera o texto se a tag GCM conferir (comparacao em tempo constante). Com CRC, checa corrupcao.",
+            },
+        }
+        return specs.get(kind, {
+            "title": "RESULTADO DA MISSAO", "theme": "space",
+            "nodes": [{"title": "PACOTE", "sub": f"{ctx['total']} B"},
+                      {"title": "DOWNLINK", "sub": "SAT -> solo"},
+                      {"title": "ENTREGUE", "sub": ctx["result"] or "OK", "color": g}],
+            "theory": "Pacote final = payload + ML-KEM + nonce + tag (+ CRC). Tempos e tamanhos medidos na placa Wisdom.",
+        })
 
     # ---- Mission scene painters -------------------------------------------
     def _draw_mission_transformation_panel(self, surface, rect, scenario, mission, step, local_progress, t):
-        scene = self._mission_visual_scene(scenario, mission, step)
         kind = str(step.get("kind", "")).lower()
         color = step.get("color", self._scenario_color(scenario))
-        self._draw_transform_shell(surface, rect, scene["title"], color)
-        progress = max(0.0, min(1.0, local_progress))
-        live = str(mission.get("payload_mode", "")).upper() == "LIVE"
-        theme = "space" if kind in {"payload", "send"} else "lab"
-        stage = self._pix_stage(surface, pygame.Rect(rect.x + 9, rect.y + 31, rect.width - 18, rect.height - 58), color, t, theme)
-
         ctx = {
-            "scenario": scenario, "mission": mission, "live": live,
+            "scenario": scenario, "mission": mission,
+            "live": str(mission.get("payload_mode", "")).upper() == "LIVE",
             "payload": self._mission_int(mission, "bytes_payload"),
             "mlkem": self._mission_int(mission, "bytes_mlkem"),
             "checksum": self._mission_int(mission, "bytes_checksum"),
@@ -4640,276 +3975,80 @@ class DashboardPanel:
             "gcm": self._mission_int(mission, "bytes_gcm_tag", self._mission_int(mission, "gcm_tag_bytes")),
             "result": str(mission.get("result", "")),
         }
-        painters = {
-            "payload": self._scene_payload, "crc": self._scene_crc,
-            "keygen": self._scene_keygen, "mlkem": self._scene_encap,
-            "decap": self._scene_decap, "kdf": self._scene_kdf,
-            "rng": self._scene_rng, "aead": self._scene_aead,
-            "verify": self._scene_verify,
-        }
-        painter = painters.get(kind, self._scene_result)
-        painter(surface, stage, color, progress, t, ctx)
+        spec = self._mission_scene_spec(kind, ctx)
+        self._draw_clean_step(surface, rect, spec, color, max(0.0, min(1.0, local_progress)), t)
 
-        surface.blit(self._render_clipped(FONT_LABEL, scene["note"], (232, 238, 255), rect.width - 18),
-                     (rect.x + 9, rect.bottom - 24))
-
-    def _scene_payload(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery - 4
-        rob = self._pix_robot(surface, stage.x + 42, midy, self._pix_unit(stage), C_ACCENT_CYAN, t, "work")
-        self._pix_tag(surface, rob.centerx, rob.bottom + 2, "SAT", C_ACCENT_CYAN)
-        # sensors / message tokens streaming into the packet
-        if ctx["live"]:
-            sources = (("TEMP", C_ACCENT_CYAN), ("ACCEL", C_ACCENT_PURPLE), ("POT", C_ACCENT_ORANGE))
-        else:
-            sources = (("ASCII", C_ACCENT_BLUE), ("MSG", C_ACCENT_CYAN), ("SEQ", C_ACCENT_PURPLE))
-        pcx = stage.right - 70
-        for i, (label, c) in enumerate(sources):
-            appear = max(0.0, min(1.0, progress * 3 - i))
-            if appear <= 0:
-                continue
-            sx = stage.x + 96 + i * 8
-            sy = stage.y + 14 + i * ((stage.height - 36) // 2)
-            travel = appear
-            tx = int(sx + (pcx - sx) * travel)
-            ty = int(sy + (midy - sy) * travel)
-            self._pix_token(surface, tx, ty, label, c, t, pulse=True)
-        self._pix_beam(surface, (rob.right + 4, midy), (pcx - 26, midy), color, progress, t)
-        self._pix_packet(surface, pcx, midy, 56, 44, C_ACCENT_BLUE, fill=progress, t=t)
-        self._pix_tag(surface, pcx, midy + 28, f"PAYLOAD {ctx['payload']}B", C_ACCENT_BLUE)
-
-    def _scene_crc(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery + 2
-        pcx = stage.centerx
-        # packet below, guardian shield stamping the CRC seal on top
-        self._pix_packet(surface, pcx, midy + 6, 70, 44, C_ACCENT_BLUE, fill=1.0, t=t)
-        self._pix_tag(surface, pcx, midy + 32, f"PAYLOAD {ctx['payload']}B", C_ACCENT_BLUE)
-        u = self._pix_unit(stage)
-        drop = int((1 - progress) * 26)
-        sh = self._pix_blit_center(surface, PIX_SHIELD, pcx, stage.y + 26 - drop, u, C_ACCENT_GREEN)
-        self._pix_tag(surface, stage.x + 48, midy - 6, "GUARDIÃO", C_ACCENT_GREEN, 110)
-        if progress > 0.6:
-            seal = self._pix_token(surface, pcx + 30, midy - 8, f"CRC +{ctx['checksum']}B", C_ACCENT_GREEN, t, pulse=True)
-            self._pix_check(surface, seal.right + 10, seal.centery, 5, C_ACCENT_GREEN)
-
-    def _scene_keygen(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery - 2
-        u = self._pix_unit(stage)
-        self._pix_robot(surface, stage.x + 40, midy, u, C_ACCENT_PURPLE, t, "work")
-        self._pix_tag(surface, stage.x + 40, midy + 34, "SAT", C_ACCENT_PURPLE)
-        # lattice forge: crystals grow in a grid
-        forge = pygame.Rect(stage.centerx - 56, midy - 30, 96, 60)
-        for gy in range(3):
-            for gx in range(4):
-                idx = gy * 4 + gx
-                grown = progress * 12 - idx
-                if grown <= 0:
-                    pygame.draw.rect(surface, (20, 16, 38), (forge.x + 6 + gx * 22, forge.y + 6 + gy * 18, 4, 4))
-                    continue
-                cxp = forge.x + 8 + gx * 22
-                cyp = forge.y + 10 + gy * 18
-                jit = int(math.sin(t * 3 + idx) * 1.5)
-                pygame.draw.polygon(surface, C_ACCENT_PURPLE, [
-                    (cxp, cyp - 5 + jit), (cxp + 5, cyp), (cxp, cyp + 5 + jit), (cxp - 5, cyp)], 0 if grown > 0.5 else 1)
-        # outputs: pk crystal + sk key
-        if progress > 0.55:
-            pk = self._pix_blit_center(surface, PIX_CRYSTAL, stage.right - 48, midy - 16, max(3, u - 1), C_ACCENT_PURPLE)
-            self._pix_tag(surface, pk.centerx, pk.bottom, "pk pública", C_ACCENT_PURPLE)
-        if progress > 0.75:
-            sk = self._pix_blit_center(surface, PIX_KEY, stage.right - 48, midy + 22, max(3, u - 1), C_ACCENT_RED)
-            self._pix_tag(surface, sk.centerx, sk.bottom + 1, "sk local", C_ACCENT_RED)
-
-    def _scene_encap(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery - 2
-        u = self._pix_unit(stage)
-        # left: public key crystal + plaintext secret orb
-        self._pix_blit_center(surface, PIX_CRYSTAL, stage.x + 40, midy - 10, max(3, u - 1), C_ACCENT_PURPLE)
-        self._pix_tag(surface, stage.x + 40, midy + 16, "pk 800B", C_ACCENT_PURPLE)
-        # machine sealing the secret into a capsule
-        self._pix_machine(surface, stage.centerx, midy, 70, 50, C_ACCENT_PURPLE, "ENCAP", t, progress)
-        # the secret orb being captured
-        orbx = int(stage.x + 70 + (stage.centerx - 70) * min(1.0, progress * 1.4))
-        self._pix_orb(surface, orbx, midy, 7, C_ACCENT_GREEN, t)
-        self._pix_beam(surface, (stage.centerx + 36, midy), (stage.right - 70, midy), C_ACCENT_PURPLE, progress, t)
-        if progress > 0.5:
-            ct = self._pix_blit_center(surface, PIX_CRYSTAL, stage.right - 52, midy - 12, max(3, u - 1), C_ACCENT_PURPLE)
-            self._pix_tag(surface, ct.centerx, ct.bottom, f"CT-KEM +{ctx['mlkem']}B", C_ACCENT_PURPLE)
-        if progress > 0.75:
-            self._pix_orb(surface, stage.right - 52, midy + 26, 6, C_ACCENT_GREEN, t)
-            self._pix_tag(surface, stage.right - 52, midy + 34, "ss 32B", C_ACCENT_GREEN)
-
-    def _scene_decap(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery - 2
-        u = self._pix_unit(stage)
-        # incoming ciphertext crystal on the left
-        self._pix_blit_center(surface, PIX_CRYSTAL, stage.x + 40, midy - 8, max(3, u - 1), C_ACCENT_PURPLE)
-        self._pix_tag(surface, stage.x + 40, midy + 18, "CT-KEM", C_ACCENT_PURPLE)
-        # ground receiver opening the capsule with its private key
-        lock_rows = PIX_LOCK_OPEN if progress > 0.55 else PIX_LOCK_CLOSED
-        self._pix_blit_center(surface, lock_rows, stage.centerx, midy, u, C_ACCENT_PURPLE if progress <= 0.55 else C_ACCENT_GREEN)
-        self._pix_blit_center(surface, PIX_KEY, stage.centerx - 26, midy + 22, max(3, u - 2), C_ACCENT_RED)
-        self._pix_dish(surface, stage.right - 44, midy - 2, max(4, u - 1), C_ACCENT_GREEN, t)
-        self._pix_tag(surface, stage.right - 44, midy + 30, "SOLO", C_ACCENT_GREEN)
-        if progress > 0.65:
-            self._pix_orb(surface, stage.centerx, midy - 2, 7, C_ACCENT_GREEN, t)
-            self._pix_check(surface, stage.centerx + 22, midy - 4, 5, C_ACCENT_GREEN)
-            self._pix_tag(surface, stage.centerx, midy + 26, "ss = match", C_ACCENT_GREEN)
-
-    def _scene_kdf(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery - 2
-        self._pix_orb(surface, stage.x + 46, midy, 9, C_ACCENT_GREEN, t)
-        self._pix_tag(surface, stage.x + 46, midy + 16, "ss 32B", C_ACCENT_GREEN)
-        self._pix_machine(surface, stage.centerx, midy, 76, 52, C_ACCENT_CYAN, "KDF / HMAC", t, progress)
-        self._pix_beam(surface, (stage.x + 60, midy), (stage.centerx - 40, midy), C_ACCENT_GREEN, progress, t)
-        self._pix_beam(surface, (stage.centerx + 40, midy), (stage.right - 64, midy), C_ACCENT_CYAN, progress, t)
-        if progress > 0.5:
-            k = self._pix_blit_center(surface, PIX_KEY, stage.right - 48, midy, max(3, self._pix_unit(stage) - 1), C_ACCENT_CYAN)
-            self._pix_tag(surface, k.centerx, k.bottom + 2, "AES-128", C_ACCENT_CYAN)
-
-    def _scene_rng(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery - 2
-        # an RNG dice machine spitting out random bits
-        self._pix_machine(surface, stage.centerx - 40, midy, 64, 54, C_ACCENT_CYAN, "RNG", t, progress,
-                          icon=lambda s, r: self._pix_dice(s, r.centerx, r.centery + 2, t))
-        for i in range(6):
-            f = (t * 0.5 + i / 6.0) % 1.0
-            if f > progress:
-                continue
-            bx = int(stage.centerx - 8 + (stage.right - 60 - stage.centerx) * f)
-            by = int(midy - 14 + 28 * ((i % 3) / 2.0))
-            txt = FONT_LABEL.render("01"[i % 2], True, C_ACCENT_CYAN)
-            surface.blit(txt, (bx, by))
-        if progress > 0.5:
-            k = self._pix_blit_center(surface, PIX_KEY, stage.right - 52, midy - 12, max(3, self._pix_unit(stage) - 1), C_ACCENT_CYAN)
-            self._pix_tag(surface, k.centerx, k.bottom, "AES-128", C_ACCENT_CYAN)
-            self._pix_token(surface, stage.right - 52, midy + 24, f"NONCE {ctx['nonce']}B", C_TEXT_DIM, t)
-
-    def _scene_aead(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery - 2
-        u = self._pix_unit(stage)
-        # left: readable plaintext blocks
-        for i in range(3):
-            bx = stage.x + 24 + i * 16
-            txt = FONT_SMALL.render("ABC"[i], True, C_ACCENT_BLUE)
-            pygame.draw.rect(surface, (10, 16, 34), (bx - 2, midy - 18, 14, 14))
-            pygame.draw.rect(surface, C_ACCENT_BLUE, (bx - 2, midy - 18, 14, 14), 1)
-            surface.blit(txt, (bx + 1, midy - 18))
-        self._pix_tag(surface, stage.x + 44, midy + 4, "PLAIN", C_ACCENT_BLUE, 90)
-        self._pix_blit_center(surface, PIX_KEY, stage.x + 44, midy + 22, max(3, u - 2), C_ACCENT_CYAN)
-        # center: padlock closing as it encrypts
-        lock_rows = PIX_LOCK_CLOSED if progress > 0.5 else PIX_LOCK_OPEN
-        self._pix_blit_center(surface, lock_rows, stage.centerx, midy, u, C_ACCENT_ORANGE)
-        self._pix_tag(surface, stage.centerx, midy + 30, "AES-GCM", C_ACCENT_ORANGE)
-        # right: scrambled cipher + tag seal
-        if progress > 0.45:
-            hexes = ("7A", "C3", "9F")
-            for i, hx in enumerate(hexes):
-                bx = stage.right - 78 + i * 18
-                pygame.draw.rect(surface, (10, 16, 34), (bx, midy - 18, 16, 14))
-                pygame.draw.rect(surface, C_ACCENT_ORANGE, (bx, midy - 18, 16, 14), 1)
-                surface.blit(FONT_LABEL.render(hx, True, C_ACCENT_ORANGE), (bx + 1, midy - 17))
-            self._pix_tag(surface, stage.right - 52, midy + 2, "CIPHER", C_ACCENT_ORANGE, 90)
-        if progress > 0.7:
-            tag = self._pix_token(surface, stage.right - 52, midy + 24, f"TAG +{ctx['gcm']}B", C_ACCENT_ORANGE, t, pulse=True)
-
-    def _scene_verify(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery - 2
-        u = self._pix_unit(stage)
-        has_crc = ctx["checksum"] > 0
-        # cipher + tag arrive at the ground station
-        self._pix_token(surface, stage.x + 46, midy - 10, "CIPHER", C_ACCENT_ORANGE, t)
-        self._pix_token(surface, stage.x + 46, midy + 16, "TAG", C_ACCENT_ORANGE, t)
-        valid = progress > 0.5
-        lock_rows = PIX_LOCK_OPEN if valid else PIX_LOCK_CLOSED
-        self._pix_blit_center(surface, lock_rows, stage.centerx, midy, u, C_ACCENT_GREEN if valid else C_ACCENT_ORANGE)
-        self._pix_dish(surface, stage.right - 44, midy - 4, max(4, u - 1), C_ACCENT_GREEN, t)
-        self._pix_tag(surface, stage.right - 44, midy + 28, "SOLO", C_ACCENT_GREEN)
-        if valid:
-            self._pix_token(surface, stage.centerx, midy + 30, "PLAIN ok", C_ACCENT_GREEN, t, pulse=True)
-            self._pix_check(surface, stage.centerx + 30, midy - 18, 6, C_ACCENT_GREEN)
-            if has_crc:
-                self._pix_check(surface, stage.centerx + 30, midy + 2, 5, C_ACCENT_GREEN)
-                self._pix_tag(surface, stage.centerx + 46, midy + 2, "CRC", C_ACCENT_GREEN, 40)
-
-    def _scene_result(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery - 2
-        u = self._pix_unit(stage)
-        sat = self._pix_robot(surface, stage.x + 40, midy, u, C_ACCENT_CYAN, t, "happy")
-        self._pix_tag(surface, sat.centerx, sat.bottom + 1, "SAT", C_ACCENT_CYAN)
-        dish = self._pix_dish(surface, stage.right - 42, midy, u, color, t)
-        self._pix_tag(surface, dish.centerx, dish.bottom, "SOLO", color)
-        self._pix_beam(surface, (sat.right + 6, midy), (dish.left - 6, midy), color, progress, t)
-        # packet riding the beam
-        px = int(sat.right + 10 + (dish.left - 16 - sat.right) * progress)
-        self._pix_packet(surface, px, midy, 30, 24, color, fill=1.0, sealed=True, t=t)
-        delivered = ctx["result"] in {"DELIVERED", ""}
-        if progress > 0.9:
-            mark_color = C_ACCENT_GREEN if delivered else C_ACCENT_RED
-            self._pix_token(surface, stage.centerx, stage.bottom - 12,
-                            f"ENTREGUE {ctx['total']}B" if delivered else f"{ctx['result']}",
-                            mark_color, t, pulse=True)
-
-    def _pix_dice(self, surface, cx, cy, t):
-        cx, cy = int(cx), int(cy)
-        r = pygame.Rect(cx - 11, cy - 11, 22, 22)
-        pygame.draw.rect(surface, (14, 20, 40), r, border_radius=4)
-        pygame.draw.rect(surface, C_ACCENT_CYAN, r, 2, border_radius=4)
-        face = int(t * 3) % 3
-        pips = ([(0, 0)], [(-5, -5), (5, 5)], [(-5, -5), (0, 0), (5, 5)])[face]
-        for dx, dy in pips:
-            pygame.draw.rect(surface, C_TEXT_PRIMARY, (cx + dx - 2, cy + dy - 2, 4, 4))
-
-    def _draw_bit_strip(self, surface, x, y, width, label, byte_value, mask, color):
-        label_w = 52 if width < 210 else 60
-        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, label_w - 4), (x, y + 5))
-        bit_gap = 3
-        bit_size = min(22, max(10, (width - label_w - bit_gap * 7) // 8))
-        start_x = x + label_w
-        for bit_index in range(8):
-            bit_mask = 1 << (7 - bit_index)
-            changed = bool(mask and (mask & bit_mask))
-            bit = (byte_value >> (7 - bit_index)) & 1
-            bx = start_x + bit_index * (bit_size + bit_gap)
-            fill = (72, 18, 34) if changed else (10, 16, 34)
-            border = C_ACCENT_RED if changed else color
-            pygame.draw.rect(surface, fill, (bx, y, bit_size, bit_size), border_radius=4)
-            pygame.draw.rect(surface, border, (bx, y, bit_size, bit_size), width=2 if changed else 1, border_radius=4)
-            txt = FONT_LABEL.render(str(bit), True, C_TEXT_PRIMARY if not changed else C_ACCENT_RED)
-            surface.blit(txt, (bx + (bit_size - txt.get_width()) // 2, y + (bit_size - txt.get_height()) // 2))
-
-    def _fault_visual_scene(self, fault, step):
-        label = str(step.get("label", "")).upper()
-        result = str(fault.get("result", ""))
-        guard = str(fault.get("guard", "NONE")).upper()
+    def _fault_scene_spec(self, label, ctx):
+        g, p, o, r, d, b = (C_ACCENT_GREEN, C_ACCENT_PURPLE, C_ACCENT_ORANGE,
+                            C_ACCENT_RED, C_TEXT_DIM, C_ACCENT_BLUE)
+        is_ct = ctx["target"] == "CIPHERTEXT"
+        if label in {"PAYLOAD", "CIPHERTEXT"}:
+            return {"title": "MATERIAL INTEGRO (ANTES DA FALHA)", "theme": "space",
+                    "nodes": [{"title": "CIPHERTEXT integro" if is_ct else "PAYLOAD integro",
+                               "sub": "768 B" if is_ct else "referencia salva", "color": g}],
+                    "theory": "Estado integro antes da falha. O CRC (ou o segredo de referencia) e calculado agora."}
         if label == "BIT-FLIP":
-            return "INVERSÃO DE UM ÚNICO BIT", "XOR", str(fault.get("bit_mask", "--")), "Um bit muda; todo o comportamento seguinte depende da proteção disponível."
-        if label == "SEM CRC":
-            return "NÃO HÁ GUARDIÃO DE INTEGRIDADE", "SEM", "CRC", "Sem checksum salvo, o receptor não tem referência simples para comparar."
-        if label == "ENTREGA":
-            return "CORRUPÇÃO PASSA COMO SE FOSSE VÁLIDA", "SILENT", "FAIL", "Falha silenciosa é perigosa porque parece entrega normal."
-        if label == "CRC32":
-            return "CHECKSUM SERVE COMO REFERÊNCIA", "CRC32", "tx", "O CRC guardado antes da falha será comparado com o CRC recalculado."
-        if label == "VERIFICA":
-            return "COMPARAÇÃO REVELA A CORRUPÇÃO", "CHECK", "crc", "Single-bit flip da demo muda o CRC e bloqueia aceitação íntegra."
-        if label == "DECAP":
-            return "CIPHERTEXT PQC CORROMPIDO AFETA O SEGREDO", "DECAP", "ss", "A decapsulação tenta recuperar segredo a partir de material alterado."
-        if label == "CONFIRMA":
-            return "CONFIRMAÇÃO AUTENTICADA REJEITA DIVERGÊNCIA", "HMAC", "tag", "Se os segredos divergem, a confirmação de chave falha."
+            if ctx["before"] is not None and ctx["after"] is not None:
+                return {"title": "INVERSAO DE UM UNICO BIT", "theme": "space", "special": "bits",
+                        "before": ctx["before"], "after": ctx["after"], "mask": ctx["mask"],
+                        "byte_index": ctx["byte_index"],
+                        "theory": "Um unico bit invertido (XOR com a mascara): o modelo de falha por radiacao (SEU)."}
+            return {"title": "INVERSAO DE UM BIT NO CIPHERTEXT", "theme": "space",
+                    "nodes": [{"title": "ct (CRC)", "sub": ctx["crc_before"]},
+                              {"title": "BIT-FLIP", "sub": "XOR", "color": r},
+                              {"title": "ct' (CRC)", "sub": ctx["crc_after"], "color": r}],
+                    "theory": "Um bit do ciphertext ML-KEM e invertido; o CRC do pacote muda de tx para rx."}
+        specs = {
+            "SEM CRC": {"title": "SEM GUARDIAO DE INTEGRIDADE",
+                        "nodes": [{"title": "Payload alterado", "sub": ""},
+                                  {"title": "SEM CRC", "sub": "GUARD=NONE", "color": d},
+                                  {"title": "PASSA", "sub": "sem checar", "color": r}],
+                        "theory": "Sem checksum salvo nao ha referencia para comparar; a alteracao segue sem ser detectada."},
+            "ENTREGA": {"title": "CORRUPCAO PASSA COMO VALIDA",
+                        "nodes": [{"title": "Corrompido", "sub": ""},
+                                  {"title": "ACEITO", "sub": "sem verificar"},
+                                  {"title": "SILENT", "sub": "perigoso", "color": r}],
+                        "theory": "A corrupcao e aceita como valida. Falha silenciosa e perigosa: parece uma entrega normal."},
+            "CRC32": {"title": "CRC-32 SERVE DE REFERENCIA",
+                      "nodes": [{"title": "Payload", "sub": ""},
+                                {"title": "CRC-32", "sub": "salvo (tx)", "color": g},
+                                {"title": "Referencia", "sub": ctx["crc_before"]}],
+                      "theory": "O CRC salvo antes da falha vira a referencia comparada depois com o CRC recalculado."},
+            "VERIFICA": {"title": "COMPARACAO REVELA A CORRUPCAO",
+                         "nodes": [{"title": "CRC tx", "sub": ctx["crc_before"], "color": g},
+                                   {"title": "COMPARA", "sub": "tx != rx", "color": o},
+                                   {"title": "CRC rx", "sub": ctx["crc_after"], "color": r}],
+                         "theory": "Recalcula o CRC e compara com o salvo. Divergiu -> DETECTED_GUARD; 1 bit sempre e detectado."},
+            "DECAP": {"title": "DECAPSULACAO DIVERGENTE",
+                      "nodes": [{"title": "ct corrompido", "sub": "", "color": r},
+                                {"title": "DECAPS", "sub": "ct' != ct"},
+                                {"title": "Segredo", "sub": "divergente", "color": r}],
+                      "theory": "Com o ciphertext alterado a re-encapsulacao nao bate (FO) e o segredo recuperado diverge."},
+            "CONFIRMA": {"title": "CONFIRMACAO HMAC REJEITA",
+                         "nodes": [{"title": "ss emissor", "sub": "ok", "color": g},
+                                   {"title": "HMAC-SHA256", "sub": "ss tx != ss rx"},
+                                   {"title": "REJEITADO", "sub": "PROTOCOL", "color": g}],
+                         "theory": "A confirmacao HMAC compara os segredos das duas pontas sem revela-los. Divergiu -> PROTOCOL_REJECT."},
+        }
         if label == "RESULTADO":
-            return "RESULTADO OBSERVADO DA FALHA", result or "RESULT", guard, "O dashboard registra o evento e exporta as métricas da campanha."
-        target = str(fault.get("target", "PAYLOAD")).upper()
-        return "MATERIAL ANTES DA RADIAÇÃO SIMULADA", target, guard, "Antes do bit-flip, payload ou ciphertext ainda estão íntegros."
+            silent = ctx["result"] == "SILENT"
+            verdict = {"DETECTED_GUARD": "CRC DETECTOU", "PROTOCOL_REJECT": "PROTOCOLO REJEITOU",
+                       "KEY_MISMATCH": "CHAVE DIVERGENTE"}.get(ctx["result"], "PROTEGIDO")
+            return {"title": "RESULTADO OBSERVADO DA FALHA", "theme": "space",
+                    "nodes": [{"title": "FALHA SILENCIOSA" if silent else verdict,
+                               "sub": "corrupcao aceita" if silent else "corrupcao barrada",
+                               "color": r if silent else g}],
+                    "theory": ("A corrupcao foi aceita sem aviso: sem guardiao, o erro passa como entrega normal."
+                               if silent else
+                               "A protecao barrou a corrupcao antes da entrega. O evento e exportado para o JSON.")}
+        return specs.get(label, {"title": "FALHA", "nodes": [{"title": label, "sub": ""}],
+                                 "theory": "Etapa da campanha de falha."})
 
     def _draw_fault_transformation_panel(self, surface, rect, fault, step, local_progress, t):
         color = step.get("color", self._fault_result_color(str(fault.get("result", ""))))
-        title, op_label, op_sub, note = self._fault_visual_scene(fault, step)
-        self._draw_transform_shell(surface, rect, title, color)
         label = str(step.get("label", "")).upper()
-        progress = max(0.0, min(1.0, local_progress))
-        result = str(fault.get("result", "")).upper()
-        theme = "space" if label in {"PAYLOAD", "CIPHERTEXT", "BIT-FLIP", "SEM CRC", "ENTREGA"} else "lab"
-        stage = self._pix_stage(surface, pygame.Rect(rect.x + 9, rect.y + 31, rect.width - 18, rect.height - 58), color, t, theme)
         ctx = {
-            "result": result, "color": color,
+            "result": str(fault.get("result", "")).upper(),
             "guard": str(fault.get("guard", "NONE")).upper(),
             "target": str(fault.get("target", "PAYLOAD")).upper(),
             "before": self._parse_int_auto(fault.get("before_byte")),
@@ -4917,173 +4056,10 @@ class DashboardPanel:
             "mask": self._parse_int_auto(fault.get("bit_mask")) or 0,
             "crc_before": str(fault.get("crc_before", "--"))[-8:],
             "crc_after": str(fault.get("crc_after", "--"))[-8:],
-            "key_ok": str(fault.get("key_match")) in {"1", "true", "True"},
             "byte_index": fault.get("byte_index", "--"),
         }
-        painters = {
-            "PAYLOAD": self._scene_fault_intact, "CIPHERTEXT": self._scene_fault_intact,
-            "BIT-FLIP": self._scene_fault_bitflip, "SEM CRC": self._scene_fault_noguard,
-            "ENTREGA": self._scene_fault_silent, "CRC32": self._scene_fault_crc,
-            "VERIFICA": self._scene_fault_verify, "DECAP": self._scene_fault_decap,
-            "CONFIRMA": self._scene_fault_confirm, "RESULTADO": self._scene_fault_result,
-        }
-        painter = painters.get(label, self._scene_fault_intact)
-        painter(surface, stage, color, progress, t, ctx)
-        surface.blit(self._render_clipped(FONT_LABEL, note, (232, 238, 255), rect.width - 18), (rect.x + 9, rect.bottom - 24))
-
-    # ---- Fault scene painters ---------------------------------------------
-    def _scene_fault_intact(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery
-        u = self._pix_unit(stage)
-        is_ct = ctx["target"] == "CIPHERTEXT"
-        sat = self._pix_robot(surface, stage.x + 44, midy, u, C_ACCENT_CYAN, t, "happy")
-        self._pix_tag(surface, sat.centerx, sat.bottom + 1, "SAT", C_ACCENT_CYAN)
-        if is_ct:
-            self._pix_blit_center(surface, PIX_CRYSTAL, stage.centerx + 30, midy, u, C_ACCENT_PURPLE, bob=int(math.sin(t * 2) * 2))
-            self._pix_tag(surface, stage.centerx + 30, midy + 28, "CIPHERTEXT ML-KEM", C_ACCENT_PURPLE)
-        else:
-            self._pix_packet(surface, stage.centerx + 30, midy, 60, 46, C_ACCENT_BLUE, fill=1.0, sealed=True, t=t)
-            self._pix_tag(surface, stage.centerx + 30, midy + 30, "PAYLOAD ÍNTEGRO", C_ACCENT_BLUE)
-        self._pix_check(surface, stage.right - 36, midy, 8, C_ACCENT_GREEN)
-
-    def _scene_fault_bitflip(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery + 2
-        # cosmic-ray emitter in the corner firing a bolt at the target
-        star = self._pix_blit_center(surface, PIX_RAY_STAR, stage.x + 24, stage.y + 20, 4, C_ACCENT_RED)
-        self._pix_tag(surface, star.centerx, star.bottom, "raio cósmico", C_ACCENT_RED, 110)
-        target = (stage.centerx, midy - 6)
-        if progress > 0.18:
-            self._pix_bolt(surface, (star.centerx, star.bottom), target, C_ACCENT_RED, t)
-        if ctx["before"] is not None and ctx["after"] is not None:
-            shown = ctx["after"] if progress > 0.5 else ctx["before"]
-            mask = ctx["mask"] if progress > 0.5 else 0
-            self._pix_bits(surface, stage.centerx, midy - 6, shown, mask, C_ACCENT_CYAN if progress <= 0.5 else color)
-            tag = "ANTES  byte %s" % ctx["byte_index"] if progress <= 0.5 else "DEPOIS  bit invertido"
-            self._pix_tag(surface, stage.centerx, midy + 18, tag, C_ACCENT_CYAN if progress <= 0.5 else C_ACCENT_RED, 240)
-        else:
-            cr = self._pix_blit_center(surface, PIX_CRYSTAL, stage.centerx, midy - 6, self._pix_unit(stage), C_ACCENT_PURPLE)
-            self._pix_tag(surface, stage.centerx, cr.bottom + 2, "CT %s -> %s" % (ctx["crc_before"], ctx["crc_after"]), C_ACCENT_PURPLE, 260)
-        if progress > 0.5:
-            self._pix_spark(surface, target[0], target[1], C_ACCENT_RED, min(1.0, (progress - 0.5) * 2), t)
-
-    def _scene_fault_noguard(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery
-        u = self._pix_unit(stage)
-        self._pix_robot(surface, stage.x + 42, midy, u, C_ACCENT_RED, t, "worry")
-        self._pix_tag(surface, stage.x + 42, midy + 34, "sem guarda", C_ACCENT_RED, 110)
-        # empty guard gate: two posts and a dashed empty shield slot
-        gx = stage.centerx
-        for dx in (-26, 26):
-            pygame.draw.rect(surface, (52, 62, 90), (gx + dx - 3, midy - 26, 6, 52))
-            pygame.draw.rect(surface, (80, 92, 120), (gx + dx - 3, midy - 26, 6, 4))
-        slot = pygame.Rect(gx - 18, midy - 22, 36, 40)
-        self._pix_dashed_rect(surface, slot, C_TEXT_DIM, t)
-        self._pix_tag(surface, gx, midy + 24, "? sem CRC", C_TEXT_DIM, 90)
-        # corrupted packet slips straight through
-        px = int(stage.x + 86 + (stage.right - 70 - stage.x - 86) * progress)
-        self._pix_packet(surface, px, midy - 2, 30, 24, C_ACCENT_BLUE, fill=1.0, glitch=True, t=t)
-        if progress > 0.85:
-            self._pix_tag(surface, stage.right - 50, midy + 22, "passou direto", C_ACCENT_RED, 110)
-
-    def _scene_fault_silent(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery
-        u = self._pix_unit(stage)
-        # corrupted packet delivered to an unaware-happy receiver
-        px = int(stage.x + 40 + (stage.right - 96 - stage.x - 40) * min(1.0, progress * 1.3))
-        self._pix_packet(surface, px, midy, 34, 26, C_ACCENT_BLUE, fill=1.0, glitch=True, t=t)
-        dish = self._pix_robot(surface, stage.right - 48, midy, u, C_ACCENT_GREEN, t, "happy")
-        self._pix_tag(surface, dish.centerx, dish.bottom + 1, "SOLO aceita", C_ACCENT_GREEN, 120)
-        if progress > 0.55:
-            skull = self._pix_blit_center(surface, PIX_SKULL, stage.centerx, stage.y + 24, 4, C_ACCENT_RED)
-            stamp = self._pix_token(surface, stage.centerx, midy + 30, "SILENT", C_ACCENT_RED, t, pulse=True)
-            self._pix_cross(surface, skull.right + 6, skull.centery, 4, C_ACCENT_RED)
-
-    def _scene_fault_crc(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery
-        u = self._pix_unit(stage)
-        sh = self._pix_blit_center(surface, PIX_SHIELD, stage.x + 46, midy, u, C_ACCENT_GREEN, bob=int(math.sin(t * 2) * 2))
-        self._pix_tag(surface, sh.centerx, sh.bottom + 1, "GUARDIÃO", C_ACCENT_GREEN, 120)
-        # the guardian holds the saved reference checksum (a clipboard token)
-        clip = pygame.Rect(stage.centerx - 10, midy - 26, 80, 52)
-        pygame.draw.rect(surface, (12, 20, 34), clip, border_radius=4)
-        pygame.draw.rect(surface, C_ACCENT_GREEN, clip, 2, border_radius=4)
-        pygame.draw.rect(surface, C_ACCENT_GREEN, (clip.centerx - 8, clip.y - 4, 16, 6), border_radius=2)
-        self._pix_tag(surface, clip.centerx, clip.y + 6, "CRC SALVO", C_ACCENT_GREEN, clip.width)
-        self._pix_tag(surface, clip.centerx, clip.y + 24, "tx %s" % ctx["crc_before"], C_TEXT_PRIMARY, clip.width)
-        if progress > 0.6:
-            self._pix_tag(surface, stage.right - 60, midy, "referência", C_ACCENT_GREEN, 110)
-            self._pix_check(surface, stage.right - 26, midy, 6, C_ACCENT_GREEN)
-
-    def _scene_fault_verify(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery
-        diverged = ctx["crc_before"] != ctx["crc_after"]
-        # compare saved CRC (tx) vs recomputed CRC (rx)
-        self._pix_token(surface, stage.x + 58, midy - 14, "tx %s" % ctx["crc_before"], C_ACCENT_GREEN, t, w=120)
-        self._pix_token(surface, stage.x + 58, midy + 14, "rx %s" % ctx["crc_after"], C_ACCENT_RED if diverged else C_ACCENT_GREEN, t, w=120)
-        self._pix_tag(surface, stage.centerx, midy - 28, "=?", C_TEXT_PRIMARY, 40)
-        u = self._pix_unit(stage)
-        if progress > 0.5 and diverged:
-            sh = self._pix_blit_center(surface, PIX_SHIELD, stage.centerx + 30, midy, u, C_ACCENT_ORANGE)
-            self._pix_cross(surface, stage.centerx + 30, midy, 9, C_ACCENT_RED)
-            # bounce the blocked packet back
-            self._pix_packet(surface, stage.right - 54, midy, 28, 22, C_ACCENT_RED, fill=1.0, glitch=True, t=t)
-            self._pix_tag(surface, stage.right - 54, midy + 22, "BLOQUEADO", C_ACCENT_GREEN, 120)
-        else:
-            self._pix_blit_center(surface, PIX_SHIELD, stage.centerx + 30, midy, u, C_ACCENT_GREEN)
-
-    def _scene_fault_decap(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery
-        u = self._pix_unit(stage)
-        # corrupted ciphertext crystal arrives glitching
-        cr = self._pix_blit_center(surface, PIX_CRYSTAL, stage.x + 44, midy, u, C_ACCENT_RED, bob=int(math.sin(t * 3) * 2))
-        self._pix_tag(surface, cr.centerx, cr.bottom + 1, "CT corrompido", C_ACCENT_RED, 130)
-        self._pix_machine(surface, stage.centerx, midy, 70, 50, C_ACCENT_PURPLE, "DECAP", t, progress)
-        self._pix_blit_center(surface, PIX_KEY, stage.centerx - 24, midy + 24, max(3, u - 2), C_ACCENT_RED)
-        if progress > 0.55:
-            # the recovered secret comes out the wrong colour
-            self._pix_orb(surface, stage.right - 52, midy - 6, 8, C_ACCENT_RED, t, glitch=True)
-            self._pix_tag(surface, stage.right - 52, midy + 16, "ss divergente", C_ACCENT_RED, 120)
-
-    def _scene_fault_confirm(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery
-        # HMAC compares the two derived secrets
-        self._pix_orb(surface, stage.x + 50, midy, 9, C_ACCENT_GREEN, t)
-        self._pix_tag(surface, stage.x + 50, midy + 18, "ss emissor", C_ACCENT_GREEN, 110)
-        self._pix_orb(surface, stage.x + 120, midy, 9, C_ACCENT_RED, t, glitch=True)
-        self._pix_tag(surface, stage.x + 120, midy + 18, "ss receptor", C_ACCENT_RED, 110)
-        self._pix_machine(surface, stage.centerx + 40, midy, 70, 50, C_ACCENT_ORANGE, "HMAC", t, progress)
-        if progress > 0.55:
-            self._pix_cross(surface, stage.right - 44, midy, 9, C_ACCENT_RED)
-            self._pix_tag(surface, stage.right - 44, midy + 18, "REJEITADO", C_ACCENT_GREEN, 110)
-
-    def _scene_fault_result(self, surface, stage, color, progress, t, ctx):
-        midy = stage.centery
-        silent = ctx["result"] == "SILENT"
-        cx = stage.centerx
-        if silent:
-            sk = self._pix_blit_center(surface, PIX_SKULL, cx, midy - 6, 6, C_ACCENT_RED, bob=int(math.sin(t * 2) * 2))
-            self._pix_tag(surface, cx, sk.bottom + 4, "FALHA SILENCIOSA", C_ACCENT_RED, 260)
-            self._pix_tag(surface, cx, sk.bottom + 20, "corrupção aceita sem aviso", C_TEXT_DIM, 280)
-        else:
-            sh = self._pix_blit_center(surface, PIX_SHIELD, cx, midy - 6, 7, C_ACCENT_GREEN, bob=int(math.sin(t * 2) * 2))
-            verdict = {"DETECTED_GUARD": "CRC DETECTOU", "PROTOCOL_REJECT": "PROTOCOLO REJEITOU",
-                       "KEY_MISMATCH": "CHAVE DIVERGENTE"}.get(ctx["result"], "PROTEGIDO")
-            self._pix_tag(surface, cx, sh.bottom + 4, verdict, C_ACCENT_GREEN, 280)
-            self._pix_tag(surface, cx, sh.bottom + 20, "a corrupção foi barrada", C_TEXT_DIM, 280)
-
-    def _pix_dashed_rect(self, surface, rect, color, t):
-        dash = 5
-        phase = int(t * 8) % (dash * 2)
-        x = rect.x
-        while x < rect.right:
-            pygame.draw.line(surface, color, (x + phase % dash, rect.y), (min(x + dash, rect.right), rect.y), 1)
-            pygame.draw.line(surface, color, (x, rect.bottom), (min(x + dash, rect.right), rect.bottom), 1)
-            x += dash * 2
-        y = rect.y
-        while y < rect.bottom:
-            pygame.draw.line(surface, color, (rect.x, y), (rect.x, min(y + dash, rect.bottom)), 1)
-            pygame.draw.line(surface, color, (rect.right, y), (rect.right, min(y + dash, rect.bottom)), 1)
-            y += dash * 2
+        spec = self._fault_scene_spec(label, ctx)
+        self._draw_clean_step(surface, rect, spec, color, max(0.0, min(1.0, local_progress)), t)
 
     def _draw_stress_results_control(self, surface, x, y, width, mouse_pos):
         card_h = 86
@@ -5249,10 +4225,10 @@ class DashboardPanel:
         ly += table_h + 18
         notes = (
             "Resultados oficiais com cifragem AES-GCM ativa nas missões.",
-            "PQC foi 25.9x mais lento e 11.5x maior em bytes que CLASSIC.",
+            "PQC foi 22.6x mais lento e 13.4x maior em bytes que CLASSIC.",
             "PQC+CRC32 adicionou 4 bytes ao pacote, com verificação ativa de integridade.",
             "Heap médio estável em 201.412 B no baseline de 240 MHz.",
-            "A 80 MHz (limited), PQC subiu para 38.8 ms (34.1x o clássico).",
+            "A 80 MHz (limited), PQC subiu para 40.0 ms (38.5x o clássico).",
         )
         for note in notes:
             if ly > left.bottom - 42:
@@ -5283,11 +4259,31 @@ class DashboardPanel:
             by += 32
         ry += bench_h + 12
 
+        aes_ok = bool(CONSOLIDATED_AES_GCM_CHECKS.get("official_candidate"))
+        aes_color = C_ACCENT_GREEN if aes_ok else C_ACCENT_ORANGE
+        validation_h = 82
+        validation_rect = pygame.Rect(rx, ry, rw, validation_h)
+        pygame.draw.rect(surface, (18, 18, 34), validation_rect, border_radius=5)
+        pygame.draw.rect(surface, aes_color, validation_rect, width=1, border_radius=5)
+        validation_title = "VALIDAÇÃO AES-GCM: OFICIAL" if aes_ok else "VALIDAÇÃO AES-GCM: REJEITADA"
+        surface.blit(self._render_clipped(FONT_LABEL, validation_title, aes_color, rw - 18), (rx + 9, ry + 7))
+        validation_lines = (
+            f"official_candidate={str(aes_ok).lower()} | non_aes={CONSOLIDATED_AES_GCM_CHECKS.get('non_aes_gcm_records', 0)}/{CONSOLIDATED_AES_GCM_CHECKS.get('mission_records', CONSOLIDATED_SUMMARY['mission_runs'])}",
+            f"campos AES ausentes={CONSOLIDATED_AES_GCM_CHECKS.get('missing_required_fields', 0)} | falhas AEAD={CONSOLIDATED_AES_GCM_CHECKS.get('aead_failures', 0)}",
+            f"fonte: {CONSOLIDATED_ACCEPTANCE_LOG}",
+        )
+        line_y = ry + 27
+        for line in validation_lines:
+            surface.blit(self._render_clipped(FONT_SMALL, line, C_TEXT_PRIMARY, rw - 18), (rx + 9, line_y))
+            line_y += 16
+        ry += validation_h + 12
+
         security_notes = (
             f"Aceite: {CONSOLIDATED_SUMMARY['records']} registros, {CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões.",
             "PQC_KAT aprovado: ss_crc32=0xD9DA8D6C.",
-            "Falhas payload: 600/600 silenciosas sem CRC32; 600/600 detectadas com CRC32.",
-            "Coleta final: 10 PQC_BENCH de 100 rounds, todos OK.",
+            f"Falhas payload: {CONSOLIDATED_SUMMARY['demo_none_silent']} silenciosas sem CRC32; {CONSOLIDATED_SUMMARY['demo_crc_detected']} detectadas com CRC32.",
+            f"Coleta final: {CONSOLIDATED_SUMMARY['pqc_bench_runs']} PQC_BENCH de 100 rounds, todos OK.",
+            "AES-GCM oficial: validado na bateria atual." if aes_ok else "AES-GCM oficial: pendente de nova gravação do firmware.",
             "PQC_FAULT com confirmação: PROTOCOL_REJECT.",
         )
         for note in security_notes:
@@ -5314,9 +4310,9 @@ class DashboardPanel:
             block_w = max(120, (rw - block_gap * 2) // 3)
             block_h = min(54, max(44, right.bottom - ry - 8))
             narrative_blocks = (
-                ("CUSTO", "Histórico: PQC 25,9x.", C_ACCENT_ORANGE),
-                ("CRC32", "Detecta corrupção.", C_ACCENT_GREEN),
-                ("AES-GCM", "Nova bateria pendente.", C_ACCENT_CYAN),
+                ("BATERIA", f"{CONSOLIDATED_SUMMARY['records']} regs; {CONSOLIDATED_SUMMARY['failed']} falhas.", C_ACCENT_ORANGE),
+                ("FALHAS", f"{CONSOLIDATED_SUMMARY['demo_none_silent']} silent; {CONSOLIDATED_SUMMARY['demo_crc_detected']} CRC.", C_ACCENT_GREEN),
+                ("AES-GCM", "Validada." if aes_ok else "Rejeitada no firmware.", C_ACCENT_CYAN),
             )
             for index, (label, body, color) in enumerate(narrative_blocks):
                 bx = rx + index * (block_w + block_gap)
@@ -5952,7 +4948,6 @@ class DashboardPanel:
         surface.blit(self._render_clipped(FONT_LABEL, detail, C_TEXT_DIM, width - 86), (rect.x + 9, rect.y + 19))
         surface.blit(FONT_LABEL.render(status, True, C_ACCENT_GREEN if active else C_TEXT_DIM), (knob_rect.x - 28, rect.y + 11))
         return rect.bottom
-
 
 
     def _render_clipped(self, font, text, color, max_width):
@@ -7302,7 +6297,6 @@ class Onboarding:
 
         val_corr = FONT_SMALL.render("0x49 | pode virar falha silenciosa", True, C_TEXT_DIM)
         surface.blit(val_corr, (bx + 20, by2 + box_h - 32))
-
 
 
     def draw_slide_1(self, surface):

@@ -172,6 +172,34 @@ projeto sem reconstruir decisões antigas:
   3.074 registros, 0 falhas, 1.800 `MISSION runs`, 10 `PQC_BENCH` e 1.200
   testes `FAULT`. A fonte principal dos resultados da apresentação passou a
   ser esse JSON.
+- 2026-06-26: criado `tools/aes_gcm_metrics_battery.py`, runner específico para
+  a bateria oficial pós-AES-GCM. Ele usa payload fixo nos três cenários
+  `MISSION`, valida `cipher=AES-128-GCM`, nonce de 12 bytes, tag de 16 bytes,
+  `aead_match`, `decrypt_ok`, `tag_match`, variação de `nonce_crc32`,
+  `ciphertext_crc32` e `gcm_tag_crc32`, e grava JSON
+  `*_aes_gcm_metrics_*.json` pronto para atualização dos resultados.
+- 2026-06-26: bateria pós-runner AES concluída em
+  `logs/20260626T044359Z_aes_gcm_metrics_dev-ttyusb0.json`: 324,5 s,
+  1.038 registros, 0 falhas, 600 `MISSION runs`, 6 `PQC_BENCH` e 400 testes
+  `FAULT`. A execução foi limpa, mas `summary.aes_gcm.checks.official_candidate`
+  ficou `false`: os `MISSION` retornaram campos legados (`HMAC-SHA256` e
+  confirmação HMAC), sem `cipher=AES-128-GCM`, `nonce_crc32` ou `gcm_tag_crc32`.
+  Essa coleta foi reclassificada como diagnóstico de firmware antigo, não como
+  resultado oficial.
+- 2026-06-26: aba `RESULTADOS` reforçada para mostrar a validação AES-GCM
+  diretamente no painel: `official_candidate=false`, `non_aes=600/600`, 6.000
+  campos AES ausentes e 600 falhas AEAD esperadas para firmware legado. O
+  consolidator agora recalcula esses contadores a partir dos `records`, em vez
+  de confiar no `summary.aes_gcm` gerado antes da correção do parser de
+  `MISSION ... payload_hex`.
+- 2026-06-26: firmware regravado e nova bateria oficial AES-GCM concluída em
+  `logs/20260626T051412Z_aes_gcm_metrics_dev-ttyusb0.json`: 343,16 s,
+  1.038 registros, 0 falhas, 600 `MISSION runs`, 6 `PQC_BENCH` e 400 testes
+  `FAULT`. A validação passou com `official_candidate=true`,
+  `non_aes_gcm_records=0`, `missing_required_fields=0`, `aead_failures=0` e
+  `nonce_crc32_duplicates=0`. O dashboard agora usa essa coleta na aba
+  `RESULTADOS`, mostrando `CLASSIC` com AES-128-GCM, `PQC` com ML-KEM-512 +
+  AES-GCM e `PQC_CRC32` com ML-KEM-512 + AES-GCM + CRC32.
 - 2026-06-25: camada "satélite vivo" adicionada sem alterar firmware. O
   dashboard ganhou toggle `Payload vivo`, coleta curta de `SENSOR_READ
   TEMP_HUM`, `SENSOR_READ ACCEL`, `SENSOR_READ APDS`, `ANALOG POT` e
@@ -637,6 +665,9 @@ Entregas:
 - runner `tools/final_metrics_battery.py` implementado para nova coleta longa
   de métricas finais, com ciclos balanceados por perfil, resumo estatístico e
   JSON pronto para consolidação em tabelas da apresentação;
+- runner `tools/aes_gcm_metrics_battery.py` implementado para nova bateria
+  oficial da versão cifrada com AES-128-GCM, incluindo validações específicas
+  de AEAD, nonce, tag e ciphertext;
 - campanha final de métricas validada por
   `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`;
 - projetor validado por confirmação do usuário em 2026-06-18, após ajuste
