@@ -3806,22 +3806,109 @@ class DashboardPanel:
     # ---- Technical schematic primitives -----------------------------------
     # ---- Technical layer ---------------------------------------------------
     # ---- Clean didactic step diagram --------------------------------------
+    def _icon(self, surface, name, cx, cy, s, color, t=0.0, progress=1.0):
+        """Small, tasteful line-art icons that label the step's operation."""
+        cx, cy = int(cx), int(cy)
+        if name == "check":
+            pygame.draw.lines(surface, color, False, [(cx - s, cy), (cx - s // 3, cy + s), (cx + s, cy - s)], 2)
+        elif name == "cross":
+            pygame.draw.line(surface, color, (cx - s, cy - s), (cx + s, cy + s), 2)
+            pygame.draw.line(surface, color, (cx - s, cy + s), (cx + s, cy - s), 2)
+        elif name == "shield":
+            pts = [(cx, cy - s), (cx + s, cy - s + s // 2), (cx + s - 1, cy + s // 3),
+                   (cx, cy + s), (cx - s + 1, cy + s // 3), (cx - s, cy - s + s // 2)]
+            pygame.draw.polygon(surface, color, pts, 2)
+            pygame.draw.lines(surface, color, False, [(cx - s // 2, cy), (cx - 1, cy + s // 2), (cx + s // 2, cy - s // 3)], 2)
+        elif name in ("lock", "unlock"):
+            body = pygame.Rect(cx - s, cy - 1, 2 * s, s + 3)
+            sh = pygame.Rect(cx - s + 2, cy - s - 1, 2 * s - 4, 2 * s)
+            if name == "unlock":
+                pygame.draw.arc(surface, color, sh.move(5, 0), 1.1, 3.1, 2)
+            else:
+                pygame.draw.arc(surface, color, sh, math.pi, math.tau, 2)
+            pygame.draw.rect(surface, color, body, 2, border_radius=2)
+        elif name == "key":
+            pygame.draw.circle(surface, color, (cx - s + 2, cy), max(2, s // 2), 2)
+            pygame.draw.line(surface, color, (cx - s + 5, cy), (cx + s, cy), 2)
+            pygame.draw.line(surface, color, (cx + s, cy), (cx + s, cy + 3), 2)
+            pygame.draw.line(surface, color, (cx + s - 4, cy), (cx + s - 4, cy + 3), 2)
+        elif name == "hash":
+            for dx in (-s // 2, s // 3):
+                pygame.draw.line(surface, color, (cx + dx + 1, cy - s), (cx + dx - 1, cy + s), 2)
+            for dy in (-s // 3, s // 3):
+                pygame.draw.line(surface, color, (cx - s, cy + dy), (cx + s, cy + dy), 2)
+        elif name == "rng":
+            r = pygame.Rect(cx - s, cy - s, 2 * s, 2 * s)
+            pygame.draw.rect(surface, color, r, 2, border_radius=2)
+            for dx, dy in ((-s // 2, -s // 2), (s // 2, s // 2), (0, 0)):
+                pygame.draw.circle(surface, color, (cx + dx, cy + dy), 1)
+        elif name == "sensor":
+            pygame.draw.circle(surface, color, (cx, cy + s // 2), 2)
+            for k in (1, 2):
+                rr = pygame.Rect(cx - 3 * k, cy + s // 2 - 3 * k, 6 * k, 6 * k)
+                pygame.draw.arc(surface, color, rr, math.pi * 1.15, math.pi * 1.85, 2)
+        elif name == "sat":
+            body = pygame.Rect(cx - s // 2, cy - s // 2, s, s)
+            pygame.draw.rect(surface, color, body, 2)
+            pygame.draw.rect(surface, color, (cx - s - 2, cy - 2, 3, 4))
+            pygame.draw.rect(surface, color, (cx + s, cy - 2, 3, 4))
+            pygame.draw.line(surface, color, (cx, cy - s // 2), (cx, cy - s), 1)
+        elif name == "list":
+            for dy in (-s // 2, 0, s // 2):
+                pygame.draw.line(surface, color, (cx - s, cy + dy), (cx + s, cy + dy), 2)
+        elif name == "alert":
+            pygame.draw.polygon(surface, color, [(cx, cy - s), (cx + s, cy + s), (cx - s, cy + s)], 2)
+            pygame.draw.line(surface, color, (cx, cy - s // 3), (cx, cy + s // 4), 2)
+            pygame.draw.circle(surface, color, (cx, cy + s - 1), 1)
+
+    def _fx_bolt(self, surface, p1, p2, color, t):
+        x1, y1 = p1
+        x2, y2 = p2
+        pts = [(x1, y1)]
+        seg = 5
+        for i in range(1, seg):
+            f = i / seg
+            mx = x1 + (x2 - x1) * f
+            my = y1 + (y2 - y1) * f
+            off = (1 if i % 2 else -1) * (5 + 3 * math.sin(t * 13 + i))
+            pts.append((mx + off, my))
+        pts.append((x2, y2))
+        pygame.draw.lines(surface, color, False, pts, 2)
+
+    def _fx_spark(self, surface, cx, cy, color, mag, t):
+        for i in range(8):
+            ang = (i / 8) * math.tau + t * 3
+            r = 4 + int(11 * max(0.0, min(1.0, mag)))
+            pygame.draw.line(surface, color, (cx, cy), (cx + int(r * math.cos(ang)), cy + int(r * math.sin(ang))), 2)
+
     def _clean_node(self, surface, rect, node, base_color, emphasis, progress, t):
         nc = node.get("color", base_color)
         if emphasis:
             self._draw_soft_glow(surface, rect.center, max(10, rect.height // 3), nc, 20)
         pygame.draw.rect(surface, (10, 16, 32), rect, border_radius=6)
         pygame.draw.rect(surface, nc, rect, 2 if emphasis else 1, border_radius=6)
+        icon = node.get("icon")
+        text_top = rect.y
+        if icon:
+            self._icon(surface, icon, rect.centerx, rect.y + 16, 7, nc, t, progress)
+            text_top = rect.y + 26
         title = str(node.get("title", ""))
         sub = str(node.get("sub", ""))
         tfont = FONT_SMALL if emphasis else FONT_LABEL
         ts = self._render_clipped(tfont, title, nc if emphasis else C_TEXT_PRIMARY, rect.width - 8)
         block_h = ts.get_height() + (15 if sub else 0)
-        ty = rect.centery - block_h // 2
+        ty = (text_top + rect.bottom) // 2 - block_h // 2
         surface.blit(ts, (rect.centerx - ts.get_width() // 2, ty))
         if sub:
             ss = self._render_clipped(FONT_LABEL, sub, C_TEXT_DIM, rect.width - 8)
             surface.blit(ss, (rect.centerx - ss.get_width() // 2, ty + ts.get_height() + 3))
+        badge = node.get("badge")
+        if badge:
+            bc = C_ACCENT_GREEN if badge == "check" else C_ACCENT_RED
+            bx, by = rect.right - 12, rect.y + 12
+            pygame.draw.circle(surface, (8, 14, 28), (bx, by), 8)
+            pygame.draw.circle(surface, bc, (bx, by), 8, 1)
+            self._icon(surface, badge, bx, by, 4, bc)
         if emphasis:
             bar = pygame.Rect(rect.x + 6, rect.bottom - 6, rect.width - 12, 3)
             pygame.draw.rect(surface, (22, 30, 52), bar)
@@ -3836,7 +3923,7 @@ class DashboardPanel:
         pygame.draw.polygon(surface, color, [(x2, y), (x2 - 7, y - 5), (x2 - 7, y + 5)])
         pygame.draw.circle(surface, C_TEXT_PRIMARY, (px, y), 3)
 
-    def _draw_clean_flow(self, surface, area, nodes, color, progress, t):
+    def _draw_clean_flow(self, surface, area, nodes, color, progress, t, particles=False):
         n = len(nodes)
         if n == 0:
             return
@@ -3857,21 +3944,41 @@ class DashboardPanel:
             self._clean_node(surface, r, nd, self._mix_color(C_PANEL_BORDER, color, 0.6), i == mid, progress, t)
             rects.append(r)
         for i in range(n - 1):
-            self._clean_arrow_h(surface, rects[i].right + 3, rects[i + 1].left - 3, area.centery, color, progress)
+            ax1, ax2 = rects[i].right + 3, rects[i + 1].left - 3
+            self._clean_arrow_h(surface, ax1, ax2, area.centery, color, progress)
+            if particles:
+                for k in range(3):
+                    f = (t * 0.6 + k / 3.0) % 1.0
+                    if f > max(0.06, progress):
+                        continue
+                    dx = int(ax1 + (ax2 - ax1) * f)
+                    pygame.draw.rect(surface, color, (dx - 2, area.centery - 8, 4, 4))
 
     def _clean_bits(self, surface, area, spec, color, progress, t):
         before, after, mask = spec["before"], spec["after"], spec["mask"]
         show = after if progress > 0.5 else before
         live_mask = mask if progress > 0.5 else 0
-        bits = self._pix_bits(surface, area.centerx, area.centery - 2, show, live_mask,
+        bits = self._pix_bits(surface, area.centerx, area.centery + 6, show, live_mask,
                               C_ACCENT_CYAN if progress <= 0.5 else C_ACCENT_RED, u=22)
+        # cosmic-ray emitter + bolt striking the byte
+        ex, ey = area.x + 24, area.y + 18
+        pygame.draw.circle(surface, C_ACCENT_RED, (ex, ey), 4)
+        for i in range(6):
+            ang = (i / 6) * math.tau + t
+            pygame.draw.line(surface, C_ACCENT_RED, (ex, ey), (ex + int(8 * math.cos(ang)), ey + int(8 * math.sin(ang))), 1)
+        surface.blit(self._render_clipped(FONT_LABEL, "raio cosmico", C_ACCENT_RED, 110), (ex + 12, ey - 6))
+        flip_i = next((i for i in range(8) if mask & (1 << (7 - i))), 0)
+        fx = bits.x + flip_i * 25 + 11
+        if progress > 0.12:
+            self._fx_bolt(surface, (ex, ey + 4), (fx, bits.y - 2), C_ACCENT_RED, t)
         top = ("ANTES  byte[%s]" % spec.get("byte_index", "--")) if progress <= 0.5 else "DEPOIS  bit invertido"
-        self._pix_tag(surface, area.centerx, bits.y - 19, top, C_ACCENT_CYAN if progress <= 0.5 else C_ACCENT_RED, area.width)
+        self._pix_tag(surface, area.centerx, bits.y - 20, top, C_ACCENT_CYAN if progress <= 0.5 else C_ACCENT_RED, area.width)
         if progress <= 0.5:
             bottom = "valor 0x%02X" % (before & 0xFF)
         else:
             bottom = "0x%02X  XOR  0x%02X  =  0x%02X" % (before & 0xFF, mask & 0xFF, after & 0xFF)
-        self._pix_tag(surface, area.centerx, bits.bottom + 9, bottom, C_TEXT_PRIMARY, area.width)
+            self._fx_spark(surface, fx, bits.centery, C_ACCENT_RED, min(1.0, (progress - 0.5) * 2), t)
+        self._pix_tag(surface, area.centerx, bits.bottom + 10, bottom, C_TEXT_PRIMARY, area.width)
 
     def _draw_clean_step(self, surface, rect, spec, color, progress, t):
         self._draw_transform_shell(surface, rect, spec["title"], color)
@@ -3880,7 +3987,7 @@ class DashboardPanel:
         if spec.get("special") == "bits" and spec.get("before") is not None:
             self._clean_bits(surface, stage, spec, color, progress, t)
         else:
-            self._draw_clean_flow(surface, stage, spec["nodes"], color, progress, t)
+            self._draw_clean_flow(surface, stage, spec["nodes"], color, progress, t, spec.get("particles", False))
         self._draw_wrapped_text(surface, FONT_LABEL, spec["theory"], (214, 226, 250),
                                 rect.x + 11, stage_rect.bottom + 7, rect.width - 22,
                                 line_spacing=15, max_lines=2)
@@ -3889,74 +3996,74 @@ class DashboardPanel:
         g, p, o, c, b = C_ACCENT_GREEN, C_ACCENT_PURPLE, C_ACCENT_ORANGE, C_ACCENT_CYAN, C_ACCENT_BLUE
         specs = {
             "payload": {
-                "title": "COLETA E SERIALIZACAO DO PAYLOAD", "theme": "space",
-                "nodes": [{"title": "Sensores", "sub": "/ mensagem"},
-                          {"title": "SERIALIZAR", "sub": "buffer TLV"},
-                          {"title": "PAYLOAD", "sub": f"{ctx['payload']} B", "color": b}],
+                "title": "COLETA E SERIALIZACAO DO PAYLOAD", "theme": "space", "particles": True,
+                "nodes": [{"title": "Sensores", "sub": "/ mensagem", "icon": "sensor"},
+                          {"title": "SERIALIZAR", "sub": "buffer TLV", "icon": "list"},
+                          {"title": "PAYLOAD", "sub": f"{ctx['payload']} B", "color": b, "icon": "packet"}],
                 "theory": "O payload e montado em texto claro (TLV ASCII). Ainda nao ha cifra, MAC nem checksum.",
             },
             "crc": {
                 "title": "INTEGRIDADE COM CRC-32",
                 "nodes": [{"title": "PAYLOAD", "sub": f"{ctx['payload']} B"},
-                          {"title": "CRC-32", "sub": "poly 0xEDB88320"},
-                          {"title": "+ CRC", "sub": f"{ctx['checksum']} B", "color": g}],
+                          {"title": "CRC-32", "sub": "poly 0xEDB88320", "icon": "shield"},
+                          {"title": "+ CRC", "sub": f"{ctx['checksum']} B", "color": g, "badge": "check"}],
                 "theory": "O CRC-32 detecta corrupcao acidental (ate 1 bit), mas nao autentica contra um atacante.",
             },
             "keygen": {
                 "title": "GERACAO DO PAR DE CHAVES ML-KEM",
                 "nodes": [{"title": "seed + ruido", "sub": "amostras"},
-                          {"title": "KEYGEN", "sub": "t = A.s + e"},
+                          {"title": "KEYGEN", "sub": "t = A.s + e", "icon": "key"},
                           {"title": "pk / sk", "sub": "800B / 1632B", "color": p}],
                 "theory": "Par ML-KEM-512 baseado em reticulados (MLWE). Custa CPU e RAM; o pacote ainda nao cresce.",
             },
             "mlkem": {
                 "title": "ENCAPSULAMENTO ML-KEM",
                 "nodes": [{"title": "pk + aleatorio", "sub": "m, r"},
-                          {"title": "ENCAPS", "sub": "ML-KEM"},
-                          {"title": "ct + segredo", "sub": f"{ctx['mlkem']}B + 32B", "color": p}],
+                          {"title": "ENCAPS", "sub": "ML-KEM", "icon": "lock"},
+                          {"title": "ct + segredo", "sub": f"{ctx['mlkem']}B + 32B", "color": p, "badge": "check"}],
                 "theory": "Encapsula um segredo: gera o ciphertext ML-KEM e a chave K. O segredo em si nunca trafega.",
             },
             "decap": {
                 "title": "RECUPERACAO DO MESMO SEGREDO",
                 "nodes": [{"title": "ct + sk", "sub": f"{ctx['mlkem']} B"},
-                          {"title": "DECAPS", "sub": "+ confere (FO)"},
-                          {"title": "SEGREDO", "sub": "identico", "color": g}],
+                          {"title": "DECAPS", "sub": "+ confere (FO)", "icon": "unlock"},
+                          {"title": "SEGREDO", "sub": "identico", "color": g, "badge": "check"}],
                 "theory": "O receptor recupera o segredo e re-encapsula para conferir (Fujisaki-Okamoto): so aceita se bater.",
             },
             "kdf": {
                 "title": "DERIVACAO DA CHAVE AES",
                 "nodes": [{"title": "SEGREDO", "sub": "32 B"},
-                          {"title": "SHA-256", "sub": "KDF"},
-                          {"title": "CHAVE", "sub": "AES-128", "color": c}],
+                          {"title": "SHA-256", "sub": "KDF", "icon": "hash"},
+                          {"title": "CHAVE", "sub": "AES-128", "color": c, "icon": "key"}],
                 "theory": "O segredo ML-KEM deriva uma chave AES-128 de sessao. Quem cifra a mensagem e o AES-GCM.",
             },
             "rng": {
                 "title": "CHAVE EFEMERA (BASELINE CLASSICO)",
-                "nodes": [{"title": "ENTROPIA", "sub": "TRNG"},
-                          {"title": "DRBG", "sub": "CSPRNG"},
+                "nodes": [{"title": "ENTROPIA", "sub": "TRNG", "icon": "sensor"},
+                          {"title": "DRBG", "sub": "CSPRNG", "icon": "rng"},
                           {"title": "CHAVE + NONCE", "sub": "128b + 96b", "color": c}],
                 "theory": "Baseline classico: chave AES-128 efemera e nonce, gerados por hardware e unicos por mensagem.",
             },
             "aead": {
                 "title": "CIFRA AUTENTICADA AES-GCM",
                 "nodes": [{"title": "PAYLOAD + chave", "sub": "claro"},
-                          {"title": "AES-GCM", "sub": "cifra + tag"},
-                          {"title": "CIPHERTEXT", "sub": f"+ tag {ctx['gcm']}B", "color": o}],
+                          {"title": "AES-GCM", "sub": "cifra + tag", "icon": "lock"},
+                          {"title": "CIPHERTEXT", "sub": f"+ tag {ctx['gcm']}B", "color": o, "badge": "check"}],
                 "theory": "AES-GCM cifra (modo CTR) e autentica (GHASH) numa passada. O nonce nao pode repetir com a chave.",
             },
             "verify": {
                 "title": "VERIFICACAO NO RECEPTOR",
                 "nodes": [{"title": "CIPHERTEXT", "sub": "+ tag"},
-                          {"title": "AES-GCM", "sub": "confere a tag"},
-                          {"title": "PAYLOAD", "sub": "liberado", "color": g}],
+                          {"title": "AES-GCM", "sub": "confere a tag", "icon": "shield"},
+                          {"title": "PAYLOAD", "sub": "liberado", "color": g, "badge": "check"}],
                 "theory": "So libera o texto se a tag GCM conferir (comparacao em tempo constante). Com CRC, checa corrupcao.",
             },
         }
         return specs.get(kind, {
             "title": "RESULTADO DA MISSAO", "theme": "space",
-            "nodes": [{"title": "PACOTE", "sub": f"{ctx['total']} B"},
-                      {"title": "DOWNLINK", "sub": "SAT -> solo"},
-                      {"title": "ENTREGUE", "sub": ctx["result"] or "OK", "color": g}],
+            "nodes": [{"title": "PACOTE", "sub": f"{ctx['total']} B", "icon": "packet"},
+                      {"title": "DOWNLINK", "sub": "SAT -> solo", "icon": "sat"},
+                      {"title": "ENTREGUE", "sub": ctx["result"] or "OK", "color": g, "badge": "check"}],
             "theory": "Pacote final = payload + ML-KEM + nonce + tag (+ CRC). Tempos e tamanhos medidos na placa Wisdom.",
         })
 
@@ -3985,7 +4092,8 @@ class DashboardPanel:
         if label in {"PAYLOAD", "CIPHERTEXT"}:
             return {"title": "MATERIAL INTEGRO (ANTES DA FALHA)", "theme": "space",
                     "nodes": [{"title": "CIPHERTEXT integro" if is_ct else "PAYLOAD integro",
-                               "sub": "768 B" if is_ct else "referencia salva", "color": g}],
+                               "sub": "768 B" if is_ct else "referencia salva", "color": g,
+                               "icon": "shield", "badge": "check"}],
                     "theory": "Estado integro antes da falha. O CRC (ou o segredo de referencia) e calculado agora."}
         if label == "BIT-FLIP":
             if ctx["before"] is not None and ctx["after"] is not None:
@@ -3995,39 +4103,39 @@ class DashboardPanel:
                         "theory": "Um unico bit invertido (XOR com a mascara): o modelo de falha por radiacao (SEU)."}
             return {"title": "INVERSAO DE UM BIT NO CIPHERTEXT", "theme": "space",
                     "nodes": [{"title": "ct (CRC)", "sub": ctx["crc_before"]},
-                              {"title": "BIT-FLIP", "sub": "XOR", "color": r},
-                              {"title": "ct' (CRC)", "sub": ctx["crc_after"], "color": r}],
+                              {"title": "BIT-FLIP", "sub": "XOR", "color": r, "icon": "alert"},
+                              {"title": "ct' (CRC)", "sub": ctx["crc_after"], "color": r, "badge": "cross"}],
                     "theory": "Um bit do ciphertext ML-KEM e invertido; o CRC do pacote muda de tx para rx."}
         specs = {
             "SEM CRC": {"title": "SEM GUARDIAO DE INTEGRIDADE",
                         "nodes": [{"title": "Payload alterado", "sub": ""},
-                                  {"title": "SEM CRC", "sub": "GUARD=NONE", "color": d},
-                                  {"title": "PASSA", "sub": "sem checar", "color": r}],
+                                  {"title": "SEM CRC", "sub": "GUARD=NONE", "color": d, "icon": "alert"},
+                                  {"title": "PASSA", "sub": "sem checar", "color": r, "badge": "cross"}],
                         "theory": "Sem checksum salvo nao ha referencia para comparar; a alteracao segue sem ser detectada."},
             "ENTREGA": {"title": "CORRUPCAO PASSA COMO VALIDA",
                         "nodes": [{"title": "Corrompido", "sub": ""},
-                                  {"title": "ACEITO", "sub": "sem verificar"},
-                                  {"title": "SILENT", "sub": "perigoso", "color": r}],
+                                  {"title": "ACEITO", "sub": "sem verificar", "icon": "alert"},
+                                  {"title": "SILENT", "sub": "perigoso", "color": r, "badge": "cross"}],
                         "theory": "A corrupcao e aceita como valida. Falha silenciosa e perigosa: parece uma entrega normal."},
             "CRC32": {"title": "CRC-32 SERVE DE REFERENCIA",
                       "nodes": [{"title": "Payload", "sub": ""},
-                                {"title": "CRC-32", "sub": "salvo (tx)", "color": g},
-                                {"title": "Referencia", "sub": ctx["crc_before"]}],
+                                {"title": "CRC-32", "sub": "salvo (tx)", "color": g, "icon": "shield"},
+                                {"title": "Referencia", "sub": ctx["crc_before"], "badge": "check"}],
                       "theory": "O CRC salvo antes da falha vira a referencia comparada depois com o CRC recalculado."},
             "VERIFICA": {"title": "COMPARACAO REVELA A CORRUPCAO",
                          "nodes": [{"title": "CRC tx", "sub": ctx["crc_before"], "color": g},
-                                   {"title": "COMPARA", "sub": "tx != rx", "color": o},
-                                   {"title": "CRC rx", "sub": ctx["crc_after"], "color": r}],
+                                   {"title": "COMPARA", "sub": "tx != rx", "color": o, "icon": "shield"},
+                                   {"title": "CRC rx", "sub": ctx["crc_after"], "color": r, "badge": "cross"}],
                          "theory": "Recalcula o CRC e compara com o salvo. Divergiu -> DETECTED_GUARD; 1 bit sempre e detectado."},
             "DECAP": {"title": "DECAPSULACAO DIVERGENTE",
                       "nodes": [{"title": "ct corrompido", "sub": "", "color": r},
-                                {"title": "DECAPS", "sub": "ct' != ct"},
-                                {"title": "Segredo", "sub": "divergente", "color": r}],
+                                {"title": "DECAPS", "sub": "ct' != ct", "icon": "unlock"},
+                                {"title": "Segredo", "sub": "divergente", "color": r, "badge": "cross"}],
                       "theory": "Com o ciphertext alterado a re-encapsulacao nao bate (FO) e o segredo recuperado diverge."},
             "CONFIRMA": {"title": "CONFIRMACAO HMAC REJEITA",
                          "nodes": [{"title": "ss emissor", "sub": "ok", "color": g},
-                                   {"title": "HMAC-SHA256", "sub": "ss tx != ss rx"},
-                                   {"title": "REJEITADO", "sub": "PROTOCOL", "color": g}],
+                                   {"title": "HMAC-SHA256", "sub": "ss tx != ss rx", "icon": "shield"},
+                                   {"title": "REJEITADO", "sub": "PROTOCOL", "color": g, "badge": "check"}],
                          "theory": "A confirmacao HMAC compara os segredos das duas pontas sem revela-los. Divergiu -> PROTOCOL_REJECT."},
         }
         if label == "RESULTADO":
@@ -4037,7 +4145,9 @@ class DashboardPanel:
             return {"title": "RESULTADO OBSERVADO DA FALHA", "theme": "space",
                     "nodes": [{"title": "FALHA SILENCIOSA" if silent else verdict,
                                "sub": "corrupcao aceita" if silent else "corrupcao barrada",
-                               "color": r if silent else g}],
+                               "color": r if silent else g,
+                               "icon": "alert" if silent else "shield",
+                               "badge": "cross" if silent else "check"}],
                     "theory": ("A corrupcao foi aceita sem aviso: sem guardiao, o erro passa como entrega normal."
                                if silent else
                                "A protecao barrou a corrupcao antes da entrega. O evento e exportado para o JSON.")}
