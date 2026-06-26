@@ -465,6 +465,47 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertIn("PQC_INFO", rendered)
         self.assertIn("I2C_SCAN", rendered)
 
+    def test_left_panel_terminal_toggle_controls_command_input(self):
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            dashboard.WIDTH, dashboard.HEIGHT = 1366, 768
+            surface = pygame.Surface((1366, 768), pygame.SRCALPHA)
+            earth = dashboard.Earth()
+            satellite = dashboard.Satellite(earth)
+            panel = dashboard.DashboardPanel()
+
+            panel._draw_left_panel(surface, 0.5, satellite)
+            self.assertIsNotNone(panel.terminal_toggle_rect)
+            self.assertFalse(panel.terminal_visible)
+            self.assertFalse(panel.input_active)
+
+            panel.handle_event(
+                pygame.event.Event(
+                    pygame.MOUSEBUTTONDOWN,
+                    {"button": 1, "pos": panel.terminal_toggle_rect.center},
+                )
+            )
+            self.assertTrue(panel.terminal_visible)
+            self.assertTrue(panel.input_active)
+
+            panel.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_h, "unicode": "H"}))
+            self.assertEqual(panel.input_text, "H")
+
+            panel.handle_event(
+                pygame.event.Event(
+                    pygame.MOUSEBUTTONDOWN,
+                    {"button": 1, "pos": panel.terminal_toggle_rect.center},
+                )
+            )
+            self.assertFalse(panel.terminal_visible)
+            self.assertFalse(panel.input_active)
+            self.assertEqual(panel.input_text, "")
+
+            panel.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_x, "unicode": "X"}))
+            self.assertEqual(panel.input_text, "")
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
     def test_metric_tiles_render_core_presentation_metrics(self):
         panel = dashboard.DashboardPanel()
         panel._apply_hardware_response(
@@ -793,6 +834,8 @@ class DashboardCommandTests(unittest.TestCase):
                 {"button": 1, "pos": panel.mission_overlay_close_rect.center},
             )
             panel.handle_event(close_event)
+            self.assertTrue(panel.mission_overlay_visible)
+            panel.update(dashboard.POPUP_EXIT_SECONDS + 0.01)
             self.assertFalse(panel.mission_overlay_visible)
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
@@ -877,6 +920,8 @@ class DashboardCommandTests(unittest.TestCase):
                 )
             )
 
+            self.assertIn("PQC", panel.mission_overlays)
+            panel.update(dashboard.POPUP_EXIT_SECONDS + 0.01)
             self.assertNotIn("PQC", panel.mission_overlays)
             self.assertIn("CLASSIC", panel.mission_overlays)
             self.assertIn("PQC_CRC32", panel.mission_overlays)

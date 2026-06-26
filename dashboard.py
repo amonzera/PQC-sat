@@ -62,6 +62,8 @@ DEMO_SNAPSHOT_SECONDS = 1.5
 DEMO_RESULTS_SECONDS = 8.0
 MISSION_FLOW_ANIMATION_SECONDS = 8.0
 FAULT_FLOW_ANIMATION_SECONDS = 7.5
+POPUP_ENTER_SECONDS = 0.20
+POPUP_EXIT_SECONDS = 0.16
 HELP_HINT_LINES = (
     "Botões: comandos visuais da demo.",
     "Payload vivo usa sensores no envio.",
@@ -1207,8 +1209,10 @@ class DashboardPanel:
         self.command_history = []
         self.command_button_rects = []
         self.live_payload_toggle_rect = None
+        self.terminal_toggle_rect = None
+        self.terminal_visible = False
         self.input_text = ""
-        self.input_active = True
+        self.input_active = False
         self.cursor_blink = 0
         self.session_status = "SIMULADO"
         self.pqc_algorithm = "ML-KEM-512 (ATIVO - SIMULADO)" if serial_client is None else "ML-KEM-512 (PENDENTE)"
@@ -1228,6 +1232,8 @@ class DashboardPanel:
         self.fault_overlay_visible = False
         self.fault_overlay = {}
         self.fault_overlay_position = None
+        self.fault_overlay_opened_at = 0.0
+        self.fault_overlay_closing_since = None
         self.fault_overlay_rect = None
         self.fault_overlay_close_rect = None
         self.fault_overlay_drag_rect = None
@@ -1277,6 +1283,8 @@ class DashboardPanel:
         self.mission_overlays = {}
         self.mission_overlay_order = []
         self.mission_overlay_positions = {}
+        self.mission_overlay_opened_at = {}
+        self.mission_overlay_closing_since = {}
         self.mission_overlay_rects = {}
         self.mission_overlay_close_rects = {}
         self.mission_overlay_drag_rects = {}
@@ -1368,6 +1376,13 @@ class DashboardPanel:
                 self._execute_command("TOGGLE_LIVE_PAYLOAD")
                 self.input_active = False
                 return
+            if (
+                event.button == 1
+                and self.terminal_toggle_rect is not None
+                and self.terminal_toggle_rect.collidepoint(event.pos)
+            ):
+                self._execute_command("TOGGLE_TERMINAL")
+                return
             if event.button == 1 and self._handle_command_button_click(event.pos):
                 self.input_active = False
                 return
@@ -1375,13 +1390,13 @@ class DashboardPanel:
                 delta = -3 if event.button == 4 else 3
                 self.help_scroll = max(0, self.help_scroll + delta)
                 return
-            self.input_active = True
+            self.input_active = self.terminal_visible
 
         if event.type == pygame.MOUSEWHEEL and self.help_visible:
             self.help_scroll = max(0, self.help_scroll - event.y * 3)
             return
 
-        if event.type == pygame.KEYDOWN:
+        if event.type == pygame.KEYDOWN and self.terminal_visible:
             if event.key == pygame.K_RETURN:
                 if self.input_text.strip():
                     self._execute_command(self.input_text.strip())
@@ -1530,8 +1545,17 @@ class DashboardPanel:
             animation["awaiting_confirm"] = True
 
     def _close_fault_overlay(self):
+        if not self.fault_overlay_visible:
+            return
+        if self.fault_overlay_closing_since is None:
+            self.fault_overlay_closing_since = self.uptime
+        self.dragging_fault_overlay = False
+        self.dragging_fault_flow = False
+
+    def _clear_fault_overlay(self):
         self.fault_overlay_visible = False
         self.fault_overlay = {}
+        self.fault_overlay_closing_since = None
         self.fault_overlay_rect = None
         self.fault_overlay_close_rect = None
         self.fault_overlay_drag_rect = None
@@ -1649,6 +1673,14 @@ class DashboardPanel:
             self.session_dirty = True
             self.session_status = "PAYLOAD VIVO" if self.live_payload_enabled else "PAYLOAD FIXO"
             status = "PAYLOAD VIVO ON" if self.live_payload_enabled else "PAYLOAD VIVO OFF"
+        elif cmd_upper == "TOGGLE_TERMINAL":
+            self.terminal_visible = not self.terminal_visible
+            self.input_active = self.terminal_visible
+            if not self.terminal_visible:
+                self.input_text = ""
+                self.help_visible = False
+                self.help_scroll = 0
+            status = "TERMINAL ON" if self.terminal_visible else "TERMINAL OFF"
         elif cmd_upper == "PQC_STATUS":
             if self.serial_connected:
                 self._queue_serial_command("PQC_INFO", visible=True)
@@ -1676,6 +1708,8 @@ class DashboardPanel:
         elif command_name == "TELEMETRY" and self.serial_client is None:
             status = "SNAPSHOT SIM"
         elif command_name == "HELP":
+            self.terminal_visible = True
+            self.input_active = True
             self.help_visible = True
             self.help_topic = "INDEX"
             self.help_scroll = 0
@@ -2016,6 +2050,7 @@ class DashboardPanel:
         self.fault_overlay_visible = False
         self.fault_overlay.clear()
         self.fault_overlay_position = None
+        self.fault_overlay_closing_since = None
         self.fault_overlay_rect = None
         self.fault_overlay_close_rect = None
         self.fault_overlay_drag_rect = None
@@ -2041,6 +2076,8 @@ class DashboardPanel:
         self.mission_overlays.clear()
         self.mission_overlay_order.clear()
         self.mission_overlay_positions.clear()
+        self.mission_overlay_opened_at.clear()
+        self.mission_overlay_closing_since.clear()
         self.mission_overlay_rects.clear()
         self.mission_overlay_close_rects.clear()
         self.mission_overlay_drag_rects.clear()
@@ -2496,6 +2533,8 @@ class DashboardPanel:
     def _open_fault_overlay(self, fault):
         self.fault_overlay = dict(fault)
         self.fault_overlay_visible = True
+        self.fault_overlay_opened_at = self.uptime
+        self.fault_overlay_closing_since = None
         if self.fault_overlay_position is None:
             self.fault_overlay_position = self._default_fault_overlay_position()
         self.fault_flow_animation = {
@@ -2722,6 +2761,11 @@ class DashboardPanel:
             self.effect_timer = max(0.0, self.effect_timer - dt)
         if self.mission_effect_timer > 0:
             self.mission_effect_timer = max(0.0, self.mission_effect_timer - dt)
+        if self.fault_overlay_closing_since is not None and self.uptime - self.fault_overlay_closing_since >= POPUP_EXIT_SECONDS:
+            self._clear_fault_overlay()
+        for scenario, closing_since in list(self.mission_overlay_closing_since.items()):
+            if self.uptime - closing_since >= POPUP_EXIT_SECONDS:
+                self._remove_mission_overlay(scenario)
         if self.stress_state == "RUNNING":
             elapsed = self.uptime - self.stress_started_at
             if elapsed >= STRESS_DIDACTIC_TIMEOUT_SECONDS:
@@ -2889,6 +2933,8 @@ class DashboardPanel:
         if snapshot:
             mission.update(self._mission_context_fields(snapshot))
         self.mission_overlays[scenario] = mission
+        self.mission_overlay_opened_at[scenario] = self.uptime
+        self.mission_overlay_closing_since.pop(scenario, None)
         if scenario not in self.mission_overlay_order:
             self.mission_overlay_order.append(scenario)
         if scenario not in self.mission_overlay_positions:
@@ -3075,8 +3121,19 @@ class DashboardPanel:
         self._sync_mission_overlay_state()
 
     def _close_mission_overlay(self, scenario):
+        if scenario not in self.mission_overlays:
+            return
+        self.mission_overlay_closing_since.setdefault(scenario, self.uptime)
+        if self.dragging_mission_overlay == scenario:
+            self.dragging_mission_overlay = None
+        if self.dragging_mission_flow_scenario == scenario:
+            self.dragging_mission_flow_scenario = None
+
+    def _remove_mission_overlay(self, scenario):
         self.mission_overlays.pop(scenario, None)
         self.mission_overlay_positions.pop(scenario, None)
+        self.mission_overlay_opened_at.pop(scenario, None)
+        self.mission_overlay_closing_since.pop(scenario, None)
         self.mission_overlay_rects.pop(scenario, None)
         self.mission_overlay_close_rects.pop(scenario, None)
         self.mission_overlay_drag_rects.pop(scenario, None)
@@ -3430,6 +3487,16 @@ class DashboardPanel:
             y += line_spacing
         return y
 
+    def _short_explanation(self, text):
+        text = str(text or "").strip()
+        if not text:
+            return ""
+        for separator in (". ", "; "):
+            if separator in text:
+                first = text.split(separator, 1)[0].strip()
+                return first + ("." if separator.startswith(".") and not first.endswith(".") else "")
+        return text
+
     def _scenario_color(self, scenario):
         if scenario == "PQC_CRC32":
             return C_ACCENT_GREEN
@@ -3483,17 +3550,12 @@ class DashboardPanel:
 
     def _draw_operation_core(self, surface, center, label, sub, color, progress, t):
         progress = max(0.0, min(1.0, progress))
-        self._draw_soft_glow(surface, center, 34, color, 58)
-        pulse = int(4 * math.sin(t * 6 + progress * math.pi))
-        for radius, alpha in ((36 + pulse, 110), (26, 180), (17, 230)):
+        self._draw_soft_glow(surface, center, 28, color, 38)
+        pulse = int(3 * math.sin(t * 5 + progress * math.pi))
+        for radius, alpha in ((31 + pulse, 100), (21, 210)):
             pygame.draw.circle(surface, self._mix_color((5, 8, 18), color, alpha / 255.0), center, radius, 2)
-        pygame.draw.circle(surface, (5, 8, 18), center, 25)
-        pygame.draw.circle(surface, color, center, 25, 2)
-        for index in range(7):
-            angle = t * 1.8 + progress * math.pi * 2 + index * math.tau / 7
-            radius = 32 + 3 * math.sin(t * 2.3 + index)
-            dot = (center[0] + int(math.cos(angle) * radius), center[1] + int(math.sin(angle) * radius))
-            pygame.draw.circle(surface, color, dot, 2)
+        pygame.draw.circle(surface, (5, 8, 18), center, 24)
+        pygame.draw.circle(surface, color, center, 24, 2)
         surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, 82), (center[0] - 41, center[1] - 12))
         if sub:
             surface.blit(self._render_clipped(FONT_LABEL, sub, (210, 225, 255), 82), (center[0] - 41, center[1] + 6))
@@ -3514,15 +3576,12 @@ class DashboardPanel:
 
     def _draw_circuit_background(self, surface, rect, color, t):
         pygame.draw.rect(surface, (4, 8, 18), rect, border_radius=5)
-        step = 24
+        step = 42
         for x in range(rect.x + 8, rect.right, step):
-            pygame.draw.line(surface, (14, 22, 48), (x, rect.y + 4), (x, rect.bottom - 4), 1)
+            pygame.draw.line(surface, (10, 16, 34), (x, rect.y + 4), (x, rect.bottom - 4), 1)
         for y in range(rect.y + 8, rect.bottom, step):
-            pygame.draw.line(surface, (14, 22, 48), (rect.x + 4, y), (rect.right - 4, y), 1)
-        for index in range(8):
-            px = rect.x + 16 + ((index * 73 + int(t * 34)) % max(1, rect.width - 32))
-            py = rect.y + 10 + ((index * 29) % max(1, rect.height - 20))
-            pygame.draw.circle(surface, self._mix_color((18, 24, 48), color, 0.45), (px, py), 1)
+            pygame.draw.line(surface, (10, 16, 34), (rect.x + 4, y), (rect.right - 4, y), 1)
+        pygame.draw.rect(surface, self._mix_color(C_PANEL_BORDER, color, 0.25), rect, width=1, border_radius=5)
 
     def _draw_crypto_capsule(self, surface, rect, label, sub, color, fill=1.0, active=False):
         fill = max(0.0, min(1.0, fill))
@@ -3583,6 +3642,31 @@ class DashboardPanel:
         arrow = ((ex - 8, ey - 5), (ex, ey), (ex - 8, ey + 5))
         if abs(dy) > abs(dx):
             arrow = ((ex - 5, ey - 8), (ex, ey), (ex + 5, ey - 8))
+        pygame.draw.polygon(surface, color, arrow)
+
+    def _draw_clean_arrow(self, surface, start, end, color, progress):
+        progress = max(0.0, min(1.0, progress))
+        sx, sy = start
+        ex, ey = end
+        active = (sx + int((ex - sx) * progress), sy + int((ey - sy) * progress))
+        pygame.draw.line(surface, (36, 48, 86), start, end, 2)
+        pygame.draw.line(surface, color, start, active, 3)
+        if progress <= 0.02:
+            return
+        dx = ex - sx
+        dy = ey - sy
+        distance = math.hypot(dx, dy) or 1.0
+        ux = dx / distance
+        uy = dy / distance
+        nx = -uy
+        ny = ux
+        tip = active
+        back = (tip[0] - int(9 * ux), tip[1] - int(9 * uy))
+        arrow = (
+            tip,
+            (back[0] + int(5 * nx), back[1] + int(5 * ny)),
+            (back[0] - int(5 * nx), back[1] - int(5 * ny)),
+        )
         pygame.draw.polygon(surface, color, arrow)
 
     def _draw_sensor_nodes(self, surface, area, progress, t, live):
@@ -3659,15 +3743,9 @@ class DashboardPanel:
         progress = max(0.0, min(1.0, progress))
         source = (rect.x + 26, rect.y + 12)
         hit = (source[0] + int((target[0] - source[0]) * progress), source[1] + int((target[1] - source[1]) * progress))
-        for index in range(3):
-            offset = math.sin(t * 7 + index) * 5
-            pygame.draw.line(surface, color, (source[0], source[1] + int(offset)), hit, 2)
-        pygame.draw.circle(surface, color, hit, 5 + int(4 * math.sin(t * 8) ** 2))
-        for index in range(10):
-            angle = t * 3 + index * math.tau / 10
-            radius = 10 + 18 * progress
-            point = (target[0] + int(math.cos(angle) * radius), target[1] + int(math.sin(angle) * radius))
-            pygame.draw.circle(surface, color, point, 2)
+        pygame.draw.line(surface, color, source, hit, 2)
+        pygame.draw.circle(surface, color, hit, 4 + int(2 * math.sin(t * 8) ** 2))
+        pygame.draw.circle(surface, color, target, int(10 + 14 * progress), 1)
 
     def _mission_visual_scene(self, scenario, mission, step):
         kind = str(step.get("kind", "")).lower()
@@ -3781,21 +3859,12 @@ class DashboardPanel:
         if kind == "payload":
             self._draw_sensor_nodes(surface, left_rect, progress, t, live)
         elif kind in {"keygen", "mlkem", "decap"}:
-            self._draw_lattice_effect(surface, left_rect.inflate(-6, -6), C_ACCENT_PURPLE, progress, t)
             self._draw_capsule_row(surface, scene["left"], left_rect, reveal=1.0)
         else:
             self._draw_capsule_row(surface, scene["left"], left_rect, reveal=1.0)
 
         stream_color = C_ACCENT_PURPLE if kind in {"keygen", "mlkem", "decap"} else color
-        if kind == "aead":
-            stream_labels = ("P1", "4F", "A7", "09", "D2", "8C")
-        elif kind in {"mlkem", "decap"}:
-            stream_labels = ("pk", "r", "A", "u", "v", "ss")
-        elif kind == "crc":
-            stream_labels = ("P", "A", "Y", "+", "C", "R")
-        else:
-            stream_labels = None
-        self._draw_byte_stream(surface, input_anchor, (center[0] - 38, center[1]), stream_color, progress, t, stream_labels)
+        self._draw_clean_arrow(surface, input_anchor, (center[0] - 38, center[1]), stream_color, progress)
 
         self._draw_operation_core(surface, center, scene["op"][0], scene["op"][1], color, progress, t)
         if kind == "crc":
@@ -3810,7 +3879,7 @@ class DashboardPanel:
         elif kind in {"keygen", "mlkem", "decap"}:
             self._draw_lattice_effect(surface, pygame.Rect(center[0] - 31, center[1] - 31, 62, 62), C_ACCENT_PURPLE, progress, t)
 
-        self._draw_byte_stream(surface, (center[0] + 38, center[1]), output_anchor, color, progress, t, ("CT", "N", "TAG", "OK") if kind == "aead" else None)
+        self._draw_clean_arrow(surface, (center[0] + 38, center[1]), output_anchor, color, progress)
         reveal = 0.18 + progress * 0.82
         active_right = len(scene["right"]) - 1 if progress > 0.85 else None
         self._draw_capsule_row(surface, scene["right"], right_rect, reveal=reveal, active_index=active_right)
@@ -3884,10 +3953,10 @@ class DashboardPanel:
             left_rect = pygame.Rect(content.x + 8, row_y, max(190, int(content.width * 0.36)), 42)
             right_rect = pygame.Rect(center[0] + 62, row_y, max(190, content.right - center[0] - 70), 42)
             self._draw_bit_strip(surface, left_rect.x, left_rect.y + 4, left_rect.width, "ANTES", before, 0, C_ACCENT_CYAN)
-            self._draw_byte_stream(surface, (left_rect.right + 8, center[1]), (center[0] - 38, center[1]), C_ACCENT_CYAN, min(1.0, progress * 1.15), t, ("10", "01", "00"))
+            self._draw_clean_arrow(surface, (left_rect.right + 8, center[1]), (center[0] - 38, center[1]), C_ACCENT_CYAN, min(1.0, progress * 1.15))
             self._draw_operation_core(surface, center, op_label, op_sub, color, progress, t)
             self._draw_radiation_strike(surface, content, center, C_ACCENT_RED, progress, t)
-            self._draw_byte_stream(surface, (center[0] + 38, center[1]), (right_rect.x - 10, center[1]), color, progress, t, ("10", "11", "00"))
+            self._draw_clean_arrow(surface, (center[0] + 38, center[1]), (right_rect.x - 10, center[1]), color, progress)
             self._draw_bit_strip(surface, right_rect.x, right_rect.y + 4, right_rect.width, "DEPOIS", after, mask, color)
             if mask:
                 pygame.draw.rect(surface, C_ACCENT_RED, right_rect.inflate(6, 18), width=2, border_radius=7)
@@ -3904,7 +3973,7 @@ class DashboardPanel:
             left_rect = pygame.Rect(content.x + 8, lane_y, max(160, int(content.width * 0.28)), lane_h)
             right_rect = pygame.Rect(center[0] + 66, lane_y, max(190, content.right - center[0] - 74), lane_h)
             self._draw_capsule_row(surface, left, left_rect, 1.0)
-            self._draw_byte_stream(surface, (left_rect.right + 9, center[1]), (center[0] - 40, center[1]), C_ACCENT_PURPLE, progress, t, ("CT", "7F", "E2", "??"))
+            self._draw_clean_arrow(surface, (left_rect.right + 9, center[1]), (center[0] - 40, center[1]), C_ACCENT_PURPLE, progress)
             self._draw_operation_core(surface, center, op_label, op_sub, color, progress, t)
             if label in {"CRC32", "VERIFICA"}:
                 self._draw_shield_symbol(surface, center, C_ACCENT_GREEN, progress, breached=False)
@@ -3915,7 +3984,7 @@ class DashboardPanel:
                 pygame.draw.line(surface, C_ACCENT_RED, (center[0] - 19, center[1] - 24), (center[0] + 18, center[1] + 24), 3)
             else:
                 self._draw_radiation_strike(surface, content, center, C_ACCENT_RED, progress, t)
-            self._draw_byte_stream(surface, (center[0] + 40, center[1]), (right_rect.x - 10, center[1]), color, progress, t, ("OK", "NO", "TAG") if label in {"CONFIRMA", "VERIFICA"} else None)
+            self._draw_clean_arrow(surface, (center[0] + 40, center[1]), (right_rect.x - 10, center[1]), color, progress)
             self._draw_capsule_row(surface, right, right_rect, 0.18 + progress * 0.82, active_index=1 if progress > 0.82 else None)
             if label in {"ENTREGA", "RESULTADO"} and str(fault.get("result", "")).upper() == "SILENT":
                 stamp = pygame.Rect(center[0] - 38, center[1] + 28, 76, 18)
@@ -4207,6 +4276,15 @@ class DashboardPanel:
         max_y = max(min_y, HEIGHT - height - 44)
         return max(10, min(int(x), max_x)), max(min_y, min(int(y), max_y))
 
+    def _popup_transition(self, opened_at, closing_since=None):
+        if closing_since is not None:
+            ratio = max(0.0, min(1.0, (self.uptime - closing_since) / POPUP_EXIT_SECONDS))
+            eased = ratio * ratio
+            return -int(18 * eased), max(0.35, 1.0 - ratio)
+        ratio = max(0.0, min(1.0, (self.uptime - opened_at) / POPUP_ENTER_SECONDS))
+        eased = 1.0 - (1.0 - ratio) ** 3
+        return int(20 * (1.0 - eased)), max(0.35, eased)
+
     def _fault_overlay_geometry(self):
         width, height = self._fault_overlay_size()
         if self.fault_overlay_position is None:
@@ -4228,6 +4306,13 @@ class DashboardPanel:
             return
 
         rect, close_rect = self._fault_overlay_geometry()
+        offset_y, alpha_ratio = self._popup_transition(
+            self.fault_overlay_opened_at,
+            self.fault_overlay_closing_since,
+        )
+        if offset_y:
+            rect = rect.move(0, offset_y)
+            close_rect = close_rect.move(0, offset_y)
         drag_rect = pygame.Rect(rect.x, rect.y, rect.width, 44)
         self.fault_overlay_rect = rect
         self.fault_overlay_close_rect = close_rect
@@ -4237,10 +4322,10 @@ class DashboardPanel:
         color = self._fault_result_color(result)
         panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
         pulse = int(150 + 45 * math.sin(t * 8)) if self.effect_timer > 0 else 150
-        pygame.draw.rect(panel, (*C_PANEL_BG, 232), (0, 0, rect.width, rect.height), border_radius=8)
-        pygame.draw.rect(panel, (*color, max(120, pulse)), (0, 0, rect.width, rect.height), width=1, border_radius=8)
-        pygame.draw.rect(panel, (*color, 34), (0, 0, rect.width, 44), border_radius=8)
-        pygame.draw.line(panel, (*C_PANEL_BORDER, 180), (0, 44), (rect.width, 44), 1)
+        pygame.draw.rect(panel, (*C_PANEL_BG, int(232 * alpha_ratio)), (0, 0, rect.width, rect.height), border_radius=8)
+        pygame.draw.rect(panel, (*color, int(max(120, pulse) * alpha_ratio)), (0, 0, rect.width, rect.height), width=1, border_radius=8)
+        pygame.draw.rect(panel, (*color, int(34 * alpha_ratio)), (0, 0, rect.width, 44), border_radius=8)
+        pygame.draw.line(panel, (*C_PANEL_BORDER, int(180 * alpha_ratio)), (0, 44), (rect.width, 44), 1)
         surface.blit(panel, rect.topleft)
 
         title = f"FALHA {self.fault_overlay.get('target', 'PAYLOAD')} | {self._fault_result_short_label(result)}"
@@ -4302,7 +4387,7 @@ class DashboardPanel:
         )
         y += 18
 
-        step_h = 86 if rect.height >= 580 else 78
+        step_h = 76 if rect.height >= 580 else 70
         step_rect = pygame.Rect(x, y, width, step_h)
         pygame.draw.rect(surface, (8, 12, 26), step_rect, border_radius=5)
         pygame.draw.rect(surface, color, step_rect, width=2, border_radius=5)
@@ -4314,18 +4399,18 @@ class DashboardPanel:
         self._draw_wrapped_text(
             surface,
             FONT_LABEL,
-            active_step.get("explain", ""),
+            self._short_explanation(active_step.get("explain", "")),
             C_TEXT_PRIMARY,
             step_rect.x + 7,
             step_rect.y + 46,
             width - 14,
             line_spacing=14,
-            max_lines=2,
+            max_lines=1,
         )
 
         timeline_y = rect.bottom - 54
         visual_top = step_rect.bottom + 8
-        visual_h = max(176, timeline_y - visual_top - 24)
+        visual_h = max(188, timeline_y - visual_top - 24)
         visual_rect = pygame.Rect(x, visual_top, width, visual_h)
         self._draw_fault_transformation_panel(surface, visual_rect, fault, active_step, local_progress, t)
 
@@ -4370,9 +4455,9 @@ class DashboardPanel:
         pygame.draw.circle(surface, C_TEXT_PRIMARY, (marker_x, timeline_y), 12, 1)
 
         hint = (
-            "Arraste a linha para revisar; clique VER DADOS para abrir o resultado."
+            "Arraste a linha para revisar; VER DADOS abre resultado."
             if awaiting_confirm
-            else "Arraste a linha do tempo para avançar ou voltar durante a explicação."
+            else "Arraste a linha para revisar a explicação."
         )
         surface.blit(self._render_clipped(FONT_LABEL, hint, C_TEXT_DIM, width), (x, rect.bottom - 20))
 
@@ -4546,8 +4631,11 @@ class DashboardPanel:
     def _left_panel_height(self):
         header_and_top_padding = 42
         row_heights = (16 + 28, 16 + 28, 24)
+        terminal_control_height = 14 + 30
         bottom_padding = 18
-        return self._compact_panel_height(header_and_top_padding + sum(row_heights) + bottom_padding)
+        return self._compact_panel_height(
+            header_and_top_padding + sum(row_heights) + terminal_control_height + bottom_padding
+        )
 
     def _right_panel_height(self, width):
         columns = 2 if width >= 260 else 1
@@ -4597,6 +4685,8 @@ class DashboardPanel:
         guard_text = "CRC32 ON" if self.checksum_enabled else "NONE"
         val = self._render_clipped(FONT_BODY, guard_text, guard_color, cw - 142)
         surface.blit(val, (x + 142, y - 2))
+        y += 38
+        self._draw_terminal_toggle(surface, x, y, cw)
 
     def _draw_event_timeline(self, surface, x, y, width, panel_rect):
         lbl = FONT_LABEL.render("TIMELINE", True, C_ACCENT_CYAN)
@@ -4764,6 +4854,26 @@ class DashboardPanel:
         detail = "sensores -> MISSION" if active else "payload fixo"
         surface.blit(self._render_clipped(FONT_LABEL, detail, C_TEXT_DIM, width - 86), (rect.x + 9, rect.y + 19))
         surface.blit(FONT_LABEL.render(status, True, C_ACCENT_GREEN if active else C_TEXT_DIM), (knob_rect.x - 28, rect.y + 11))
+        return rect.bottom
+
+    def _draw_terminal_toggle(self, surface, x, y, width):
+        rect = pygame.Rect(x, y, width, 30)
+        self.terminal_toggle_rect = rect
+        active = bool(self.terminal_visible)
+        try:
+            hovered = rect.collidepoint(pygame.mouse.get_pos())
+        except pygame.error:
+            hovered = False
+        border = C_ACCENT_CYAN if active or hovered else C_PANEL_BORDER
+        fill = (0, 40, 54) if active else (18, 20, 40)
+        if hovered:
+            fill = (0, 55, 74) if active else (24, 30, 58)
+        pygame.draw.rect(surface, fill, rect, border_radius=5)
+        pygame.draw.rect(surface, border, rect, width=1, border_radius=5)
+        status = "ON" if active else "OFF"
+        status_color = C_ACCENT_GREEN if active else C_TEXT_DIM
+        surface.blit(self._render_clipped(FONT_LABEL, "TERMINAL", C_TEXT_PRIMARY, width - 52), (rect.x + 9, rect.y + 8))
+        surface.blit(FONT_LABEL.render(status, True, status_color), (rect.right - 38, rect.y + 8))
         return rect.bottom
 
     def _render_clipped(self, font, text, color, max_width):
@@ -5177,6 +5287,13 @@ class DashboardPanel:
 
     def _draw_single_mission_overlay(self, surface, t, scenario, mission):
         rect, close_rect = self._mission_overlay_geometry(scenario)
+        offset_y, alpha_ratio = self._popup_transition(
+            self.mission_overlay_opened_at.get(scenario, self.uptime),
+            self.mission_overlay_closing_since.get(scenario),
+        )
+        if offset_y:
+            rect = rect.move(0, offset_y)
+            close_rect = close_rect.move(0, offset_y)
         drag_rect = pygame.Rect(rect.x, rect.y, rect.width, 44)
         self.mission_overlay_rects[scenario] = rect
         self.mission_overlay_close_rects[scenario] = close_rect
@@ -5196,16 +5313,16 @@ class DashboardPanel:
         color = scenario_color if result in {"", "DELIVERED"} else C_ACCENT_RED
 
         shadow = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(shadow, (0, 0, 0, 118), (0, 0, rect.width, rect.height), border_radius=10)
+        pygame.draw.rect(shadow, (0, 0, 0, int(82 * alpha_ratio)), (0, 0, rect.width, rect.height), border_radius=10)
         surface.blit(shadow, (rect.x + 8, rect.y + 10))
 
         panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
         alpha = int(170 + 55 * math.sin(t * 7)) if self.mission_effect_timer > 0 else 190
         border_alpha = min(245, max(185, alpha))
-        pygame.draw.rect(panel, (*C_PANEL_BG, 248), (0, 0, rect.width, rect.height), border_radius=8)
-        pygame.draw.rect(panel, (*color, border_alpha), (0, 0, rect.width, rect.height), 2, border_radius=8)
-        pygame.draw.rect(panel, (*color, 58), (0, 0, rect.width, 44), border_radius=8)
-        pygame.draw.line(panel, (*C_PANEL_BORDER, 230), (0, 44), (rect.width, 44), 1)
+        pygame.draw.rect(panel, (*C_PANEL_BG, int(248 * alpha_ratio)), (0, 0, rect.width, rect.height), border_radius=8)
+        pygame.draw.rect(panel, (*color, int(border_alpha * alpha_ratio)), (0, 0, rect.width, rect.height), 2, border_radius=8)
+        pygame.draw.rect(panel, (*color, int(48 * alpha_ratio)), (0, 0, rect.width, 44), border_radius=8)
+        pygame.draw.line(panel, (*C_PANEL_BORDER, int(210 * alpha_ratio)), (0, 44), (rect.width, 44), 1)
         surface.blit(panel, rect.topleft)
 
         result_label = "OK" if result == "DELIVERED" else (result or "EM CURSO")
@@ -5270,7 +5387,7 @@ class DashboardPanel:
         )
         y += 18
 
-        step_h = 90 if rect.height >= 580 else 82
+        step_h = 78 if rect.height >= 580 else 72
         step_rect = pygame.Rect(x, y, width, step_h)
         pygame.draw.rect(surface, (8, 12, 26), step_rect, border_radius=5)
         pygame.draw.rect(surface, color, step_rect, width=2, border_radius=5)
@@ -5289,13 +5406,13 @@ class DashboardPanel:
         self._draw_wrapped_text(
             surface,
             FONT_LABEL,
-            active_step.get("explain", ""),
+            self._short_explanation(active_step.get("explain", "")),
             C_TEXT_PRIMARY,
             step_rect.x + 7,
             step_rect.y + 45,
             width - 14,
             line_spacing=14,
-            max_lines=2,
+            max_lines=1,
         )
 
         hint_y = rect.bottom - 20
@@ -5303,7 +5420,7 @@ class DashboardPanel:
         bar_y = hint_y - bar_h - 4
         timeline_y = bar_y - 18
         visual_top = step_rect.bottom + 8
-        visual_h = max(190, timeline_y - visual_top - 22)
+        visual_h = max(204, timeline_y - visual_top - 22)
         visual_rect = pygame.Rect(x, visual_top, width, visual_h)
         self._draw_mission_transformation_panel(surface, visual_rect, scenario, mission, active_step, local_progress, t)
 
@@ -5365,9 +5482,9 @@ class DashboardPanel:
         bar_rect = pygame.Rect(rect.x, bar_y, rect.width, bar_h)
         self._draw_mission_flow_packet_bar(surface, bar_rect, mission, current_bytes, total_bytes)
         hint = (
-            "Arraste a linha para revisar; clique VER DADOS para abrir as métricas."
+            "Arraste a linha para revisar; VER DADOS abre métricas."
             if awaiting_confirm
-            else "Arraste a linha do tempo para avançar ou voltar durante a explicação."
+            else "Arraste a linha para revisar a explicação."
         )
         surface.blit(self._render_clipped(FONT_LABEL, hint, C_TEXT_DIM, width), (x, hint_y))
 
@@ -5684,7 +5801,7 @@ class DashboardPanel:
             (f"FALHAS: I{self.fault_injections} D{self.detected_errors} S{self.silent_failures}", fault_color),
             (f"PAYLOAD: {payload_label}", payload_color),
         ]
-        show_prompt = bool(self.input_text or self.help_visible)
+        show_prompt = bool(self.terminal_visible or self.input_text or self.help_visible)
         prompt_w = min(360, max(220, WIDTH // 3)) if show_prompt else 0
         item_limit_x = WIDTH - prompt_w - 40 if show_prompt else WIDTH - 100
         ix = 25
