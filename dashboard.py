@@ -3827,10 +3827,11 @@ class DashboardPanel:
         surface.blit(self._render_clipped(FONT_LABEL, scene["note"], (232, 238, 255), rect.width - 18), (rect.x + 9, note_y))
 
     def _draw_bit_strip(self, surface, x, y, width, label, byte_value, mask, color):
-        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, 60), (x, y + 5))
+        label_w = 52 if width < 210 else 60
+        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, label_w - 4), (x, y + 5))
         bit_gap = 3
-        bit_size = min(22, max(14, (width - 64 - bit_gap * 7) // 8))
-        start_x = x + 64
+        bit_size = min(22, max(10, (width - label_w - bit_gap * 7) // 8))
+        start_x = x + label_w
         for bit_index in range(8):
             bit_mask = 1 << (7 - bit_index)
             changed = bool(mask and (mask & bit_mask))
@@ -4538,10 +4539,27 @@ class DashboardPanel:
             title_surf = FONT_SMALL.render(title, True, C_ACCENT_CYAN)
             surface.blit(title_surf, (rect.x + 26, rect.y + 8))
 
+    def _compact_panel_height(self, content_height):
+        available_height = max(0, HEIGHT - 110)
+        return min(available_height, max(0, content_height))
+
+    def _left_panel_height(self):
+        header_and_top_padding = 42
+        row_heights = (16 + 28, 16 + 28, 24)
+        bottom_padding = 18
+        return self._compact_panel_height(header_and_top_padding + sum(row_heights) + bottom_padding)
+
+    def _right_panel_height(self, width):
+        columns = 2 if width >= 260 else 1
+        rows = math.ceil(len(COMMAND_BUTTONS) / columns)
+        button_block_h = 20 + rows * 30 + max(0, rows - 1) * 8
+        content_h = 42 + 34 + 14 + button_block_h + 16
+        return self._compact_panel_height(content_h)
+
     def _draw_left_panel(self, surface, t, satellite):
         """Painel esquerdo: Falhas e integridade (foco da simulacao)."""
         pw = 300
-        panel_rect = pygame.Rect(20, 55, pw, HEIGHT - 110)
+        panel_rect = pygame.Rect(20, 55, pw, self._left_panel_height())
         self._draw_panel_bg(surface, panel_rect, "[SIMULAÇÃO PQC]", t)
 
         y = panel_rect.y + 42
@@ -4560,7 +4578,7 @@ class DashboardPanel:
             session_color = C_ACCENT_CYAN
         else:
             session_color = C_ACCENT_GREEN
-        val = FONT_BODY.render(self.session_status, True, session_color)
+        val = self._render_clipped(FONT_BODY, self.session_status, session_color, cw)
         surface.blit(val, (x, y))
         y += 28
 
@@ -4568,7 +4586,7 @@ class DashboardPanel:
         lbl = FONT_LABEL.render("ALGORITMO", True, C_TEXT_DIM)
         surface.blit(lbl, (x, y))
         y += 16
-        val = FONT_BODY.render(self.pqc_algorithm, True, C_ACCENT_PURPLE)
+        val = self._render_clipped(FONT_BODY, self.pqc_algorithm, C_ACCENT_PURPLE, cw)
         surface.blit(val, (x, y))
         y += 28
 
@@ -4577,7 +4595,7 @@ class DashboardPanel:
         surface.blit(lbl, (x, y))
         guard_color = C_ACCENT_GREEN if self.checksum_enabled else C_ACCENT_ORANGE
         guard_text = "CRC32 ON" if self.checksum_enabled else "NONE"
-        val = FONT_BODY.render(guard_text, True, guard_color)
+        val = self._render_clipped(FONT_BODY, guard_text, guard_color, cw - 142)
         surface.blit(val, (x + 142, y - 2))
 
     def _draw_event_timeline(self, surface, x, y, width, panel_rect):
@@ -4666,12 +4684,12 @@ class DashboardPanel:
     def _draw_right_panel(self, surface, t):
         """Painel direito: Console de comandos."""
         pw = 380
-        panel_rect = pygame.Rect(WIDTH - pw - 20, 55, pw, HEIGHT - 110)
+        cw = pw - 28
+        panel_rect = pygame.Rect(WIDTH - pw - 20, 55, pw, self._right_panel_height(cw))
         self._draw_panel_bg(surface, panel_rect, "[DEMO AO VIVO]", t)
 
         y = panel_rect.y + 42
         x = panel_rect.x + 14
-        cw = pw - 28
         y = self._draw_live_payload_toggle(surface, x, y, cw) + 14
         self._draw_command_buttons(surface, x, y, cw, t)
 
