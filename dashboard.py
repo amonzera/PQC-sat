@@ -1376,13 +1376,7 @@ class DashboardPanel:
                 self._execute_command("TOGGLE_LIVE_PAYLOAD")
                 self.input_active = False
                 return
-            if (
-                event.button == 1
-                and self.terminal_toggle_rect is not None
-                and self.terminal_toggle_rect.collidepoint(event.pos)
-            ):
-                self._execute_command("TOGGLE_TERMINAL")
-                return
+
             if event.button == 1 and self._handle_command_button_click(event.pos):
                 self.input_active = False
                 return
@@ -4631,10 +4625,9 @@ class DashboardPanel:
     def _left_panel_height(self):
         header_and_top_padding = 42
         row_heights = (16 + 28, 16 + 28, 24)
-        terminal_control_height = 14 + 30
         bottom_padding = 18
         return self._compact_panel_height(
-            header_and_top_padding + sum(row_heights) + terminal_control_height + bottom_padding
+            header_and_top_padding + sum(row_heights) + bottom_padding
         )
 
     def _right_panel_height(self, width):
@@ -4686,7 +4679,6 @@ class DashboardPanel:
         val = self._render_clipped(FONT_BODY, guard_text, guard_color, cw - 142)
         surface.blit(val, (x + 142, y - 2))
         y += 38
-        self._draw_terminal_toggle(surface, x, y, cw)
 
     def _draw_event_timeline(self, surface, x, y, width, panel_rect):
         lbl = FONT_LABEL.render("TIMELINE", True, C_ACCENT_CYAN)
@@ -4856,25 +4848,7 @@ class DashboardPanel:
         surface.blit(FONT_LABEL.render(status, True, C_ACCENT_GREEN if active else C_TEXT_DIM), (knob_rect.x - 28, rect.y + 11))
         return rect.bottom
 
-    def _draw_terminal_toggle(self, surface, x, y, width):
-        rect = pygame.Rect(x, y, width, 30)
-        self.terminal_toggle_rect = rect
-        active = bool(self.terminal_visible)
-        try:
-            hovered = rect.collidepoint(pygame.mouse.get_pos())
-        except pygame.error:
-            hovered = False
-        border = C_ACCENT_CYAN if active or hovered else C_PANEL_BORDER
-        fill = (0, 40, 54) if active else (18, 20, 40)
-        if hovered:
-            fill = (0, 55, 74) if active else (24, 30, 58)
-        pygame.draw.rect(surface, fill, rect, border_radius=5)
-        pygame.draw.rect(surface, border, rect, width=1, border_radius=5)
-        status = "ON" if active else "OFF"
-        status_color = C_ACCENT_GREEN if active else C_TEXT_DIM
-        surface.blit(self._render_clipped(FONT_LABEL, "TERMINAL", C_TEXT_PRIMARY, width - 52), (rect.x + 9, rect.y + 8))
-        surface.blit(FONT_LABEL.render(status, True, status_color), (rect.right - 38, rect.y + 8))
-        return rect.bottom
+
 
     def _render_clipped(self, font, text, color, max_width):
         if font.size(text)[0] <= max_width:
