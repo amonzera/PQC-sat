@@ -13,6 +13,7 @@ from collections import Counter
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import statistics
 import sys
 import time
@@ -124,15 +125,7 @@ def utc_now_iso() -> str:
 
 
 def safe_slug(value: str) -> str:
-    slug = []
-    for char in value.lower():
-        if char.isalnum():
-            slug.append(char)
-        elif char in {"-", "_"}:
-            slug.append(char)
-        else:
-            slug.append("-")
-    return "".join(slug).strip("-") or "serial"
+    return re.sub(r"[^a-z0-9_-]", "-", str(value).lower()).strip("-") or "serial"
 
 
 def parse_number(value: object) -> float | int | None:
@@ -481,15 +474,15 @@ def summarize(records: list[dict[str, object]], actual_elapsed_s: float) -> dict
     return summary
 
 
-def write_document(document: dict[str, object], log_dir: str) -> Path:
+def write_document(document: dict[str, object], log_dir: str, kind: str = "final_metrics") -> Path:
     directory = Path(log_dir)
     directory.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     port = safe_slug(str(document.get("port", "serial")))
-    path = directory / f"{timestamp}_final_metrics_{port}.json"
+    path = directory / f"{timestamp}_{kind}_{port}.json"
     suffix = 1
     while path.exists():
-        path = directory / f"{timestamp}_final_metrics_{port}_{suffix}.json"
+        path = directory / f"{timestamp}_{kind}_{port}_{suffix}.json"
         suffix += 1
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     with tmp_path.open("w", encoding="utf-8") as handle:

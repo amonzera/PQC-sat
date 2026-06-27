@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Consolidate metrics from a PQC-SAT hardware battery JSON log into dashboard.py."""
+"""Consolidate metrics from a PQC-SAT hardware battery log into logs/metrics_consolidated.json.
+
+The dashboard reads that file at boot and overlays it on its baked-in defaults,
+so this runner never edits dashboard.py source.
+"""
 
 import argparse
 import json
@@ -9,8 +13,17 @@ from pathlib import Path
 
 # Setup paths relative to script location
 REPO_DIR = Path(__file__).resolve().parents[1]
-DASHBOARD_PATH = REPO_DIR / "dashboard.py"
 LOGS_DIR = REPO_DIR / "logs"
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(REPO_DIR))
+
+from tools.final_metrics_battery import (  # noqa: E402
+    mission_scenario_of,
+    parse_number as _parse_number,
+    payload_of,
+)
+
 MISSION_SCENARIOS = ("CLASSIC", "PQC", "PQC_CRC32")
 AES_REQUIRED_FIELDS = (
     "cipher",
@@ -29,7 +42,7 @@ AES_REQUIRED_FIELDS = (
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Analyze a final_metrics JSON log and consolidate into dashboard.py"
+        description="Analyze a final_metrics JSON log and write logs/metrics_consolidated.json"
     )
     parser.add_argument(
         "--file",
@@ -39,38 +52,16 @@ def parse_args():
 
 
 def parse_number(value) -> float:
-    if value is None:
-        return 0.0
-    text = str(value).strip()
-    if not text:
-        return 0.0
-    try:
-        if text.lower().startswith("0x"):
-            return float(int(text, 16))
-        return float(text)
-    except ValueError:
-        return 0.0
+    # Reuse the tested parser from final_metrics_battery; keep this module's
+    # "invalid/missing -> 0.0" contract so safe_mean and the ratio math below
+    # stay numeric.
+    parsed = _parse_number(value)
+    return float(parsed) if parsed is not None else 0.0
 
 
 def safe_mean(values) -> float:
     parsed = [parse_number(v) for v in values if v is not None]
     return sum(parsed) / len(parsed) if parsed else 0.0
-
-
-def payload_of(record):
-    payload = record.get("payload")
-    return payload if isinstance(payload, dict) else {}
-
-
-def mission_scenario_of(record) -> str | None:
-    payload = payload_of(record)
-    scenario = str(payload.get("scenario") or "").strip().upper()
-    if scenario in MISSION_SCENARIOS:
-        return scenario
-    parts = str(record.get("command", "")).split()
-    if len(parts) >= 2 and parts[0] == "MISSION" and parts[1] in MISSION_SCENARIOS:
-        return parts[1]
-    return None
 
 
 def records_for_profile(records, profile):
@@ -338,82 +329,51 @@ def main():
     limited_pqc_ms = avg_l_pqc / 1000.0 if avg_l_pqc > 0 else 38.8
     limited_pqc_vs_classic_elapsed = avg_l_pqc / avg_l_classic if avg_l_classic > 0 else 34.1
 
-    # Formatting structure block
-    formatted_summary = json.dumps(summary_dict, indent=4, ensure_ascii=False, sort_keys=True)
-    formatted_aes_checks = repr(dict(sorted(checks.items())))
-    formatted_mission_baseline = json.dumps(baseline_stats, indent=4, ensure_ascii=False)
-    formatted_pqc_bench = "(\n"
-    for item in pqc_bench_tuples:
-        formatted_pqc_bench += (
-            f"    ({json.dumps(item[0], ensure_ascii=False)}, "
-            f"{json.dumps(item[1])}, {json.dumps(item[2])}, {json.dumps(item[3])}),\n"
-        )
-    formatted_pqc_bench += ")"
-
-    # Read dashboard.py
-    with DASHBOARD_PATH.open("r", encoding="utf-8") as f:
-        content = f.read()
-
-    # Replacement 1: Replace main constants block
-    log_path_relative = f"logs/{log_path.name}"
-    
-    new_constants_block = f"""CONSOLIDATED_ACCEPTANCE_LOG = "{log_path_relative}"
-CONSOLIDATED_ACCEPTANCE_LABEL = "{log_label}"
-CONSOLIDATED_METRICS_STATUS = "{status}"
-CONSOLIDATED_SUMMARY = {formatted_summary}
-CONSOLIDATED_AES_GCM_CHECKS = {formatted_aes_checks}
-CONSOLIDATED_MISSION_BASELINE = {formatted_mission_baseline}
-CONSOLIDATED_PQC_BENCH = {formatted_pqc_bench}
-
-"""
-    # Regex to match the entire old block between CONSOLIDATED_ACCEPTANCE_LOG and # --- Paleta de Cores
-    pattern = re.compile(
-        r'CONSOLIDATED_ACCEPTANCE_LOG\s*=.*?(?=# --- Paleta de Cores)',
-        re.DOTALL
-    )
-    content, count = pattern.subn(new_constants_block, content)
-    if count == 0:
-        print("Error: Could not locate CONSOLIDATED_ACCEPTANCE_LOG constants block in dashboard.py", file=sys.stderr)
-        return 1
-
+    # Build the consolidated metrics document. The dashboard reads this JSON at
+    # boot (logs/metrics_consolidated.json) and overlays it on its baked-in
+    # defaults; if the file is absent the dashboard keeps the committed values.
     title = "DESEMPENHO DA MISSÃO (AES-GCM)" if checks.get("official_candidate") else "DESEMPENHO MEDIDO (firmware legado)"
-    content = content.replace('"CUSTO HISTÓRICO (pré AES-GCM)"', f'"{title}"')
-    content = content.replace('"DESEMPENHO DA MISSÃO (AES-GCM)"', f'"{title}"')
-    content = content.replace('"DESEMPENHO MEDIDO (firmware legado)"', f'"{title}"')
-
-    # Replacement 3: Replace notes array block
     formatted_heap = f"{heap_baseline:,}".replace(",", ".")
     if checks.get("official_candidate"):
-        note_lines = (
+        note_lines = [
             "Resultados oficiais com cifragem AES-GCM ativa nas missões.",
             f"PQC foi {pqc_vs_classic_elapsed:.1f}x mais lento e {pqc_vs_classic_bytes:.1f}x maior em bytes que CLASSIC.",
             f"PQC+CRC32 adicionou {crc32_extra_bytes:.0f} bytes ao pacote, com verificação ativa de integridade.",
             f"Heap médio estável em {formatted_heap} B no baseline de 240 MHz.",
             f"A 80 MHz (limited), PQC subiu para {limited_pqc_ms:.1f} ms ({limited_pqc_vs_classic_elapsed:.1f}x o clássico).",
-        )
+        ]
     else:
-        note_lines = (
+        note_lines = [
             "Bateria executou sem falhas, mas não valida a versão AES-GCM.",
             "MISSION retornou HMAC-SHA256 legado; faltaram cipher, nonce e tag GCM.",
             f"Números abaixo valem como regressão: PQC foi {pqc_vs_classic_elapsed:.1f}x mais lento e {pqc_vs_classic_bytes:.1f}x maior.",
             f"CRC32 acrescentou {crc32_extra_bytes:.0f} bytes e manteve a detecção didática de bit-flip.",
             "Próximo passo: regravar firmware AES-GCM e repetir este runner.",
-        )
-    notes_body = "\n".join(f'            "{line}",' for line in note_lines)
-    new_notes = f"""notes = (
-{notes_body}
-        )"""
+        ]
 
-    pattern_notes = re.compile(r'\bnotes\s*=\s*\(.*?\n\s*\)', re.DOTALL)
-    content, count_notes = pattern_notes.subn(new_notes, content)
-    if count_notes == 0:
-        print("Warning: Could not replace notes block automatically in dashboard.py", file=sys.stderr)
+    document = {
+        "schema_version": "pqc-sat-consolidated-metrics-v1",
+        "acceptance_log": f"logs/{log_path.name}",
+        "acceptance_label": log_label,
+        "metrics_status": status,
+        "mission_title": title,
+        "summary": summary_dict,
+        "aes_gcm_checks": dict(sorted(checks.items())),
+        "mission_baseline": baseline_stats,
+        "pqc_bench": [list(item) for item in pqc_bench_tuples],
+        "notes": note_lines,
+    }
 
-    # Save dashboard.py
-    with DASHBOARD_PATH.open("w", encoding="utf-8") as f:
-        f.write(content)
+    output_path = LOGS_DIR / "metrics_consolidated.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = output_path.with_suffix(".json.tmp")
+    with tmp_path.open("w", encoding="utf-8") as handle:
+        json.dump(document, handle, indent=2, ensure_ascii=False, sort_keys=True)
+        handle.write("\n")
+    tmp_path.replace(output_path)
 
-    print("Successfully updated dashboard.py constants and text labels!")
+    print(f"Wrote consolidated metrics to {output_path}")
+    print(f"Status: {status}")
     print(f"Summary fields: {summary_dict}")
     print(f"Classic elapsed: {baseline_stats['CLASSIC']['elapsed_us']} us, PQC elapsed: {baseline_stats['PQC']['elapsed_us']} us (Ratio: {pqc_vs_classic_elapsed:.1f}x)")
     print(f"Classic bytes: {baseline_stats['CLASSIC']['bytes_total']} B, PQC bytes: {baseline_stats['PQC']['bytes_total']} B (Ratio: {pqc_vs_classic_bytes:.1f}x)")

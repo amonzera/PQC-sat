@@ -314,25 +314,6 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(panel.fault_injections, 0)
         self.assertEqual(panel.command_history[-1]["status"], "INVALID_INPUT")
 
-    def test_timeline_layout_limits_window_and_keeps_summary_global(self):
-        engine = dashboard.ExperimentEngine(seed=7)
-        for index in range(20):
-            guard = "CRC32" if index % 2 else "NONE"
-            engine.run_fault(guard=guard)
-
-        layout = dashboard.timeline_layout(engine.events, 20, 55, 272, 72)
-        summary = dashboard.event_summary(engine.events)
-
-        self.assertEqual(len(layout), dashboard.TIMELINE_WINDOW)
-        self.assertEqual(summary["events"], 20)
-        self.assertEqual(summary["silent"], 10)
-        self.assertEqual(summary["detected_guard"], 10)
-        for point in layout:
-            self.assertGreaterEqual(point["x"], 20)
-            self.assertLess(point["x"], 20 + 272)
-            self.assertGreaterEqual(point["y"], 55)
-            self.assertLess(point["y"], 55 + 72)
-
     def test_event_summary_ignores_duplicate_event_identity(self):
         engine = dashboard.ExperimentEngine(seed=3)
         event = engine.run_fault(guard="NONE")
@@ -1006,7 +987,7 @@ class DashboardCommandTests(unittest.TestCase):
         fake.sent.clear()
 
         for _ in range(40):
-            panel.update(dashboard.TELEMETRY_POLL_SECONDS)
+            panel.update(30.0)
 
         self.assertNotIn("TELEMETRY", fake.sent)
 
@@ -1406,12 +1387,24 @@ class DashboardCommandTests(unittest.TestCase):
         )
         self.assertTrue(panel._handle_mission_overlay_event(scrub_release))
 
-        panel.mission_flow_animation["awaiting_confirm"] = False
-        panel.mission_flow_animation["age"] = 0.0
+        # Grabbing the scrub bar pauses the flow: it no longer auto-advances and
+        # stays wherever it is dragged (regression guard for the pause behavior).
+        self.assertTrue(panel.mission_flow_animation.get("paused"))
+        grab = pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": (scrub_rect.centerx, scrub_rect.centery)}
+        )
+        self.assertTrue(panel._handle_mission_overlay_event(grab))
+        self.assertFalse(panel.mission_flow_animation["awaiting_confirm"])
+        paused_age = panel.mission_flow_animation["age"]
+        self.assertGreater(paused_age, 0.0)
         panel.update(0.5)
-        self.assertGreater(panel.mission_flow_animation["age"], 0.0)
+        self.assertEqual(panel.mission_flow_animation["age"], paused_age)
 
-        panel.update(dashboard.MISSION_FLOW_ANIMATION_SECONDS + 0.1)
+        to_end = pygame.event.Event(pygame.MOUSEMOTION, {"pos": (scrub_rect.right, scrub_rect.centery)})
+        self.assertTrue(panel._handle_mission_overlay_event(to_end))
+        panel._handle_mission_overlay_event(
+            pygame.event.Event(pygame.MOUSEBUTTONUP, {"button": 1, "pos": (scrub_rect.right, scrub_rect.centery)})
+        )
         self.assertIsNotNone(panel.mission_flow_animation)
         self.assertTrue(panel.mission_flow_animation["awaiting_confirm"])
         self.assertTrue(panel._mission_overlay_is_animating("PQC_CRC32"))

@@ -8,7 +8,6 @@ advanced bench commands into the dashboard's visual button set.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -17,9 +16,9 @@ import time
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from tools.final_metrics_battery import send_record, utc_now_iso, write_document
 from tools.serial_bridge import SerialBridge, SerialBridgeError, SerialBridgeTimeout
-from tools.serial_console import choose_port, split_command
-from tools.serial_protocol import ProtocolError, decode_key_values
+from tools.serial_console import choose_port
 
 
 SCHEMA_VERSION = "pqc-sat-stage8-acceptance-v1"
@@ -75,62 +74,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def safe_slug(value: str) -> str:
-    slug = []
-    for char in value.lower():
-        if char.isalnum():
-            slug.append(char)
-        elif char in {"-", "_"}:
-            slug.append(char)
-        else:
-            slug.append("-")
-    return "".join(slug).strip("-") or "stage8"
-
-
-def send_record(bridge: SerialBridge, command_line: str, phase: str) -> dict[str, object]:
-    command, args = split_command(command_line)
-    started = time.monotonic()
-    record: dict[str, object] = {
-        "phase": phase,
-        "command": command_line,
-        "started_at": utc_now_iso(),
-    }
-    try:
-        frame = bridge.send(command, args)
-        elapsed_ms = round((time.monotonic() - started) * 1000, 2)
-        payload = {}
-        raw_payload = list(frame.payload_fields)
-        if frame.payload_fields:
-            try:
-                payload = decode_key_values(frame.payload_fields)
-            except ProtocolError:
-                payload = {"raw": " ".join(frame.payload_fields)}
-        record.update(
-            {
-                "ok": frame.status == "OK",
-                "request_id": frame.request_id,
-                "status": frame.status or "UNKNOWN",
-                "elapsed_ms": elapsed_ms,
-                "payload": payload,
-                "raw_payload": raw_payload,
-            }
-        )
-    except (ProtocolError, SerialBridgeError) as exc:
-        record.update(
-            {
-                "ok": False,
-                "status": "ERROR",
-                "elapsed_ms": round((time.monotonic() - started) * 1000, 2),
-                "error": str(exc),
-            }
-        )
-    return record
-
-
 def run_smoke(bridge: SerialBridge) -> list[dict[str, object]]:
     return [send_record(bridge, command, "smoke") for command in SMOKE_COMMANDS]
 
@@ -162,8 +105,9 @@ def run_dashboard_demo(port: str, baudrate: int, timeout: float, attempts: int) 
         "started_at": utc_now_iso(),
         "ok": False,
     }
+    connect_window = max(20.0, timeout * 2)
     try:
-        while not panel.serial_connected and time.monotonic() - started < 20.0:
+        while not panel.serial_connected and time.monotonic() - started < connect_window:
             panel.update(0.1)
             time.sleep(0.1)
 
@@ -199,24 +143,6 @@ def run_dashboard_demo(port: str, baudrate: int, timeout: float, attempts: int) 
         return record
     finally:
         panel.close()
-
-
-def write_document(document: dict[str, object], log_dir: str) -> Path:
-    directory = Path(log_dir)
-    directory.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    port = safe_slug(str(document.get("port", "serial")))
-    path = directory / f"{timestamp}_stage8_acceptance_{port}.json"
-    suffix = 1
-    while path.exists():
-        path = directory / f"{timestamp}_stage8_acceptance_{port}_{suffix}.json"
-        suffix += 1
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    with tmp_path.open("w", encoding="utf-8") as handle:
-        json.dump(document, handle, indent=2, ensure_ascii=False, sort_keys=True)
-        handle.write("\n")
-    tmp_path.replace(path)
-    return path
 
 
 def summarize(records: list[dict[str, object]], dashboard_demo: dict[str, object] | None) -> dict[str, object]:
@@ -274,7 +200,7 @@ def main() -> int:
         "dashboard_demo": dashboard_demo,
     }
     document["summary"] = summarize(records, dashboard_demo)
-    path = write_document(document, args.log_dir)
+    path = write_document(document, args.log_dir, "stage8_acceptance")
     print(f"stage8_acceptance_json={path}")
     print("summary=" + json.dumps(document["summary"], sort_keys=True))
     return 0 if document["summary"]["ok"] else 1

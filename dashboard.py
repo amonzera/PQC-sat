@@ -17,6 +17,7 @@ import math
 from pathlib import Path
 import queue
 import random
+import re
 import sys
 import threading
 import time
@@ -43,7 +44,6 @@ DEFAULT_PAYLOAD = b"PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK"
 RUN_SCHEMA_VERSION = "pqc-sat-run-v2"
 DEFAULT_LOG_DIR = Path("logs")
 SPLASH_SECONDS = 1.6
-TIMELINE_WINDOW = 16
 SERIAL_STARTUP_COMMANDS = ("OLED STANDBY",)
 SERIAL_RECONNECT_DELAY = 1.5
 SERIAL_TIMEOUT_SECONDS = 5.0
@@ -52,8 +52,6 @@ LIVE_PAYLOAD_MAX_BYTES = 96
 STRESS_COMMAND = "STRESS PQC_LOOP 500 CONFIRM"
 STRESS_SERIAL_TIMEOUT_SECONDS = 30.0
 STRESS_DIDACTIC_TIMEOUT_SECONDS = 8.0
-AUTO_TELEMETRY_ENABLED = False
-TELEMETRY_POLL_SECONDS = 30.0
 CPU_LOAD_WINDOW_SECONDS = 5.0
 DEMO_DEFAULT_ATTEMPTS = 5
 DEMO_FAULT_INTERVAL_SECONDS = 0.55
@@ -150,6 +148,63 @@ CONSOLIDATED_PQC_BENCH = (
     ("BASELINE 240 MHz", "3.323", "3.878", "5.001"),
     ("LIMITED 80 MHz", "10.079", "11.794", "15.222"),
 )
+CONSOLIDATED_MISSION_TITLE = "DESEMPENHO DA MISSÃO (AES-GCM)"
+CONSOLIDATED_NOTES = (
+    "Resultados oficiais com cifragem AES-GCM ativa nas missões.",
+    "PQC foi 22.6x mais lento e 13.4x maior em bytes que CLASSIC.",
+    "PQC+CRC32 adicionou 4 bytes ao pacote, com verificação ativa de integridade.",
+    "Heap médio estável em 201.412 B no baseline de 240 MHz.",
+    "A 80 MHz (limited), PQC subiu para 40.0 ms (38.5x o clássico).",
+)
+CONSOLIDATED_METRICS_FILE = DEFAULT_LOG_DIR / "metrics_consolidated.json"
+
+
+def _load_consolidated_metrics():
+    """Overlay live battery results from logs/metrics_consolidated.json if present.
+
+    The literals above stay as the committed official baseline. If the JSON is
+    missing or malformed the dashboard renders exactly those defaults, so the
+    live presentation never depends on a generated file. Produced by
+    tools/consolidate_metrics.py.
+    """
+    try:
+        with CONSOLIDATED_METRICS_FILE.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    g = globals()
+
+    def overlay_str(name, key):
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            g[name] = value
+
+    overlay_str("CONSOLIDATED_ACCEPTANCE_LOG", "acceptance_log")
+    overlay_str("CONSOLIDATED_ACCEPTANCE_LABEL", "acceptance_label")
+    overlay_str("CONSOLIDATED_METRICS_STATUS", "metrics_status")
+    overlay_str("CONSOLIDATED_MISSION_TITLE", "mission_title")
+    summary = data.get("summary")
+    if isinstance(summary, dict):
+        g["CONSOLIDATED_SUMMARY"] = {**CONSOLIDATED_SUMMARY, **summary}
+    checks = data.get("aes_gcm_checks")
+    if isinstance(checks, dict):
+        g["CONSOLIDATED_AES_GCM_CHECKS"] = {**CONSOLIDATED_AES_GCM_CHECKS, **checks}
+    baseline = data.get("mission_baseline")
+    if isinstance(baseline, dict) and all(s in baseline for s in MISSION_OVERLAY_SCENARIOS):
+        g["CONSOLIDATED_MISSION_BASELINE"] = {
+            s: {**CONSOLIDATED_MISSION_BASELINE[s], **baseline[s]} for s in MISSION_OVERLAY_SCENARIOS
+        }
+    bench = data.get("pqc_bench")
+    if isinstance(bench, list) and bench:
+        g["CONSOLIDATED_PQC_BENCH"] = tuple(tuple(row) for row in bench)
+    notes = data.get("notes")
+    if isinstance(notes, list) and notes:
+        g["CONSOLIDATED_NOTES"] = tuple(str(line) for line in notes)
+
+
+_load_consolidated_metrics()
 RESULTS_REFERENCES = (
     ("NIST FIPS 203", "ML-KEM como KEM pos-quantico, 2024"),
     ("NIST FIPS 197", "AES como cifra de bloco padrao, atual. 2023"),
@@ -317,8 +372,6 @@ class ExperimentEngine:
             result = "OK"
         elif guard == "CRC32" and crc_after != crc_before:
             result = "DETECTED_GUARD"
-        elif guard == "NONE":
-            result = "SILENT"
         else:
             result = "SILENT"
 
@@ -423,40 +476,6 @@ def session_checksum_mode(events, current_guard="NONE"):
     return "MIXED"
 
 
-def visible_timeline_events(events, limit=TIMELINE_WINDOW):
-    return list(events)[-limit:]
-
-
-def timeline_layout(events, x, y, width, height, limit=TIMELINE_WINDOW):
-    visible_events = visible_timeline_events(events, limit=limit)
-    if not visible_events:
-        return []
-
-    lane_top = y + 16
-    lane_bottom = y + max(34, height - 14)
-    left_pad = min(46, max(32, width // 5))
-    right_pad = 10
-    usable_w = max(1, width - left_pad - right_pad)
-    step = 0 if len(visible_events) == 1 else usable_w / (len(visible_events) - 1)
-
-    points = []
-    for index, event in enumerate(visible_events):
-        if len(visible_events) == 1:
-            cx = x + left_pad + usable_w // 2
-        else:
-            cx = x + left_pad + int(round(step * index))
-        cy = lane_bottom if event.guard == "CRC32" else lane_top
-        points.append(
-            {
-                "event": event,
-                "x": max(x, min(x + width - 1, cx)),
-                "y": max(y, min(y + height - 1, cy)),
-                "lane": "B CRC32" if event.guard == "CRC32" else "A NONE",
-            }
-        )
-    return points
-
-
 def event_to_json(event):
     data = asdict(event)
     data["bit_mask_hex"] = event.bit_mask_hex
@@ -469,15 +488,7 @@ def _utc_now_iso():
 
 
 def _safe_slug(value):
-    slug = []
-    for char in str(value).lower():
-        if char.isalnum():
-            slug.append(char)
-        elif char in {"-", "_"}:
-            slug.append(char)
-        else:
-            slug.append("-")
-    return "".join(slug).strip("-") or "session"
+    return re.sub(r"[^a-z0-9_-]", "-", str(value).lower()).strip("-") or "session"
 
 
 def _atomic_write_json(document, log_dir=DEFAULT_LOG_DIR):
@@ -1237,7 +1248,6 @@ class DashboardPanel:
         self.session_dirty = False
         self.last_export_path = None
         self.battery_runs = 0
-        self.telemetry_poll_timer = 0.0
         self.last_fault_event = None
         self.fault_overlay_visible = False
         self.fault_overlay = {}
@@ -1306,7 +1316,6 @@ class DashboardPanel:
         self.mission_flow_animations = {}
         self.mission_flow_animation = None
         self.effect_timer = 0.0
-        self.effect_result = ""
         self.effect_label = ""
         self.effect_color = C_ACCENT_CYAN
         self._fault_overlay_surface = None
@@ -1355,7 +1364,6 @@ class DashboardPanel:
                 if close_rect.collidepoint(event.pos):
                     self.results_overlay_visible = False
                     return True
-                import sys
                 if "unittest" in sys.modules and self.results_stress_btn_rect is not None and self.results_stress_btn_rect.collidepoint(event.pos):
                     self._handle_stress_button_click()
                     return True
@@ -1459,7 +1467,7 @@ class DashboardPanel:
             width, height = self._mission_overlay_size()
             x = event.pos[0] - self.mission_drag_offset[0]
             y = event.pos[1] - self.mission_drag_offset[1]
-            self.mission_overlay_positions[scenario] = self._clamp_mission_overlay_position(x, y, width, height)
+            self.mission_overlay_positions[scenario] = self._clamp_overlay_position(x, y, width, height)
             return True
 
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging_mission_flow_scenario:
@@ -1537,8 +1545,8 @@ class DashboardPanel:
         ratio = (mouse_x - scrub_rect.x) / max(1, scrub_rect.width)
         ratio = max(0.0, min(1.0, ratio))
         animation["age"] = duration * ratio
-        if ratio >= 1.0:
-            animation["awaiting_confirm"] = True
+        # scrubbing back below the end re-arms the per-step animation
+        animation["awaiting_confirm"] = ratio >= 1.0
 
     def _close_fault_overlay(self):
         if not self.fault_overlay_visible:
@@ -1585,8 +1593,10 @@ class DashboardPanel:
         ratio = (mouse_x - scrub_rect.x) / max(1, scrub_rect.width)
         ratio = max(0.0, min(1.0, ratio))
         animation["age"] = duration * ratio
-        if ratio >= 1.0:
-            animation["awaiting_confirm"] = True
+        # once the user grabs the bar the flow stops auto-advancing and stays
+        # wherever it is dragged; the end still arms the VER DADOS confirmation.
+        animation["paused"] = True
+        animation["awaiting_confirm"] = ratio >= 1.0
         self._sync_active_mission_flow_animation()
 
     def _mission_flow_animation_for(self, scenario=None):
@@ -1898,7 +1908,6 @@ class DashboardPanel:
             return "INVALID_INPUT"
         manual_payload_hex = args[1].upper() if len(args) == 2 else ""
         self._set_message_preset(scenario)
-        import sys
         if (self.serial_client is None or not self.serial_connected) and "unittest" not in sys.modules:
             snapshot = self._mission_context_for_send()
             payload_text = snapshot.get("payload_text", "PQC-SAT DEMO")
@@ -2569,7 +2578,6 @@ class DashboardPanel:
 
     def _trigger_fault_effect(self, event):
         self.effect_timer = 0.9
-        self.effect_result = event.result
         if event.result == "SILENT":
             self.effect_color = C_ACCENT_RED
             self.effect_label = "FALHA SILENCIOSA"
@@ -2835,7 +2843,9 @@ class DashboardPanel:
             if elapsed >= STRESS_DIDACTIC_TIMEOUT_SECONDS:
                 self.stress_status = "TIMEOUT DIDÁTICO"
         for animation in list(getattr(self, "mission_flow_animations", {}).values()):
-            if not animation.get("awaiting_confirm"):
+            # auto-play advances only until the user grabs the scrub bar; after a
+            # manual scrub the flow stays where it was dragged ("paused").
+            if not animation.get("awaiting_confirm") and not animation.get("paused"):
                 animation["age"] += dt
                 if animation["age"] >= animation["duration"]:
                     animation["age"] = animation["duration"]
@@ -2847,20 +2857,7 @@ class DashboardPanel:
                 self.fault_flow_animation["age"] = self.fault_flow_animation["duration"]
                 self.fault_flow_animation["awaiting_confirm"] = True
         self._advance_demo(dt)
-        self._poll_telemetry(dt)
         self._drain_serial_events()
-
-    def _poll_telemetry(self, dt):
-        if not AUTO_TELEMETRY_ENABLED:
-            self.telemetry_poll_timer = 0.0
-            return
-        if self.serial_client is None or not self.serial_connected:
-            self.telemetry_poll_timer = 0.0
-            return
-        self.telemetry_poll_timer += dt
-        if self.telemetry_poll_timer >= TELEMETRY_POLL_SECONDS:
-            self.telemetry_poll_timer = 0.0
-            self._queue_serial_command("TELEMETRY", visible=False)
 
     def _drain_serial_events(self):
         if self.serial_client is None:
@@ -3709,6 +3706,11 @@ class DashboardPanel:
         elif name == "list":
             for dy in (-s // 2, 0, s // 2):
                 pygame.draw.line(surface, color, (cx - s, cy + dy), (cx + s, cy + dy), 2)
+        elif name == "packet":
+            box = pygame.Rect(cx - s, cy - s + 1, 2 * s, 2 * s - 1)
+            pygame.draw.rect(surface, color, box, 2, border_radius=2)
+            pygame.draw.line(surface, color, (cx, box.y), (cx, box.bottom), 2)
+            pygame.draw.line(surface, color, (box.x, cy), (box.right, cy), 2)
         elif name == "alert":
             pygame.draw.polygon(surface, color, [(cx, cy - s), (cx + s, cy + s), (cx - s, cy + s)], 2)
             pygame.draw.line(surface, color, (cx, cy - s // 3), (cx, cy + s // 4), 2)
@@ -3736,14 +3738,20 @@ class DashboardPanel:
 
     def _clean_node(self, surface, rect, node, base_color, emphasis, progress, t):
         nc = node.get("color", base_color)
+        pulse = 0.5 + 0.5 * math.sin(t * 4.0)
         if emphasis:
-            self._draw_soft_glow(surface, rect.center, max(10, rect.height // 3), nc, 20)
+            # Glow brightens as the operation completes; a breathing ring marks it
+            # as the step actively "doing the work".
+            self._draw_soft_glow(surface, rect.center, max(10, rect.height // 3), nc, int(18 + 26 * progress))
+            ring = self._mix_color((10, 16, 32), nc, 0.30 + 0.45 * pulse)
+            pygame.draw.rect(surface, ring, rect.inflate(6, 6), 2, border_radius=8)
         pygame.draw.rect(surface, (10, 16, 32), rect, border_radius=6)
         pygame.draw.rect(surface, nc, rect, 2 if emphasis else 1, border_radius=6)
         icon = node.get("icon")
         text_top = rect.y
         if icon:
-            self._icon(surface, icon, rect.centerx, rect.y + 16, 7, nc, t, progress)
+            icon_s = 7 + int(2 * pulse) if emphasis else 7
+            self._icon(surface, icon, rect.centerx, rect.y + 16, icon_s, nc, t, progress)
             text_top = rect.y + 26
         title = str(node.get("title", ""))
         sub = str(node.get("sub", ""))
@@ -3776,6 +3784,29 @@ class DashboardPanel:
         pygame.draw.polygon(surface, color, [(x2, y), (x2 - 7, y - 5), (x2 - 7, y + 5)])
         pygame.draw.circle(surface, C_TEXT_PRIMARY, (px, y), 3)
 
+    def _flow_packets(self, surface, x1, x2, y, color, progress, t, count=2):
+        """Little glowing data packets running along an arrow, with a comet trail.
+
+        Reinforces the direction of data movement (input -> operation -> output)
+        so the eye follows the bytes flowing through each step.
+        """
+        if x2 <= x1:
+            return
+        span = x2 - x1
+        reach = max(0.06, progress)
+        for k in range(count):
+            f = (t * 0.7 + k / count) % 1.0
+            if f > reach:
+                continue
+            for j in range(3):  # head + 2 fading trail squares
+                tf = f - j * 0.05
+                if tf < 0:
+                    break
+                tx = int(x1 + span * tf)
+                size = 5 - j
+                shade = self._mix_color((10, 16, 32), color, 1.0 - j * 0.32)
+                pygame.draw.rect(surface, shade, (tx - size // 2, y - size // 2, size, size), border_radius=1)
+
     def _draw_clean_flow(self, surface, area, nodes, color, progress, t, particles=False):
         n = len(nodes)
         if n == 0:
@@ -3799,13 +3830,7 @@ class DashboardPanel:
         for i in range(n - 1):
             ax1, ax2 = rects[i].right + 3, rects[i + 1].left - 3
             self._clean_arrow_h(surface, ax1, ax2, area.centery, color, progress)
-            if particles:
-                for k in range(3):
-                    f = (t * 0.6 + k / 3.0) % 1.0
-                    if f > max(0.06, progress):
-                        continue
-                    dx = int(ax1 + (ax2 - ax1) * f)
-                    pygame.draw.rect(surface, color, (dx - 2, area.centery - 8, 4, 4))
+            self._flow_packets(surface, ax1, ax2, area.centery, color, progress, t, count=3 if particles else 2)
 
     def _clean_bits(self, surface, area, spec, color, progress, t):
         before, after, mask = spec["before"], spec["after"], spec["mask"]
@@ -3844,99 +3869,6 @@ class DashboardPanel:
         self._draw_wrapped_text(surface, FONT_LABEL, spec["theory"], (214, 226, 250),
                                 rect.x + 11, stage_rect.bottom + 7, rect.width - 22,
                                 line_spacing=15, max_lines=2)
-
-    def _mission_scene_spec(self, kind, ctx):
-        g, p, o, c, b = C_ACCENT_GREEN, C_ACCENT_PURPLE, C_ACCENT_ORANGE, C_ACCENT_CYAN, C_ACCENT_BLUE
-        specs = {
-            "payload": {
-                "title": "COLETA E SERIALIZACAO DO PAYLOAD", "theme": "space", "particles": True,
-                "nodes": [{"title": "Sensores", "sub": "/ mensagem", "icon": "sensor"},
-                          {"title": "SERIALIZAR", "sub": "buffer TLV", "icon": "list"},
-                          {"title": "PAYLOAD", "sub": f"{ctx['payload']} B", "color": b, "icon": "packet"}],
-                "theory": "O payload e montado em texto claro (TLV ASCII). Ainda nao ha cifra, MAC nem checksum.",
-            },
-            "crc": {
-                "title": "INTEGRIDADE COM CRC-32",
-                "nodes": [{"title": "PAYLOAD", "sub": f"{ctx['payload']} B"},
-                          {"title": "CRC-32", "sub": "poly 0xEDB88320", "icon": "shield"},
-                          {"title": "+ CRC", "sub": f"{ctx['checksum']} B", "color": g, "badge": "check"}],
-                "theory": "O CRC-32 detecta corrupcao acidental (todo erro de 1 bit e a maioria das rajadas), mas nao autentica contra um atacante.",
-            },
-            "keygen": {
-                "title": "GERACAO DO PAR DE CHAVES ML-KEM",
-                "nodes": [{"title": "seed + ruido", "sub": "amostras"},
-                          {"title": "KEYGEN", "sub": "t = A.s + e", "icon": "key"},
-                          {"title": "pk / sk", "sub": "800B / 1632B", "color": p}],
-                "theory": "Par ML-KEM-512 baseado em reticulados (MLWE). Custa CPU e RAM; o pacote ainda nao cresce.",
-            },
-            "mlkem": {
-                "title": "ENCAPSULAMENTO ML-KEM",
-                "nodes": [{"title": "pk + aleatorio", "sub": "m, r"},
-                          {"title": "ENCAPS", "sub": "ML-KEM", "icon": "lock"},
-                          {"title": "ct + segredo", "sub": f"{ctx['mlkem']}B + 32B", "color": p, "badge": "check"}],
-                "theory": "Encapsula um segredo: gera o ciphertext ML-KEM e a chave K. O segredo em si nunca trafega.",
-            },
-            "decap": {
-                "title": "RECUPERACAO DO MESMO SEGREDO",
-                "nodes": [{"title": "ct + sk", "sub": f"{ctx['mlkem']} B"},
-                          {"title": "DECAPS", "sub": "+ confere (FO)", "icon": "unlock"},
-                          {"title": "SEGREDO", "sub": "identico", "color": g, "badge": "check"}],
-                "theory": "O receptor decapsula e re-cifra para conferir (Fujisaki-Okamoto). Ciphertext alterado nao gera erro: ML-KEM devolve um segredo de rejeicao diferente.",
-            },
-            "kdf": {
-                "title": "DERIVACAO DA CHAVE AES",
-                "nodes": [{"title": "SEGREDO", "sub": "32 B"},
-                          {"title": "SHA-256", "sub": "KDF", "icon": "hash"},
-                          {"title": "CHAVE", "sub": "AES-128", "color": c, "icon": "key"}],
-                "theory": "O segredo ML-KEM deriva uma chave AES-128 de sessao. Quem cifra a mensagem e o AES-GCM.",
-            },
-            "rng": {
-                "title": "CHAVE EFEMERA (BASELINE CLASSICO)",
-                "nodes": [{"title": "ENTROPIA", "sub": "TRNG", "icon": "sensor"},
-                          {"title": "DRBG", "sub": "CSPRNG", "icon": "rng"},
-                          {"title": "CHAVE + NONCE", "sub": "128b + 96b", "color": c}],
-                "theory": "Baseline classico: chave AES-128 efemera e nonce, gerados por hardware e unicos por mensagem.",
-            },
-            "aead": {
-                "title": "CIFRA AUTENTICADA AES-GCM",
-                "nodes": [{"title": "PAYLOAD + chave", "sub": "claro"},
-                          {"title": "AES-GCM", "sub": "cifra + tag", "icon": "lock"},
-                          {"title": "CIPHERTEXT", "sub": f"+ tag {ctx['gcm']}B", "color": o, "badge": "check"}],
-                "theory": "AES-GCM cifra (modo CTR) e autentica (GHASH) numa passada. O nonce nao pode repetir com a chave.",
-            },
-            "verify": {
-                "title": "VERIFICACAO NO RECEPTOR",
-                "nodes": [{"title": "CIPHERTEXT", "sub": "+ tag"},
-                          {"title": "AES-GCM", "sub": "confere a tag", "icon": "shield"},
-                          {"title": "PAYLOAD", "sub": "liberado", "color": g, "badge": "check"}],
-                "theory": "So libera o texto se a tag GCM conferir (comparacao em tempo constante). Com CRC, checa corrupcao.",
-            },
-        }
-        return specs.get(kind, {
-            "title": "RESULTADO DA MISSAO", "theme": "space",
-            "nodes": [{"title": "PACOTE", "sub": f"{ctx['total']} B", "icon": "packet"},
-                      {"title": "DOWNLINK", "sub": "SAT -> solo", "icon": "sat"},
-                      {"title": "ENTREGUE", "sub": ctx["result"] or "OK", "color": g, "badge": "check"}],
-            "theory": "Pacote final = payload + ML-KEM + nonce + tag (+ CRC). Tempos e tamanhos medidos na placa Wisdom.",
-        })
-
-    # ---- Mission scene painters -------------------------------------------
-    def _draw_mission_transformation_panel(self, surface, rect, scenario, mission, step, local_progress, t):
-        kind = str(step.get("kind", "")).lower()
-        color = step.get("color", self._scenario_color(scenario))
-        ctx = {
-            "scenario": scenario, "mission": mission,
-            "live": str(mission.get("payload_mode", "")).upper() == "LIVE",
-            "payload": self._mission_int(mission, "bytes_payload"),
-            "mlkem": self._mission_int(mission, "bytes_mlkem"),
-            "checksum": self._mission_int(mission, "bytes_checksum"),
-            "total": self._mission_int(mission, "bytes_total"),
-            "nonce": self._mission_int(mission, "bytes_nonce", self._mission_int(mission, "nonce_bytes")),
-            "gcm": self._mission_int(mission, "bytes_gcm_tag", self._mission_int(mission, "gcm_tag_bytes")),
-            "result": str(mission.get("result", "")),
-        }
-        spec = self._mission_scene_spec(kind, ctx)
-        self._draw_clean_step(surface, rect, spec, color, max(0.0, min(1.0, local_progress)), t)
 
     def _fault_scene_spec(self, label, ctx):
         g, p, o, r, d, b = (C_ACCENT_GREEN, C_ACCENT_PURPLE, C_ACCENT_ORANGE,
@@ -4138,7 +4070,7 @@ class DashboardPanel:
         lx = left.x + pad
         ly = left.y + 14
         lw = left.width - pad * 2
-        surface.blit(self._render_clipped(FONT_HEADER, "DESEMPENHO DA MISSÃO (AES-GCM)", C_ACCENT_CYAN, lw), (lx, ly))
+        surface.blit(self._render_clipped(FONT_HEADER, CONSOLIDATED_MISSION_TITLE, C_ACCENT_CYAN, lw), (lx, ly))
         ly += 32
 
         table_h = min(154, max(132, int(left.height * 0.32)))
@@ -4174,13 +4106,7 @@ class DashboardPanel:
             row_y += row_h
 
         ly += table_h + 18
-        notes = (
-            "Resultados oficiais com cifragem AES-GCM ativa nas missões.",
-            "PQC foi 22.6x mais lento e 13.4x maior em bytes que CLASSIC.",
-            "PQC+CRC32 adicionou 4 bytes ao pacote, com verificação ativa de integridade.",
-            "Heap médio estável em 201.412 B no baseline de 240 MHz.",
-            "A 80 MHz (limited), PQC subiu para 40.0 ms (38.5x o clássico).",
-        )
+        notes = CONSOLIDATED_NOTES
         for note in notes:
             if ly > left.bottom - 42:
                 break
@@ -4266,7 +4192,6 @@ class DashboardPanel:
             ry = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, rx, ry, rw, line_spacing=17, max_lines=1)
             ry += 3
 
-        import sys
         if "unittest" in sys.modules:
             ry = self._draw_stress_results_control(surface, rx, ry + 4, rw, mouse_pos)
             min_space = 86
@@ -4831,7 +4756,8 @@ class DashboardPanel:
         return rect.bottom
 
 
-    def _render_clipped(self, font, text, color, max_width):
+    @staticmethod
+    def _render_clipped(font, text, color, max_width):
         if font.size(text)[0] <= max_width:
             return font.render(text, True, color)
 
@@ -4841,7 +4767,8 @@ class DashboardPanel:
             clipped = clipped[:-1]
         return font.render(clipped + suffix, True, color)
 
-    def _wrap_text_for_width(self, font, text, max_width):
+    @staticmethod
+    def _wrap_text_for_width(font, text, max_width):
         words = text.split()
         if not words:
             return [""]
@@ -5009,7 +4936,7 @@ class DashboardPanel:
         if scenario not in self.mission_overlay_positions:
             self.mission_overlay_positions[scenario] = self._default_mission_overlay_position(scenario)
         x, y = self.mission_overlay_positions[scenario]
-        x, y = self._clamp_mission_overlay_position(x, y, width, height)
+        x, y = self._clamp_overlay_position(x, y, width, height)
         self.mission_overlay_positions[scenario] = (x, y)
         rect = pygame.Rect(x, y, width, height)
         close_rect = pygame.Rect(rect.right - 36, rect.y + 9, 24, 24)
@@ -5034,14 +4961,7 @@ class DashboardPanel:
             central_width = max(width, central_right - central_left)
             x = central_left + min(index * 34, max(0, central_width - width))
             y += index * 34
-        return self._clamp_mission_overlay_position(x, y, width, height)
-
-    @staticmethod
-    def _clamp_mission_overlay_position(x, y, width, height):
-        min_y = 50
-        max_x = max(10, WIDTH - width - 10)
-        max_y = max(min_y, HEIGHT - height - 44)
-        return max(10, min(int(x), max_x)), max(min_y, min(int(y), max_y))
+        return self._clamp_overlay_position(x, y, width, height)
 
     def _mission_metric_value(self, mission, key, formatter=None):
         value = mission.get(key)
@@ -5185,6 +5105,300 @@ class DashboardPanel:
     def _mission_overlay_is_animating(self, scenario):
         return scenario in getattr(self, "mission_flow_animations", {})
 
+    # ===================================================================
+    # Detailed process stage — recreated mission popup visualization.
+    # Shows each operation as input -> operation -> output with structure
+    # (block sizes, all measured on the Wisdom) plus illustrative sample
+    # bytes that scramble then "lock" as the step plays. Real payload bytes
+    # are used where available; crypto material is illustrative on purpose
+    # (the board never transmits the secret/key, only sizes/CRCs).
+    # ===================================================================
+    MISSION_KIND_ICON = {
+        "payload": "packet", "crc": "shield", "keygen": "key", "mlkem": "lock",
+        "kdf": "hash", "rng": "rng", "aead": "lock", "decap": "unlock",
+        "verify": "shield", "send": "sat",
+    }
+
+    def _hexish(self, seed, i, n, settle, t):
+        """Deterministic 2-char hex for cell i; scrambles until the step settles."""
+        locked = settle >= (i + 1) / max(1, n)
+        if locked:
+            b = (seed * 2654435761 + i * 40503) & 0xFF
+        else:
+            b = (int(t * 45) * 1103515245 + i * 12345 + seed) & 0xFF
+        return "%02X" % b, locked
+
+    def _cell(self, surface, x, y, size, text, color, on):
+        x, y = int(x), int(y)
+        pygame.draw.rect(surface, (12, 20, 40) if on else (8, 12, 22), (x, y, size, size), border_radius=2)
+        pygame.draw.rect(surface, color if on else C_TEXT_DIM, (x, y, size, size), 1, border_radius=2)
+        ts = FONT_LABEL.render(text, True, color if on else C_TEXT_DIM)
+        surface.blit(ts, (x + (size - ts.get_width()) // 2, y + (size - ts.get_height()) // 2))
+
+    def _d_bytes(self, surface, cx, y, n, seed, color, settle, t, real=None, cell=15, gap=3, max_cells=12):
+        if n <= 0:
+            return pygame.Rect(int(cx), int(y), 0, cell)
+        shown = min(n, max_cells)
+        total_w = shown * cell + (shown - 1) * gap
+        x0 = int(cx - total_w / 2)
+        for i in range(shown):
+            bx = x0 + i * (cell + gap)
+            if real is not None and i < len(real):
+                text, on = "%02X" % real[i], settle >= (i + 1) / shown
+            else:
+                text, on = self._hexish(seed, i, shown, settle, t)
+            self._cell(surface, bx, y, cell, text, color, on)
+        rect = pygame.Rect(x0, int(y), total_w, cell)
+        if n > shown:
+            more = FONT_LABEL.render("+%d" % (n - shown), True, C_TEXT_DIM)
+            surface.blit(more, (rect.right + 4, int(y) + 1))
+        return rect
+
+    def _d_badge(self, surface, x, y, kind):
+        bc = C_ACCENT_GREEN if kind == "check" else C_ACCENT_RED
+        pygame.draw.circle(surface, (8, 14, 28), (int(x), int(y)), 8)
+        pygame.draw.circle(surface, bc, (int(x), int(y)), 8, 1)
+        self._icon(surface, kind, int(x), int(y), 4, bc)
+
+    def _d_block(self, surface, rect, title, sub, color, icon=None, badge=None, fill=1.0):
+        pygame.draw.rect(surface, (10, 16, 32), rect, border_radius=5)
+        fill = max(0.0, min(1.0, fill))
+        if fill < 1.0:
+            fh = int(rect.height * fill)
+            pygame.draw.rect(surface, self._mix_color((10, 16, 32), color, 0.3),
+                             (rect.x, rect.bottom - fh, rect.width, fh), border_radius=5)
+        pygame.draw.rect(surface, color, rect, 2, border_radius=5)
+        if icon:
+            self._icon(surface, icon, rect.centerx, rect.y + 11, 6, color)
+            yy = rect.y + 19
+        else:
+            yy = rect.y + 6
+        ts = self._render_clipped(FONT_LABEL, title, C_TEXT_PRIMARY, rect.width - 8)
+        surface.blit(ts, (rect.centerx - ts.get_width() // 2, yy))
+        if sub and rect.bottom - (yy + 12) >= 11:  # only when it fully fits inside the block
+            ss = self._render_clipped(FONT_LABEL, sub, C_TEXT_DIM, rect.width - 8)
+            surface.blit(ss, (rect.centerx - ss.get_width() // 2, yy + 12))
+        if badge:
+            self._d_badge(surface, rect.right - 11, rect.y + 11, badge)
+
+    def _d_op_core(self, surface, cx, cy, color, icon, progress, t):
+        cx, cy = int(cx), int(cy)
+        pulse = 0.5 + 0.5 * math.sin(t * 4.0)
+        self._draw_soft_glow(surface, (cx, cy), 18, color, int(18 + 30 * progress))
+        r = 22
+        pygame.draw.circle(surface, (8, 12, 26), (cx, cy), r)
+        pygame.draw.circle(surface, self._mix_color((20, 28, 52), color, 0.35 + 0.5 * pulse), (cx, cy), r, 2)
+        self._icon(surface, icon, cx, cy, 9, color, t, progress)
+
+    def _mission_step_scene(self, kind, mission):
+        """Plain-language input -> operation -> output spec for one mission step.
+
+        Every step renders with the same grammar (see _draw_mission_stage), so
+        the popup reads consistently instead of a different diagram per step.
+        """
+        p = self._mission_int(mission, "bytes_payload")
+        m = self._mission_int(mission, "bytes_mlkem")
+        c = self._mission_int(mission, "bytes_checksum")
+        nonce = self._mission_int(mission, "bytes_nonce", self._mission_int(mission, "nonce_bytes"))
+        gcm = self._mission_int(mission, "bytes_gcm_tag", self._mission_int(mission, "gcm_tag_bytes"))
+        pay_real = str(mission.get("payload_text", "")).encode("ascii", "replace") or None
+        scenes = {
+            "payload": {
+                "inputs": [("Sensores / msg", "leitura", "sensor")],
+                "op": ("list", "SERIALIZA", "monta o buffer TLV"),
+                "outputs": [("Payload", f"{p} B", "packet", p)],
+                "note": "Texto claro (TLV ASCII). Ainda sem cifra, MAC ou checksum.",
+                "sample": {"mode": "row", "label": "bytes reais do payload", "n": p, "real": pay_real, "seed": 0x50, "color": C_ACCENT_BLUE},
+            },
+            "crc": {
+                "inputs": [("Payload", f"{p} B", "packet")],
+                "op": ("shield", "CRC-32", "calcula o checksum"),
+                "outputs": [("Payload + CRC", f"+{c} B", "hash", c)],
+                "note": "Detecta corrupcao acidental (1 bit sempre); nao autentica contra atacante.",
+            },
+            "keygen": {
+                "inputs": [("Semente + ruido", "aleatorio", "rng")],
+                "op": ("key", "KEYGEN", "gera o par de chaves"),
+                "outputs": [("Chave publica", "800 B", "key", 0), ("Chave privada", "1632 B", "lock", 0)],
+                "note": "Par ML-KEM-512 (reticulados MLWE). Custo de CPU/RAM; o pacote nao cresce.",
+            },
+            "mlkem": {
+                "inputs": [("Chave publica", "800 B", "key")],
+                "op": ("lock", "ENCAPSULA", "sela um segredo"),
+                "outputs": [("Ciphertext", f"{m} B", "packet", m), ("Segredo K", "32 B selado", "lock", 0)],
+                "note": "O segredo K nunca viaja; apenas o ciphertext ML-KEM entra no pacote.",
+            },
+            "kdf": {
+                "inputs": [("Segredo K", "32 B", "key")],
+                "op": ("hash", "SHA-256", "deriva a chave"),
+                "outputs": [("Chave AES", "16 B", "key", 0)],
+                "note": "Condensa 32 B -> 16 B. Quem cifra a mensagem e o AES-GCM.",
+                "sample": {"mode": "shrink", "label": "segredo 32 B  ->  chave 16 B", "n_in": 8, "n_out": 4},
+            },
+            "rng": {
+                "inputs": [("Entropia", "TRNG", "rng")],
+                "op": ("rng", "DRBG", "gera aleatorios"),
+                "outputs": [("Chave AES", "16 B", "key", 0), ("Nonce", "12 B", "hash", 0)],
+                "note": "Baseline classico: chave AES e nonce efemeros, unicos por mensagem.",
+            },
+            "aead": {
+                "inputs": [("Payload", "claro", "packet"), ("Chave AES", "16 B", "key")],
+                "op": ("lock", "AES-GCM", "cifra e autentica"),
+                "outputs": [("Ciphertext", f"+{nonce + gcm} B", "packet", nonce + gcm), ("Tag GCM", "16 B", "shield", 0)],
+                "note": "Cifra (CTR) e autentica (GHASH) numa passada; o nonce nunca repete com a chave.",
+                "sample": {"mode": "xor", "label": "payload (claro)  ->  ciphertext", "real": pay_real, "n": 6},
+            },
+            "decap": {
+                "inputs": [("Ciphertext", "768 B", "packet"), ("Chave privada", "1632 B", "lock")],
+                "op": ("unlock", "DECAPSULA", "recupera o segredo"),
+                "outputs": [("Segredo K", "32 B", "key", 0)],
+                "note": "Re-encapsula e confere (Fujisaki-Okamoto): mesmo segredo do emissor.",
+            },
+            "verify": {
+                "inputs": [("Ciphertext + tag", "recebido", "packet")],
+                "op": ("shield", "VERIFICA", "confere a tag"),
+                "outputs": [("Payload", "liberado", "check", 0)],
+                "note": "Tag igual -> libera o payload. Comparacao em tempo constante.",
+                "sample": {"mode": "equal", "label": "tag recebida  ==  tag recalculada", "n": 6},
+            },
+        }
+        return scenes.get(kind, {
+            "inputs": [("Entrada", "", "packet")],
+            "op": ("list", "", ""),
+            "outputs": [("Saida", "", "check", 0)],
+            "note": "",
+        })
+
+    def _d_sample_strip(self, surface, rect, sample, color, progress, t):
+        """A calm, clearly-labelled byte strip shown only where bytes clarify.
+
+        Settles early (locks fast) so it reads as data rather than noise.
+        """
+        pygame.draw.rect(surface, (8, 12, 24), rect, border_radius=5)
+        pygame.draw.rect(surface, self._mix_color(C_PANEL_BORDER, color, 0.4), rect, 1, border_radius=5)
+        self._pix_tag(surface, rect.centerx, rect.y + 3, sample.get("label", ""), C_TEXT_DIM, rect.width - 8)
+        settle = max(0.0, min(1.0, progress * 1.6))
+        y = rect.y + 20
+        mode = sample.get("mode")
+        if mode == "row":
+            self._d_bytes(surface, rect.centerx, y, sample.get("n", 8), sample.get("seed", 0x50),
+                          sample.get("color", color), settle, t, real=sample.get("real"), max_cells=10)
+        elif mode in {"shrink", "xor", "equal"}:
+            lx = rect.x + rect.width * 0.27
+            rx = rect.x + rect.width * 0.73
+            if mode == "shrink":
+                self._d_bytes(surface, lx, y, sample.get("n_in", 8), 0x5E, color, settle, t, max_cells=8)
+                self._pix_tag(surface, rect.centerx, y + 1, "->", C_TEXT_DIM, 30)
+                self._d_bytes(surface, rx, y, sample.get("n_out", 4), 0xA1, C_ACCENT_CYAN, settle, t, max_cells=4)
+            elif mode == "xor":
+                self._d_bytes(surface, lx, y, sample.get("n", 6), 0x50, C_ACCENT_BLUE, settle, t, real=sample.get("real"), max_cells=6)
+                self._pix_tag(surface, rect.centerx, y + 1, "->", C_TEXT_DIM, 30)
+                self._d_bytes(surface, rx, y, sample.get("n", 6), 0x9C, C_ACCENT_ORANGE, settle, t, max_cells=6)
+            else:  # equal
+                self._d_bytes(surface, lx, y, sample.get("n", 6), 0x7C, C_ACCENT_GREEN, settle, t, max_cells=6)
+                self._pix_tag(surface, rect.centerx, y + 1, "==", C_ACCENT_GREEN, 30)
+                self._d_bytes(surface, rx, y, sample.get("n", 6), 0x7C, C_ACCENT_GREEN, settle, t, max_cells=6)
+
+    def _d_downlink(self, surface, stage, mission, color, progress, t):
+        result = str(mission.get("result", "DELIVERED")).upper()
+        ok = result in {"", "DELIVERED", "OK"}
+        cx = stage.centerx
+        sat_y = stage.y + 24
+        gnd_y = stage.bottom - 28
+        self._icon(surface, "sat", cx, sat_y, 12, color, t)
+        self._pix_tag(surface, cx, sat_y + 14, "Wisdom (orbita)", C_TEXT_DIM, 180)
+        pygame.draw.line(surface, self._mix_color((20, 40, 78), color, 0.5), (stage.x + 20, gnd_y), (stage.right - 20, gnd_y), 2)
+        self._pix_tag(surface, cx, gnd_y + 4, "estacao de solo", C_TEXT_DIM, 180)
+        py = int(sat_y + 26 + (gnd_y - sat_y - 50) * max(0.0, min(1.0, progress)))
+        for k in range(3):  # dashed downlink beam
+            yy = sat_y + 22 + k * 12
+            if yy < py:
+                pygame.draw.line(surface, self._mix_color((20, 30, 56), color, 0.5), (cx, yy), (cx, yy + 6), 2)
+        parts = [(label, value, col) for label, value, col in self._mission_package_parts(mission) if value > 0]
+        seg_w = max(10, min(28, (stage.width - 80) // max(1, len(parts))))
+        px = cx - (len(parts) * seg_w) // 2
+        for _label, _value, col in parts:
+            pygame.draw.rect(surface, col, (px, py - 6, seg_w - 2, 12), border_radius=2)
+            px += seg_w
+        if progress > 0.8:
+            sc = C_ACCENT_GREEN if ok else C_ACCENT_RED
+            self._draw_soft_glow(surface, (cx, gnd_y - 4), 16, sc, 60)
+            pygame.draw.circle(surface, (8, 14, 28), (cx, gnd_y - 4), 13)
+            pygame.draw.circle(surface, sc, (cx, gnd_y - 4), 13, 2)
+            self._icon(surface, "check" if ok else "cross", cx, gnd_y - 4, 6, sc)
+            if ok:
+                self._fx_spark(surface, cx, gnd_y - 4, sc, (progress - 0.8) * 5, t)
+        # result label sits top-left, clear of the centred descending packet
+        self._pix_tag(surface, stage.x + 70, sat_y, "OK" if ok else result, color, 130)
+
+    def _draw_mission_stage(self, surface, area, kind, mission, color, progress, t):
+        if area.height < 90 or area.width < 120:
+            return
+        theme = "space" if kind in {"payload", "send"} else "lab"
+        stage = self._pix_stage(surface, area, color, t, theme)
+        if kind == "send":
+            self._d_downlink(surface, stage, mission, color, progress, t)
+            return
+
+        scene = self._mission_step_scene(kind, mission)
+        inputs, outputs = scene["inputs"], scene["outputs"]
+        op_icon, op_name, op_verb = scene["op"]
+        sample = scene.get("sample")
+        prog = max(0.0, min(1.0, progress))
+
+        card_w = int(min(150, stage.width * 0.30))
+        card_h = 38
+        stack = max(len(inputs), len(outputs))
+        row_h = card_h * stack + 8 * (stack - 1)
+        mid_y = stage.y + 16 + row_h // 2
+        left_x = stage.x + card_w // 2 + 12
+        right_x = stage.right - card_w // 2 - 12
+        op_x = stage.centerx
+
+        line_col = self._mix_color((26, 34, 58), color, 0.45)
+        pygame.draw.line(surface, line_col, (left_x + card_w // 2, mid_y), (op_x - 22, mid_y), 2)
+        pygame.draw.line(surface, line_col, (op_x + 22, mid_y), (right_x - card_w // 2, mid_y), 2)
+
+        def column(cx, items, is_out):
+            n = len(items)
+            total = card_h * n + 8 * (n - 1)
+            y0 = mid_y - total // 2
+            for i, item in enumerate(items):
+                label, size, icon = item[0], item[1], item[2]
+                grow = item[3] if (is_out and len(item) > 3) else 0
+                r = pygame.Rect(int(cx - card_w / 2), y0 + i * (card_h + 8), card_w, card_h)
+                ccol = color if is_out else self._mix_color(C_PANEL_BORDER, color, 0.75)
+                badge = "check" if (is_out and prog > 0.92) else None
+                self._d_block(surface, r, label, size, ccol, icon=icon, badge=badge,
+                              fill=(prog if (is_out and grow > 0) else 1.0))
+                if grow > 0:  # callout above the card (clear of stacked cards below)
+                    g = FONT_LABEL.render(f"+{grow} B", True, C_ACCENT_GREEN)
+                    surface.blit(g, (r.centerx - g.get_width() // 2, r.y - 13))
+
+        column(left_x, inputs, False)
+        column(right_x, outputs, True)
+
+        # operation core + plain name/verb below it
+        self._d_op_core(surface, op_x, mid_y, color, op_icon, prog, t)
+        name_y = max(mid_y + 26, mid_y + row_h // 2 + 8)
+        self._pix_tag(surface, op_x, name_y, op_name, color, 170)
+        self._pix_tag(surface, op_x, name_y + 14, op_verb, C_TEXT_DIM, 180)
+
+        # one clear moving token: the data gliding through the operation
+        span_l = left_x + card_w // 2 + 4
+        span_r = right_x - card_w // 2 - 4
+        tok_x = int(span_l + (span_r - span_l) * prog)
+        tok_col = color if prog >= 0.5 else self._mix_color(C_PANEL_BORDER, color, 0.7)
+        self._draw_soft_glow(surface, (tok_x, mid_y), 7, tok_col, 55)
+        pygame.draw.rect(surface, tok_col, (tok_x - 7, mid_y - 6, 14, 12), border_radius=3)
+        pygame.draw.rect(surface, C_TEXT_PRIMARY, (tok_x - 7, mid_y - 6, 14, 12), 1, border_radius=3)
+
+        note_y = stage.bottom - 13
+        if sample and stage.height >= 150:
+            strip = pygame.Rect(stage.x + 8, note_y - 48, stage.width - 16, 42)
+            self._d_sample_strip(surface, strip, sample, color, prog, t)
+        self._pix_tag(surface, stage.centerx, note_y, scene.get("note", ""), color, stage.width - 16)
+
     def _draw_mission_overlay_flow(self, surface, rect, scenario, mission, t):
         animation = self._mission_flow_animation_for(scenario)
         if animation is None:
@@ -5198,16 +5412,19 @@ class DashboardPanel:
         total_bytes = self._mission_int(mission, "bytes_total", steps[-1]["packet_bytes"])
         current_bytes = self._mission_flow_current_bytes(steps, active_index, local_progress)
         color = active_step["color"]
+        kind = str(active_step.get("kind", "")).lower()
+        awaiting_confirm = bool(animation.get("awaiting_confirm"))
+        stage_progress = 1.0 if awaiting_confirm else local_progress
 
         x = rect.x + 14
-        y = rect.y + 72
         width = rect.width - 28
 
-        awaiting_confirm = bool(animation.get("awaiting_confirm"))
-        header = "FLUXO CONCLUÍDO" if awaiting_confirm else f"FLUXO REAL {active_index + 1}/{len(steps)}"
-        control_rect = pygame.Rect(rect.right - 104, y - 2, 86, 22)
+        # --- status row + control button (VER DADOS / AGUARDE) ---
+        status_y = rect.y + 70
+        control_rect = pygame.Rect(rect.right - 104, status_y - 2, 86, 22)
         self.mission_flow_control_rects[scenario] = control_rect
-        surface.blit(self._render_clipped(FONT_LABEL, header, C_ACCENT_CYAN, width - 100), (x, y))
+        header = "FLUXO CONCLUÍDO" if awaiting_confirm else f"PROCESSO {active_index + 1}/{len(steps)}"
+        surface.blit(self._render_clipped(FONT_LABEL, header, C_ACCENT_CYAN, width - 100), (x, status_y))
         button_label = "VER DADOS" if awaiting_confirm else "AGUARDE"
         button_border = C_ACCENT_GREEN if awaiting_confirm else C_PANEL_BORDER
         button_fill = (18, 58, 46) if awaiting_confirm else (30, 38, 72)
@@ -5217,112 +5434,82 @@ class DashboardPanel:
         button_text = FONT_LABEL.render(button_label, True, button_color)
         surface.blit(
             button_text,
-            (
-                control_rect.centerx - button_text.get_width() // 2,
-                control_rect.centery - button_text.get_height() // 2,
-            ),
+            (control_rect.centerx - button_text.get_width() // 2,
+             control_rect.centery - button_text.get_height() // 2),
         )
-        y += 18
 
-        step_h = 78 if rect.height >= 580 else 72
-        step_rect = pygame.Rect(x, y, width, step_h)
-        pygame.draw.rect(surface, (8, 12, 26), step_rect, border_radius=5)
-        pygame.draw.rect(surface, color, step_rect, width=2, border_radius=5)
-
-        packet_text = f"pacote {current_bytes}/{total_bytes} B"
+        # --- step banner: icon + label/detail + bytes/time ---
+        banner = pygame.Rect(x, status_y + 20, width, 50)
+        pygame.draw.rect(surface, (8, 12, 26), banner, border_radius=6)
+        pygame.draw.rect(surface, color, banner, 2, border_radius=6)
+        self._icon(surface, self.MISSION_KIND_ICON.get(kind, "packet"), banner.x + 22, banner.centery, 11, color, t, stage_progress)
+        surface.blit(self._render_clipped(FONT_SMALL, f"{active_step['label']}  ·  {active_step['detail']}", color, width - 150),
+                     (banner.x + 44, banner.y + 8))
+        meta = f"{current_bytes}/{total_bytes} B"
         added = active_step.get("added_bytes", 0)
         if added:
-            packet_text += f"  +{added} B"
+            meta += f"   +{added} B"
         time_us = active_step.get("time_us")
         if time_us is not None:
-            packet_text += f"  {_format_elapsed(time_us)}"
+            meta += f"   {_format_elapsed(time_us)}"
+        surface.blit(self._render_clipped(FONT_LABEL, meta, (180, 198, 235), width - 52), (banner.x + 44, banner.y + 28))
 
-        title = f"{active_step['label']} - {active_step['detail']}"
-        surface.blit(self._render_clipped(FONT_SMALL, title, color, width - 14), (step_rect.x + 7, step_rect.y + 7))
-        surface.blit(self._render_clipped(FONT_LABEL, packet_text, (180, 198, 235), width - 14), (step_rect.x + 7, step_rect.y + 26))
-        self._draw_wrapped_text(
-            surface,
-            FONT_LABEL,
-            self._short_explanation(active_step.get("explain", "")),
-            C_TEXT_PRIMARY,
-            step_rect.x + 7,
-            step_rect.y + 45,
-            width - 14,
-            line_spacing=14,
-            max_lines=1,
-        )
+        # --- bottom-anchored bars (room for the scrub bar + step labels) ---
+        hint_y = rect.bottom - 14
+        sigla_y = hint_y - 14
+        scrub_cy = sigla_y - 13
+        packet_bar_h = 52
+        packet_bar_y = scrub_cy - 14 - packet_bar_h
+        explain_y = packet_bar_y - 30
 
-        hint_y = rect.bottom - 20
-        bar_h = 58
-        bar_y = hint_y - bar_h - 4
-        timeline_y = bar_y - 18
-        visual_top = step_rect.bottom + 8
-        visual_h = max(204, timeline_y - visual_top - 22)
-        visual_rect = pygame.Rect(x, visual_top, width, visual_h)
-        self._draw_mission_transformation_panel(surface, visual_rect, scenario, mission, active_step, local_progress, t)
+        # --- the recreated detailed process stage ---
+        stage_top = banner.bottom + 8
+        stage_rect = pygame.Rect(x, stage_top, width, max(120, explain_y - stage_top - 4))
+        self._draw_mission_stage(surface, stage_rect, kind, mission, color, stage_progress, t)
 
-        timeline_x = x + 10
-        timeline_w = width - 20
-        if len(steps) == 1:
-            node_positions = [timeline_x + timeline_w // 2]
-        else:
-            node_positions = [
-                timeline_x + int(round(index * timeline_w / (len(steps) - 1)))
-                for index in range(len(steps))
-            ]
+        # --- step explanation (2 lines) ---
+        self._draw_wrapped_text(surface, FONT_LABEL, active_step.get("explain", ""), C_TEXT_PRIMARY,
+                                x, explain_y, width, line_spacing=14, max_lines=2)
 
-        pygame.draw.line(surface, C_PANEL_BORDER, (node_positions[0], timeline_y), (node_positions[-1], timeline_y), 2)
-        progress_ratio = min(
-            1.0,
-            max(0.0, animation.get("age", 0.0) / max(0.001, animation.get("duration", MISSION_FLOW_ANIMATION_SECONDS))),
-        )
-        packet_x = node_positions[0] + int((node_positions[-1] - node_positions[0]) * progress_ratio)
-        scrub_rect = pygame.Rect(node_positions[0], timeline_y - 14, max(1, node_positions[-1] - node_positions[0]), 42)
+        # --- packet composition bar (kept) ---
+        self._draw_mission_flow_packet_bar(surface, pygame.Rect(rect.x, packet_bar_y, rect.width, packet_bar_h),
+                                           mission, current_bytes, total_bytes)
+
+        # --- scrub bar with step pips + abbreviations (replaces old timeline) ---
+        track_x = x + 8
+        track_w = width - 16
+        track = pygame.Rect(track_x, scrub_cy - 4, track_w, 8)
+        pygame.draw.rect(surface, (10, 16, 30), track, border_radius=4)
+        progress_ratio = min(1.0, max(0.0, animation.get("age", 0.0)
+                                      / max(0.001, animation.get("duration", MISSION_FLOW_ANIMATION_SECONDS))))
+        fill_w = int(track_w * progress_ratio)
+        pygame.draw.rect(surface, self._scenario_color(scenario), (track_x, track.y, fill_w, track.height), border_radius=4)
+        scrub_rect = pygame.Rect(track_x, scrub_cy - 12, max(1, track_w), 38)
         self.mission_flow_scrub_rects[scenario] = scrub_rect
-        pygame.draw.line(surface, self._scenario_color(scenario), (node_positions[0], timeline_y), (packet_x, timeline_y), 3)
+        sigla = {"PAYLOAD": "PAY", "CRC32": "CRC", "KEYGEN": "KEY", "ENCAP": "ENC",
+                 "KDF": "KDF", "RNG": "RNG", "AES-GCM": "AES", "DECAP": "DEC",
+                 "VERIFICA": "VER", "RESULTADO": "OK"}
+        slot = track_w // max(1, len(steps))
+        for index in range(len(steps)):
+            if len(steps) > 1:
+                px = track_x + track_w * index // (len(steps) - 1)
+            else:
+                px = track_x + track_w // 2
+            done = index <= active_index
+            pip_color = steps[index]["color"] if done else C_TEXT_DIM
+            pygame.draw.circle(surface, pip_color, (px, track.centery), 4 if index == active_index else 3)
+            label = sigla.get(steps[index]["label"], str(steps[index]["label"])[:3])
+            lbl = self._render_clipped(FONT_LABEL, label, pip_color, max(22, slot - 2))
+            lbl_x = max(x, min(px - lbl.get_width() // 2, x + width - lbl.get_width()))
+            surface.blit(lbl, (lbl_x, sigla_y))
+        handle_x = track_x + fill_w
+        self._draw_soft_glow(surface, (handle_x, track.centery), 8, color, int(40 + 30 * (0.5 + 0.5 * math.sin(t * 4.0))))
+        pygame.draw.circle(surface, color, (handle_x, track.centery), 7)
+        pygame.draw.circle(surface, C_TEXT_PRIMARY, (handle_x, track.centery), 7, 1)
 
-        for index, step in enumerate(steps):
-            node_x = node_positions[index]
-            completed = index < active_index
-            active = index == active_index
-            node_color = step["color"] if active or completed else C_TEXT_DIM
-            radius = 7 if active else 4
-            pygame.draw.circle(surface, node_color, (node_x, timeline_y), radius)
-            if active:
-                pygame.draw.circle(surface, node_color, (node_x, timeline_y), radius + 6, 1)
-            short_labels = {
-                "PAYLOAD": "PAY",
-                "KEYGEN": "KEY",
-                "ENCAP": "ENC",
-                "DECAP": "DEC",
-                "KDF": "KDF",
-                "RNG": "RNG",
-                "AES-GCM": "AES",
-                "HMAC": "MAC",
-                "CRC32": "CRC",
-                "VERIFICA": "VER",
-                "RESULTADO": "OK",
-            }
-            label = self._render_clipped(
-                FONT_LABEL,
-                short_labels.get(step["label"], step["label"][:3]),
-                node_color,
-                max(28, timeline_w // len(steps)),
-            )
-            surface.blit(label, (node_x - label.get_width() // 2, timeline_y + 10))
-
-        packet_rect = pygame.Rect(packet_x - 8, timeline_y - 8, 16, 16)
-        pygame.draw.rect(surface, color, packet_rect, border_radius=4)
-        pygame.draw.rect(surface, C_TEXT_PRIMARY, packet_rect, width=1, border_radius=4)
-        pygame.draw.circle(surface, C_TEXT_PRIMARY, (packet_x, timeline_y), 12, 1)
-
-        bar_rect = pygame.Rect(rect.x, bar_y, rect.width, bar_h)
-        self._draw_mission_flow_packet_bar(surface, bar_rect, mission, current_bytes, total_bytes)
-        hint = (
-            "Arraste a linha para revisar; VER DADOS abre métricas."
-            if awaiting_confirm
-            else "Arraste a linha para revisar a explicação."
-        )
+        # --- hint ---
+        hint = ("Arraste a barra para revisar; VER DADOS abre as métricas."
+                if awaiting_confirm else "Arraste a barra para rever cada processo.")
         surface.blit(self._render_clipped(FONT_LABEL, hint, C_TEXT_DIM, width), (x, hint_y))
 
     def _draw_mission_overlay_metrics(self, surface, rect, mission, elapsed, bytes_total):
@@ -5546,15 +5733,16 @@ class DashboardPanel:
             if fill_w > 0:
                 pygame.draw.rect(surface, color, (bar_x, bar_y, fill_w, 4), border_radius=2)
 
-    def _metric_tiles(self):
+    def _metric_state(self):
         state = dict(self.hardware_state)
         state.update(self.hardware_payload)
-
-        cpu = _optional_int(state.get("cpu_mhz"))
         computed_cpu_load = self._current_cpu_load_pct()
-        payload_cpu_load = _optional_float(state.get("cpu_load_pct"))
-        cpu_load = computed_cpu_load if self.cpu_active_window else (payload_cpu_load or 0.0)
-        heap = _optional_int(state.get("heap"))
+        payload_cpu_load = _optional_float(state.get("cpu_load_pct")) or 0.0
+        cpu_load = computed_cpu_load if self.cpu_active_window else payload_cpu_load
+        return state, _optional_int(state.get("cpu_mhz")), cpu_load, _optional_int(state.get("heap"))
+
+    def _metric_tiles(self):
+        state, cpu, cpu_load, heap = self._metric_state()
 
         if self.serial_client is None:
             profile = "SIMULADO"
@@ -5583,15 +5771,10 @@ class DashboardPanel:
         )
 
     def _metric_tile_progress(self, label):
-        state = dict(self.hardware_state)
-        state.update(self.hardware_payload)
+        _state, _cpu, cpu_load, heap = self._metric_state()
         if label == "CPU":
-            computed_cpu_load = self._current_cpu_load_pct()
-            payload_cpu_load = _optional_float(state.get("cpu_load_pct")) or 0.0
-            cpu_load = computed_cpu_load if self.cpu_active_window else payload_cpu_load
             return cpu_load / 100.0
         if label == "RAM":
-            heap = _optional_int(state.get("heap"))
             if heap is None:
                 return 0.0
             total_ram = 327680
@@ -5878,46 +6061,19 @@ class Onboarding:
         ty = rect.y + (rect.height - txt_surf.get_height()) // 2
         surface.blit(txt_surf, (tx, ty))
 
-    def wrap_text(self, font, text, max_width):
-        words = text.split()
-        if not words:
-            return []
-        lines = []
-        current_line = []
-        for word in words:
-            test_line = " ".join(current_line + [word])
-            if font.size(test_line)[0] <= max_width:
-                current_line.append(word)
-            else:
-                if current_line:
-                    lines.append(" ".join(current_line))
-                current_line = [word]
-        if current_line:
-            lines.append(" ".join(current_line))
-        return lines
-
-    def wrap_render(self, font, text, color, max_width):
-        if font.size(text)[0] <= max_width:
-            return font.render(text, True, color)
-        clipped = text
-        suffix = "..."
-        while clipped and font.size(clipped + suffix)[0] > max_width:
-            clipped = clipped[:-1]
-        return font.render(clipped + suffix, True, color)
-
     def draw_wrapped_onboarding(self, surface, text, x, y, max_width, color, line_spacing=21, max_lines=None):
-        lines = self.wrap_text(FONT_SMALL, text, max_width)
+        lines = DashboardPanel._wrap_text_for_width(FONT_SMALL, text, max_width)
         if max_lines is not None:
             lines = lines[:max_lines]
         for line in lines:
-            surface.blit(self.wrap_render(FONT_SMALL, line, color, max_width), (x, y))
+            surface.blit(DashboardPanel._render_clipped(FONT_SMALL, line, color, max_width), (x, y))
             y += line_spacing
         return y
 
     def draw_paragraphs(self, surface, paragraphs, x, y, max_width, line_spacing=26, paragraph_spacing=12):
         curr_y = y
         for para in paragraphs:
-            wrapped = self.wrap_text(FONT_BODY, para, max_width)
+            wrapped = DashboardPanel._wrap_text_for_width(FONT_BODY, para, max_width)
             for line in wrapped:
                 txt = FONT_BODY.render(line, True, C_TEXT_PRIMARY)
                 surface.blit(txt, (x, curr_y))
@@ -6203,7 +6359,7 @@ class Onboarding:
             rect = pygame.Rect(cx, content_y, card_w, card_h)
             pygame.draw.rect(surface, C_PANEL_BG, rect, border_radius=6)
             pygame.draw.rect(surface, card["color"], rect, width=2, border_radius=6)
-            surface.blit(self.wrap_render(FONT_HEADER, card["title"], card["color"], card_w - 32), (cx + 16, content_y + 18))
+            surface.blit(DashboardPanel._render_clipped(FONT_HEADER, card["title"], card["color"], card_w - 32), (cx + 16, content_y + 18))
             cy = content_y + 58
             for item in card["body"]:
                 cy = self.draw_wrapped_onboarding(surface, item, cx + 16, cy, card_w - 32, C_TEXT_PRIMARY, max_lines=2)
@@ -6217,7 +6373,7 @@ class Onboarding:
         mx = metrics_rect.x + 18
         my = metrics_rect.y + 16
         mw = metrics_rect.width - 36
-        surface.blit(self.wrap_render(FONT_HEADER, "O QUE ESTAMOS MEDINDO", C_ACCENT_CYAN, mw), (mx, my))
+        surface.blit(DashboardPanel._render_clipped(FONT_HEADER, "O QUE ESTAMOS MEDINDO", C_ACCENT_CYAN, mw), (mx, my))
         my += 38
         metric_lines = [
             "Tempo/CPU: custo para entregar a mensagem.",
@@ -6251,7 +6407,7 @@ class Onboarding:
         lx = left_rect.x + 20
         ly = left_rect.y + 18
         lw = left_rect.width - 40
-        surface.blit(self.wrap_render(FONT_HEADER, "ROTEIRO MANUAL", C_ACCENT_GREEN, lw), (lx, ly))
+        surface.blit(DashboardPanel._render_clipped(FONT_HEADER, "ROTEIRO MANUAL", C_ACCENT_GREEN, lw), (lx, ly))
         ly += 38
         steps = [
             ("CLÁSSICA", "envia a mensagem com AES-128-GCM."),
@@ -6271,7 +6427,7 @@ class Onboarding:
         rx = right_rect.x + 20
         ry = right_rect.y + 18
         rw = right_rect.width - 40
-        surface.blit(self.wrap_render(FONT_HEADER, "O QUE COMPARAR", C_ACCENT_ORANGE, rw), (rx, ry))
+        surface.blit(DashboardPanel._render_clipped(FONT_HEADER, "O QUE COMPARAR", C_ACCENT_ORANGE, rw), (rx, ry))
         ry += 38
         comparisons = [
             "Sensores da Wisdom viram payload real.",

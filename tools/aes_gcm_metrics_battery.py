@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -27,13 +26,12 @@ from tools.final_metrics_battery import (  # noqa: E402
     command_starts,
     mission_scenario_of,
     payload_of,
-    parse_number,
     profile_of,
-    safe_slug,
     send_record,
     stats,
     summarize,
     utc_now_iso,
+    write_document,
 )
 from tools.serial_bridge import SerialBridge, SerialBridgeError  # noqa: E402
 from tools.serial_console import choose_port  # noqa: E402
@@ -278,24 +276,6 @@ def summarize_aes_gcm(records: list[dict[str, object]]) -> dict[str, object]:
     return summary
 
 
-def write_document(document: dict[str, object], log_dir: str) -> Path:
-    directory = Path(log_dir)
-    directory.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    port = safe_slug(str(document.get("port", "serial")))
-    path = directory / f"{timestamp}_aes_gcm_metrics_{port}.json"
-    suffix = 1
-    while path.exists():
-        path = directory / f"{timestamp}_aes_gcm_metrics_{port}_{suffix}.json"
-        suffix += 1
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    with tmp_path.open("w", encoding="utf-8") as handle:
-        json.dump(document, handle, indent=2, ensure_ascii=False, sort_keys=True)
-        handle.write("\n")
-    tmp_path.replace(path)
-    return path
-
-
 def print_plan(args: argparse.Namespace) -> None:
     plan = planned_commands(args)
     mission_count = sum(1 for command, _phase, _profile in plan if command.startswith("MISSION "))
@@ -364,7 +344,7 @@ def main() -> int:
     }
     document["summary"] = summarize(records, actual_elapsed_s)
     document["summary"]["aes_gcm"] = summarize_aes_gcm(records)
-    path = write_document(document, args.log_dir)
+    path = write_document(document, args.log_dir, "aes_gcm_metrics")
     checks = document["summary"]["aes_gcm"]["checks"]
     print(f"aes_gcm_metrics_json={path}")
     print("summary=" + json.dumps(
