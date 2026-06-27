@@ -218,25 +218,26 @@ MOTIVATION_REFERENCES = (
 )
 
 # --- Paleta de Cores ----------------------------------------------------------
-C_SPACE_BG       = (5, 5, 18)
-C_PANEL_BG       = (12, 14, 30)
-C_PANEL_BORDER   = (40, 60, 120)
-C_PANEL_HEADER   = (18, 22, 50)
-C_ACCENT_CYAN    = (0, 220, 255)
-C_ACCENT_BLUE    = (0, 120, 255)
-C_ACCENT_GREEN   = (0, 255, 140)
-C_ACCENT_ORANGE  = (255, 165, 0)
-C_ACCENT_RED     = (255, 60, 80)
-C_ACCENT_PURPLE  = (160, 80, 255)
-C_TEXT_PRIMARY    = (220, 230, 255)
-C_TEXT_DIM        = (100, 120, 160)
-C_SAT_BODY       = (70, 80, 100)
-C_SAT_PANEL_BLUE = (40, 100, 200)
-C_SAT_PANEL_DARK = (20, 50, 120)
-C_SAT_GOLD       = (220, 190, 80)
-C_ROBOT_FACE     = (180, 200, 230)
-C_ROBOT_EYE      = (0, 200, 255)
-C_ROBOT_SMILE    = (0, 255, 160)
+# REFATORAÇÃO VISUAL: Paleta High-Contrast Cyber-Space
+C_SPACE_BG       = (0, 2, 10)
+C_PANEL_BG       = (5, 10, 22)
+C_PANEL_BORDER   = (0, 210, 255)
+C_PANEL_HEADER   = (8, 18, 38)
+C_ACCENT_CYAN    = (0, 245, 255)
+C_ACCENT_BLUE    = (38, 128, 255)
+C_ACCENT_GREEN   = (100, 255, 40)
+C_ACCENT_ORANGE  = (255, 176, 32)
+C_ACCENT_RED     = (255, 44, 84)
+C_ACCENT_PURPLE  = (255, 70, 245)
+C_TEXT_PRIMARY    = (248, 252, 255)
+C_TEXT_DIM        = (148, 178, 210)
+C_SAT_BODY       = (180, 198, 220)
+C_SAT_PANEL_BLUE = (0, 164, 255)
+C_SAT_PANEL_DARK = (5, 38, 74)
+C_SAT_GOLD       = (255, 222, 92)
+C_ROBOT_FACE     = (230, 242, 255)
+C_ROBOT_EYE      = (0, 245, 255)
+C_ROBOT_SMILE    = (100, 255, 40)
 
 # --- Fontes -------------------------------------------------------------------
 def load_font(name, size):
@@ -707,25 +708,41 @@ class Earth:
         self.radius = 180
         self.center_x = WIDTH // 2
         self.center_y = HEIGHT // 2 + 20
-        self.surface_cache = None
+        # REFATORAÇÃO VISUAL: Terra com Textura Rolável
+        self.size = 0
+        self.base_cache = None
+        self.land_texture = None
+        self.land_view_cache = None
+        self.circle_mask = None
+        self.overlay_cache = None
+        self.rotation_speed_px = 10.0
         self._build_surface()
 
     def _build_surface(self):
         margin = 50
         size = self.radius * 2 + margin * 2
-        self.surface_cache = pygame.Surface((size, size), pygame.SRCALPHA)
+        self.size = size
         cx, cy = size // 2, size // 2
         r = self.radius
+        self.base_cache = pygame.Surface((size, size), pygame.SRCALPHA)
+        self.overlay_cache = pygame.Surface((size, size), pygame.SRCALPHA)
+        self.land_view_cache = pygame.Surface((size, size), pygame.SRCALPHA)
+        self.circle_mask = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(self.circle_mask, (255, 255, 255, 255), (cx, cy), r)
 
+        # REFATORAÇÃO VISUAL: Atmosfera da Terra
         # Glow atmosferico externo
         for i in range(40, 0, -1):
             alpha = int(4.5 * (40 - i))
-            pygame.draw.circle(self.surface_cache, (50, 130, 255, min(alpha, 120)), (cx, cy), r + i)
+            pygame.draw.circle(self.base_cache, (50, 130, 255, min(alpha, 120)), (cx, cy), r + i)
 
         # Corpo base — oceano azul SOLIDO e opaco
-        pygame.draw.circle(self.surface_cache, (25, 100, 200, 255), (cx, cy), r)
-        pygame.draw.circle(self.surface_cache, (30, 90, 185, 255), (cx, cy), r - 2)
+        pygame.draw.circle(self.base_cache, (25, 100, 200, 255), (cx, cy), r)
+        pygame.draw.circle(self.base_cache, (30, 90, 185, 255), (cx, cy), r - 2)
 
+        # REFATORAÇÃO VISUAL: Continentes em Textura Contínua
+        # Continentes sao renderizados uma unica vez em textura continua 2D.
+        land_single = pygame.Surface((size, size), pygame.SRCALPHA)
         # -- Continente das Americas -- GRANDE, preenche quase toda a face
         land_color = (50, 170, 75)
         scale = r / 140
@@ -746,9 +763,9 @@ class Earth:
             (int(cx - 70 * scale), int(cy - 100 * scale)),
             (int(cx - 40 * scale), int(cy - 115 * scale)),
         ]
-        pygame.draw.polygon(self.surface_cache, (*land_color, 255), points_na)
-        pygame.draw.polygon(self.surface_cache, (60, 185, 85, 80), points_na)
-        pygame.draw.polygon(self.surface_cache, (35, 130, 55, 180), points_na, 2)
+        pygame.draw.polygon(land_single, (*land_color, 255), points_na)
+        pygame.draw.polygon(land_single, (60, 185, 85, 80), points_na)
+        pygame.draw.polygon(land_single, (35, 130, 55, 180), points_na, 2)
 
         # America Central
         points_ca = [
@@ -759,8 +776,8 @@ class Earth:
             (int(cx + 5 * scale), int(cy + 30 * scale)),
             (int(cx + 10 * scale), int(cy + 10 * scale)),
         ]
-        pygame.draw.polygon(self.surface_cache, (*land_color, 255), points_ca)
-        pygame.draw.polygon(self.surface_cache, (35, 130, 55, 180), points_ca, 2)
+        pygame.draw.polygon(land_single, (*land_color, 255), points_ca)
+        pygame.draw.polygon(land_single, (35, 130, 55, 180), points_ca, 2)
 
         # America do Sul
         points_sa = [
@@ -775,7 +792,7 @@ class Earth:
             (int(cx - 25 * scale), int(cy + 65 * scale)),
             (int(cx - 10 * scale), int(cy + 48 * scale)),
         ]
-        pygame.draw.polygon(self.surface_cache, (45, 160, 70, 255), points_sa)
+        pygame.draw.polygon(land_single, (45, 160, 70, 255), points_sa)
         # Amazonia
         amazon = [
             (int(cx + 20 * scale), int(cy + 55 * scale)),
@@ -783,8 +800,8 @@ class Earth:
             (int(cx + 50 * scale), int(cy + 80 * scale)),
             (int(cx + 15 * scale), int(cy + 75 * scale)),
         ]
-        pygame.draw.polygon(self.surface_cache, (35, 140, 55, 120), amazon)
-        pygame.draw.polygon(self.surface_cache, (30, 120, 50, 180), points_sa, 2)
+        pygame.draw.polygon(land_single, (35, 140, 55, 120), amazon)
+        pygame.draw.polygon(land_single, (30, 120, 50, 180), points_sa, 2)
 
         # Groenlandia
         points_gl = [
@@ -794,8 +811,8 @@ class Earth:
             (int(cx + 40 * scale), int(cy - 90 * scale)),
             (int(cx + 20 * scale), int(cy - 95 * scale)),
         ]
-        pygame.draw.polygon(self.surface_cache, (180, 210, 200, 255), points_gl)
-        pygame.draw.polygon(self.surface_cache, (140, 170, 160, 150), points_gl, 1)
+        pygame.draw.polygon(land_single, (180, 210, 200, 255), points_gl)
+        pygame.draw.polygon(land_single, (140, 170, 160, 150), points_gl, 1)
 
         # Ilhas do Caribe
         for ix2, iy2, iw, ih in [
@@ -803,9 +820,14 @@ class Earth:
             (int(cx + 45 * scale), int(cy + 22 * scale), int(8 * scale), int(5 * scale)),
             (int(cx + 40 * scale), int(cy + 30 * scale), int(6 * scale), int(4 * scale)),
         ]:
-            pygame.draw.ellipse(self.surface_cache, (*land_color, 250),
+            pygame.draw.ellipse(land_single, (*land_color, 250),
                                 (ix2, iy2, max(3, iw), max(3, ih)))
+        self.land_texture = pygame.Surface((size * 2, size), pygame.SRCALPHA)
+        self.land_texture.blit(land_single, (0, 0))
+        self.land_texture.blit(land_single, (size, 0))
 
+        # REFATORAÇÃO VISUAL: Overlay Atmosférico Estático
+        # Nuvens, luz e terminador ficam em overlay estatico acima do mapa.
         # Nuvens
         clouds = [
             (cx - 40, cy - 50, 70, 18),
@@ -817,7 +839,7 @@ class Earth:
         for x, y, w, h in clouds:
             s = pygame.Surface((w, h), pygame.SRCALPHA)
             pygame.draw.ellipse(s, (220, 235, 255, 45), (0, 0, w, h))
-            self.surface_cache.blit(s, (x - w // 2, y - h // 2))
+            self.overlay_cache.blit(s, (x - w // 2, y - h // 2))
 
         # Iluminacao solar
         light_surf = pygame.Surface((size, size), pygame.SRCALPHA)
@@ -826,7 +848,7 @@ class Earth:
             alpha = int(50 * (1 - ratio) ** 2)
             pygame.draw.circle(light_surf, (255, 255, 255, min(alpha, 40)),
                                (cx - int(r * 0.3), cy - int(r * 0.3)), i)
-        self.surface_cache.blit(light_surf, (0, 0))
+        self.overlay_cache.blit(light_surf, (0, 0))
 
         # Sombra terminador
         shadow_surf = pygame.Surface((size, size), pygame.SRCALPHA)
@@ -835,25 +857,27 @@ class Earth:
             alpha = int(80 * (1 - ratio) ** 1.5)
             pygame.draw.circle(shadow_surf, (0, 0, 20, min(alpha, 60)),
                                (cx + int(r * 0.35), cy + int(r * 0.35)), i)
-        self.surface_cache.blit(shadow_surf, (0, 0))
+        self.overlay_cache.blit(shadow_surf, (0, 0))
 
-        # Mascara circular
-        clean = pygame.Surface((size, size), pygame.SRCALPHA)
+        # Glow e borda final acima do mapa rolavel.
         for i in range(40, 0, -1):
             alpha = int(4.5 * (40 - i))
-            pygame.draw.circle(clean, (50, 130, 255, min(alpha, 120)), (cx, cy), r + i)
-        for y_pos in range(size):
-            for x_pos in range(size):
-                dist_sq = (x_pos - cx) ** 2 + (y_pos - cy) ** 2
-                if dist_sq <= r * r:
-                    clean.set_at((x_pos, y_pos), self.surface_cache.get_at((x_pos, y_pos)))
-        self.surface_cache = clean
-        pygame.draw.circle(self.surface_cache, (80, 160, 255, 50), (cx, cy), r, 2)
+            pygame.draw.circle(self.overlay_cache, (50, 130, 255, min(alpha, 95)), (cx, cy), r + i)
+        pygame.draw.circle(self.overlay_cache, (80, 160, 255, 50), (cx, cy), r, 2)
 
     def draw(self, surface, t):
-        blit_x = self.center_x - self.surface_cache.get_width() // 2
-        blit_y = self.center_y - self.surface_cache.get_height() // 2
-        surface.blit(self.surface_cache, (blit_x, blit_y))
+        blit_x = self.center_x - self.size // 2
+        blit_y = self.center_y - self.size // 2
+        surface.blit(self.base_cache, (blit_x, blit_y))
+        if self.land_texture is not None:
+            # REFATORAÇÃO VISUAL: Rotação por Scrolling 2D
+            # Scrolling 2D: recorta a textura duplicada sem redesenhar poligonos.
+            offset_x = int((t * self.rotation_speed_px) % self.size)
+            self.land_view_cache.fill((0, 0, 0, 0))
+            self.land_view_cache.blit(self.land_texture, (0, 0), pygame.Rect(offset_x, 0, self.size, self.size))
+            self.land_view_cache.blit(self.circle_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            surface.blit(self.land_view_cache, (blit_x, blit_y))
+        surface.blit(self.overlay_cache, (blit_x, blit_y))
 
 
 # --- Robo Pixel Art -----------------------------------------------------------
@@ -1134,32 +1158,49 @@ class Satellite:
 
     def draw_trail(self, surface, t):
         """Desenha rastro luminoso atras do satelite."""
-        trail_len = 25
+        # REFATORAÇÃO VISUAL: Rastro do Satélite
+        trail_len = 46
         for i in range(trail_len, 0, -1):
-            a = self.angle - (i * 0.03)
+            a = self.angle - (i * 0.022)
             x = self.earth.center_x + self.orbit_radius * math.cos(a)
             y = self.earth.center_y + self.orbit_radius * math.sin(a) * 0.4
-            alpha = int(200 * (1 - i / trail_len))
-            r_size = max(1, int(4 * (1 - i / trail_len)))
-            glow_surf = pygame.Surface((r_size * 4, r_size * 4), pygame.SRCALPHA)
-            pygame.draw.circle(glow_surf, (0, 180, 255, alpha),
+            fade = 1 - i / trail_len
+            alpha = int(210 * fade)
+            r_size = max(1, int(7 * fade))
+            color = (
+                int(C_ACCENT_BLUE[0] * (1 - fade) + C_ACCENT_CYAN[0] * fade),
+                int(C_ACCENT_BLUE[1] * (1 - fade) + C_ACCENT_CYAN[1] * fade),
+                int(C_ACCENT_BLUE[2] * (1 - fade) + C_ACCENT_CYAN[2] * fade),
+            )
+            glow_surf = pygame.Surface((r_size * 5, r_size * 5), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, (*color, max(20, alpha // 3)),
+                               (r_size * 2, r_size * 2), r_size * 2)
+            pygame.draw.circle(glow_surf, (*color, alpha),
                                (r_size * 2, r_size * 2), r_size)
             surface.blit(glow_surf, (int(x) - r_size * 2, int(y) - r_size * 2))
 
-    def draw(self, surface, t):
+    # OTIMIZAÇÃO SEMINÁRIO
+    def draw(self, surface, t, offset=(0, 0)):
         self.draw_orbit_line(surface)
         self.draw_trail(surface, t)
 
         x, y = self.get_position()
-        ix, iy = int(x), int(y)
+        # OTIMIZAÇÃO SEMINÁRIO
+        # Shake fisico aplicado apenas ao corpo do satelite, preservando fundo/UI.
+        ix, iy = int(x + offset[0]), int(y + offset[1])
         bs = self.body_size
 
+        # REFATORAÇÃO VISUAL: CubeSat HUD Neon
         # -- Paineis solares --
         panel_w, panel_h = bs + 24, bs // 3
         # Painel esquerdo
         for i in range(3):
-            shade = max(0, min(255, int(C_SAT_PANEL_BLUE[0] + 20 * math.sin(t * 2 + i))))
-            color = (shade, C_SAT_PANEL_BLUE[1], C_SAT_PANEL_BLUE[2])
+            pulse = 0.65 + 0.35 * math.sin(t * 2.2 + i)
+            color = (
+                int(10 + C_SAT_PANEL_BLUE[0] * pulse),
+                int(70 + C_SAT_PANEL_BLUE[1] * pulse * 0.55),
+                int(130 + C_SAT_PANEL_BLUE[2] * pulse * 0.35),
+            )
             rect_x = ix - bs // 2 - panel_w - 6
             rect_y = iy - panel_h // 2 + (i - 1) * 3
             pygame.draw.rect(surface, color, (rect_x, rect_y, panel_w, panel_h // 3 - 1))
@@ -1172,8 +1213,12 @@ class Satellite:
 
         # Painel direito
         for i in range(3):
-            shade = max(0, min(255, int(C_SAT_PANEL_BLUE[0] + 20 * math.sin(t * 2 + i + 1))))
-            color = (shade, C_SAT_PANEL_BLUE[1], C_SAT_PANEL_BLUE[2])
+            pulse = 0.65 + 0.35 * math.sin(t * 2.2 + i + 1.1)
+            color = (
+                int(10 + C_SAT_PANEL_BLUE[0] * pulse),
+                int(70 + C_SAT_PANEL_BLUE[1] * pulse * 0.55),
+                int(130 + C_SAT_PANEL_BLUE[2] * pulse * 0.35),
+            )
             rect_x = ix + bs // 2 + 6
             rect_y = iy - panel_h // 2 + (i - 1) * 3
             pygame.draw.rect(surface, color, (rect_x, rect_y, panel_w, panel_h // 3 - 1))
@@ -1193,12 +1238,15 @@ class Satellite:
         # -- Corpo do CubeSat --
         body_rect = pygame.Rect(ix - bs // 2, iy - bs // 2, bs, bs)
         glow_s = pygame.Surface((bs + 20, bs + 20), pygame.SRCALPHA)
-        glow_alpha = int(40 + 20 * math.sin(t * 3))
-        pygame.draw.rect(glow_s, (0, 180, 255, glow_alpha),
+        glow_alpha = int(72 + 44 * math.sin(t * 3))
+        pygame.draw.rect(glow_s, (*C_ACCENT_CYAN, glow_alpha),
                          (0, 0, bs + 20, bs + 20), border_radius=6)
         surface.blit(glow_s, (ix - bs // 2 - 10, iy - bs // 2 - 10))
-        pygame.draw.rect(surface, C_SAT_BODY, body_rect, border_radius=4)
-        pygame.draw.rect(surface, C_ACCENT_CYAN, body_rect, 1, border_radius=4)
+        pygame.draw.rect(surface, (36, 48, 62), body_rect, border_radius=4)
+        pygame.draw.rect(surface, C_SAT_BODY, body_rect.inflate(-10, -10), border_radius=3)
+        pygame.draw.rect(surface, C_ACCENT_CYAN, body_rect, 2, border_radius=4)
+        pygame.draw.line(surface, C_PANEL_HEADER, (body_rect.x + 10, iy), (body_rect.right - 10, iy), 2)
+        pygame.draw.line(surface, C_PANEL_HEADER, (ix, body_rect.y + 10), (ix, body_rect.bottom - 10), 2)
 
         # -- Robo sorridente --
         draw_robot_pixel(surface, ix, iy, pixel_size=6, t=t)
@@ -1207,9 +1255,15 @@ class Satellite:
         ant_height = 16
         pygame.draw.line(surface, C_SAT_GOLD,
                          (ix, iy - bs // 2), (ix, iy - bs // 2 - ant_height), 2)
-        blink = int(200 + 55 * math.sin(t * 6))
-        pygame.draw.circle(surface, (blink, 50, 50),
-                           (ix, iy - bs // 2 - ant_height), 3)
+        blink = 0.55 + 0.45 * math.sin(t * 8)
+        beacon = (255, int(80 + 160 * blink), int(40 + 80 * blink))
+        pygame.draw.circle(surface, beacon, (ix, iy - bs // 2 - ant_height), 4)
+        pygame.draw.circle(surface, (*beacon, 80), (ix, iy - bs // 2 - ant_height), 10, 1)
+        thruster_y = iy + bs // 2 + 4
+        for radius, alpha in ((18, 38), (10, 90), (4, 210)):
+            flame = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(flame, (*C_ACCENT_CYAN, alpha), (radius, radius), radius)
+            surface.blit(flame, (ix - radius, thruster_y - radius))
 
         # Label
         label = FONT_PIXEL.render("PQC-SAT-01", True, C_ACCENT_CYAN)
@@ -1318,6 +1372,10 @@ class DashboardPanel:
         self.effect_timer = 0.0
         self.effect_label = ""
         self.effect_color = C_ACCENT_CYAN
+        # OTIMIZAÇÃO SEMINÁRIO
+        # Estado visual curto para impacto fisico e chuva de bits sem bloquear loop.
+        self.impact_shake_offset = (0, 0)
+        self.bit_rain_particles = []
         self._fault_overlay_surface = None
         self._append_history("SYS_INIT", "OK")
         self._append_history("MODE_SELECT", "SIMULADO")
@@ -2227,6 +2285,9 @@ class DashboardPanel:
         self._refresh_experiment_metrics()
         self.session_status = "SIMULADO"
         self.effect_timer = 0.0
+        # OTIMIZAÇÃO SEMINÁRIO
+        self.impact_shake_offset = (0, 0)
+        self.bit_rain_particles.clear()
         self.session_dirty = False
         return "SIM RESET"
 
@@ -2588,6 +2649,48 @@ class DashboardPanel:
             self.effect_color = C_ACCENT_GREEN
             self.effect_label = event.result
 
+    def _spawn_bit_rain(self, origin):
+        # OTIMIZAÇÃO SEMINÁRIO
+        # Particulas textuais curtas: efeito CRC32/Matrix com custo fixo e baixo.
+        ox, oy = origin
+        for index in range(36):
+            self.bit_rain_particles.append(
+                {
+                    "x": ox + random.randint(-120, 120),
+                    "y": oy + random.randint(-8, 18),
+                    "vy": random.uniform(95.0, 185.0),
+                    "life": 1.0,
+                    "delay": random.uniform(0.0, 0.18),
+                    "bit": "1" if index % 2 else "0",
+                }
+            )
+
+    def _update_bit_rain(self, dt):
+        # OTIMIZAÇÃO SEMINÁRIO
+        # Atualizacao linear simples, sem alocacoes pesadas por frame.
+        alive = []
+        for particle in self.bit_rain_particles:
+            if particle["delay"] > 0:
+                particle["delay"] -= dt
+                alive.append(particle)
+                continue
+            particle["life"] -= dt
+            particle["y"] += particle["vy"] * dt
+            if particle["life"] > 0:
+                alive.append(particle)
+        self.bit_rain_particles = alive
+
+    def _draw_bit_rain(self, surface):
+        # OTIMIZAÇÃO SEMINÁRIO
+        # Renderiza poucos glyphs vermelhos com alpha decrescente por 1 segundo.
+        for particle in self.bit_rain_particles:
+            if particle["delay"] > 0:
+                continue
+            alpha = max(0, min(255, int(255 * particle["life"])))
+            glyph = FONT_PIXEL.render(particle["bit"], True, C_ACCENT_RED)
+            glyph.set_alpha(alpha)
+            surface.blit(glyph, (int(particle["x"]), int(particle["y"])))
+
     def _open_fault_overlay_from_event(self, event, snapshot=None):
         before_byte = self._byte_from_hex_at(event.before_hex, event.byte_index)
         after_byte = self._byte_from_hex_at(event.after_hex, event.byte_index)
@@ -2665,6 +2768,10 @@ class DashboardPanel:
             "duration": FAULT_FLOW_ANIMATION_SECONDS,
             "awaiting_confirm": False,
         }
+        if fault.get("result") == "DETECTED_GUARD" and str(fault.get("guard", "")).upper() == "CRC32":
+            # OTIMIZAÇÃO SEMINÁRIO
+            rect, _close_rect = self._fault_overlay_geometry()
+            self._spawn_bit_rain((rect.centerx, rect.y + 96))
 
     @staticmethod
     def _parse_int_auto(value):
@@ -2856,6 +2963,7 @@ class DashboardPanel:
             if self.fault_flow_animation["age"] >= self.fault_flow_animation["duration"]:
                 self.fault_flow_animation["age"] = self.fault_flow_animation["duration"]
                 self.fault_flow_animation["awaiting_confirm"] = True
+        self._update_bit_rain(dt)
         self._advance_demo(dt)
         self._drain_serial_events()
 
@@ -3531,6 +3639,8 @@ class DashboardPanel:
         self._draw_demo_overlay(surface, t)
         self._draw_mission_overlay(surface, t)
         self._draw_fault_overlay(surface, t)
+        # OTIMIZAÇÃO SEMINÁRIO
+        self._draw_bit_rain(surface)
         self._draw_bottom_bar(surface, t)
         if getattr(self, "results_overlay_visible", False):
             self._draw_results_overlay(surface, t)
@@ -3635,6 +3745,7 @@ class DashboardPanel:
 
     def _pix_bits(self, surface, cx, cy, value, flip_mask, color, u=None):
         """Eight chunky bit cells centred at (cx, cy); flipped bit glows red."""
+        # REFATORAÇÃO VISUAL: Byte BIT-FLIP em Alto Impacto
         cell = u or 16
         gap = 3
         total_w = 8 * cell + 7 * gap
@@ -3645,10 +3756,14 @@ class DashboardPanel:
             bit = (value >> (7 - i)) & 1
             changed = bool(flip_mask & bit_mask)
             bx = x0 + i * (cell + gap)
-            fill = (74, 16, 30) if changed else (10, 16, 34)
+            blink = 0.5 + 0.5 * math.sin(pygame.time.get_ticks() * 0.018)
+            fill = (120 + int(80 * blink), 8, 26) if changed else (10, 16, 34)
             border = C_ACCENT_RED if changed else color
+            if changed:
+                glow_rect = pygame.Rect(bx - 4, y0 - 4, cell + 8, cell + 8)
+                pygame.draw.rect(surface, (*C_ACCENT_RED, 70), glow_rect, border_radius=5)
             pygame.draw.rect(surface, fill, (bx, y0, cell, cell), border_radius=3)
-            pygame.draw.rect(surface, border, (bx, y0, cell, cell), width=2 if changed else 1, border_radius=3)
+            pygame.draw.rect(surface, border, (bx, y0, cell, cell), width=3 if changed else 1, border_radius=3)
             txt = FONT_SMALL.render(str(bit), True, C_ACCENT_RED if changed else C_TEXT_PRIMARY)
             surface.blit(txt, (bx + (cell - txt.get_width()) // 2, y0 + (cell - txt.get_height()) // 2))
         return pygame.Rect(x0, y0, total_w, cell)
@@ -3737,6 +3852,7 @@ class DashboardPanel:
             pygame.draw.line(surface, color, (cx, cy), (cx + int(r * math.cos(ang)), cy + int(r * math.sin(ang))), 2)
 
     def _clean_node(self, surface, rect, node, base_color, emphasis, progress, t):
+        # REFATORAÇÃO VISUAL: Nó Didático Ampliado
         nc = node.get("color", base_color)
         pulse = 0.5 + 0.5 * math.sin(t * 4.0)
         if emphasis:
@@ -3745,8 +3861,8 @@ class DashboardPanel:
             self._draw_soft_glow(surface, rect.center, max(10, rect.height // 3), nc, int(18 + 26 * progress))
             ring = self._mix_color((10, 16, 32), nc, 0.30 + 0.45 * pulse)
             pygame.draw.rect(surface, ring, rect.inflate(6, 6), 2, border_radius=8)
-        pygame.draw.rect(surface, (10, 16, 32), rect, border_radius=6)
-        pygame.draw.rect(surface, nc, rect, 2 if emphasis else 1, border_radius=6)
+        pygame.draw.rect(surface, (8, 14, 30), rect, border_radius=4)
+        pygame.draw.rect(surface, nc, rect, 3 if emphasis else 1, border_radius=4)
         icon = node.get("icon")
         text_top = rect.y
         if icon:
@@ -3778,11 +3894,13 @@ class DashboardPanel:
     def _clean_arrow_h(self, surface, x1, x2, y, color, progress):
         if x2 <= x1:
             return
-        pygame.draw.line(surface, self._mix_color((26, 34, 58), color, 0.4), (x1, y), (x2, y), 2)
+        # REFATORAÇÃO VISUAL: Fluxo Input-Operação-Output
+        pygame.draw.line(surface, self._mix_color((26, 34, 58), color, 0.4), (x1, y), (x2, y), 3)
         px = int(x1 + (x2 - x1) * max(0.06, min(1.0, progress)))
-        pygame.draw.line(surface, color, (x1, y), (px, y), 3)
-        pygame.draw.polygon(surface, color, [(x2, y), (x2 - 7, y - 5), (x2 - 7, y + 5)])
-        pygame.draw.circle(surface, C_TEXT_PRIMARY, (px, y), 3)
+        pygame.draw.line(surface, color, (x1, y), (px, y), 5)
+        pygame.draw.polygon(surface, color, [(x2, y), (x2 - 10, y - 7), (x2 - 10, y + 7)])
+        self._draw_soft_glow(surface, (px, y), 9, color, 85)
+        pygame.draw.circle(surface, C_TEXT_PRIMARY, (px, y), 4)
 
     def _flow_packets(self, surface, x1, x2, y, color, progress, t, count=2):
         """Little glowing data packets running along an arrow, with a comet trail.
@@ -3792,6 +3910,7 @@ class DashboardPanel:
         """
         if x2 <= x1:
             return
+        # REFATORAÇÃO VISUAL: Pacotes Luminosos com Dissipação
         span = x2 - x1
         reach = max(0.06, progress)
         for k in range(count):
@@ -3803,23 +3922,33 @@ class DashboardPanel:
                 if tf < 0:
                     break
                 tx = int(x1 + span * tf)
-                size = 5 - j
+                size = 9 - j * 2
                 shade = self._mix_color((10, 16, 32), color, 1.0 - j * 0.32)
+                if j == 0:
+                    self._draw_soft_glow(surface, (tx, y), 11, color, 80)
                 pygame.draw.rect(surface, shade, (tx - size // 2, y - size // 2, size, size), border_radius=1)
+        if progress > 0.68:
+            burst = min(1.0, (progress - 0.68) / 0.32)
+            for i in range(12):
+                drift = int(math.sin(t * 2.5 + i) * 12)
+                px = x2 - 20 + (i % 6) * 7 + drift
+                py = y + 8 + int(burst * 26) + (i // 6) * 6
+                shade = self._mix_color(C_SPACE_BG, color, max(0.15, 1.0 - burst * 0.55))
+                pygame.draw.rect(surface, shade, (px, py, 4, 4), border_radius=1)
 
     def _draw_clean_flow(self, surface, area, nodes, color, progress, t, particles=False):
         n = len(nodes)
         if n == 0:
             return
         if n == 1:
-            w = min(area.width, 260)
-            h = min(area.height - 8, 90)
+            w = min(area.width, 330)
+            h = min(area.height - 8, 118)
             r = pygame.Rect(area.centerx - w // 2, area.centery - h // 2, w, h)
             self._clean_node(surface, r, nodes[0], color, True, progress, t)
             return
-        gap = 30 if area.width >= 360 else 18
+        gap = 38 if area.width >= 360 else 22
         node_w = (area.width - gap * (n - 1)) // n
-        node_h = min(86, area.height - 6)
+        node_h = min(112, area.height - 6)
         y = area.centery - node_h // 2
         rects = []
         mid = n // 2
@@ -4233,6 +4362,11 @@ class DashboardPanel:
         surface.blit(overlay, (0, 0))
 
         sx, sy = satellite.get_position()
+        if self.effect_timer > 0:
+            # OTIMIZAÇÃO SEMINÁRIO
+            # Anel/label acompanham o tremor do corpo afetado.
+            sx += self.impact_shake_offset[0]
+            sy += self.impact_shake_offset[1]
         ring_radius = int(56 + 14 * math.sin(t * 18))
         pygame.draw.circle(surface, self.effect_color, (int(sx), int(sy)), ring_radius, 2)
         label = FONT_BODY.render(self.effect_label, True, self.effect_color)
@@ -4307,6 +4441,12 @@ class DashboardPanel:
         if offset_y:
             rect = rect.move(0, offset_y)
             close_rect = close_rect.move(0, offset_y)
+        if self.effect_timer > 0:
+            # OTIMIZAÇÃO SEMINÁRIO
+            # Popup principal recebe o mesmo tremor fisico do satelite.
+            sx, sy = self.impact_shake_offset
+            rect = rect.move(sx, sy)
+            close_rect = close_rect.move(sx, sy)
         drag_rect = pygame.Rect(rect.x, rect.y, rect.width, 44)
         self.fault_overlay_rect = rect
         self.fault_overlay_close_rect = close_rect
@@ -4356,6 +4496,7 @@ class DashboardPanel:
         active_step = steps[active_index]
         color = active_step["color"]
         awaiting_confirm = bool(animation.get("awaiting_confirm"))
+        # REFATORAÇÃO VISUAL: Popup de Falha Didático
 
         x = rect.x + 14
         y = rect.y + 72
@@ -4381,30 +4522,31 @@ class DashboardPanel:
         )
         y += 18
 
-        step_h = 76 if rect.height >= 580 else 70
+        step_h = 96 if rect.height >= 580 else 82
         step_rect = pygame.Rect(x, y, width, step_h)
-        pygame.draw.rect(surface, (8, 12, 26), step_rect, border_radius=5)
-        pygame.draw.rect(surface, color, step_rect, width=2, border_radius=5)
+        self._draw_soft_glow(surface, step_rect.center, max(18, step_rect.height // 3), color, 42)
+        pygame.draw.rect(surface, (8, 12, 26), step_rect, border_radius=4)
+        pygame.draw.rect(surface, color, step_rect, width=3, border_radius=4)
         step_title = f"{active_step['label']} - {active_step['detail']}"
-        surface.blit(self._render_clipped(FONT_SMALL, step_title, color, width - 14), (step_rect.x + 7, step_rect.y + 7))
+        surface.blit(self._render_clipped(FONT_HEADER, step_title, color, width - 14), (step_rect.x + 10, step_rect.y + 8))
         time_us = active_step.get("time_us")
         metric = _format_elapsed(time_us) if time_us not in {None, ""} else self._fault_step_metric(fault, active_step["label"])
-        surface.blit(self._render_clipped(FONT_LABEL, metric, (180, 198, 235), width - 14), (step_rect.x + 7, step_rect.y + 27))
+        surface.blit(self._render_clipped(FONT_BODY, metric, C_TEXT_PRIMARY, width - 14), (step_rect.x + 10, step_rect.y + 36))
         self._draw_wrapped_text(
             surface,
             FONT_LABEL,
             self._short_explanation(active_step.get("explain", "")),
             C_TEXT_PRIMARY,
-            step_rect.x + 7,
-            step_rect.y + 46,
+            step_rect.x + 10,
+            step_rect.y + 62,
             width - 14,
-            line_spacing=14,
+            line_spacing=16,
             max_lines=1,
         )
 
         timeline_y = rect.bottom - 54
         visual_top = step_rect.bottom + 8
-        visual_h = max(188, timeline_y - visual_top - 24)
+        visual_h = max(230, timeline_y - visual_top - 24)
         visual_rect = pygame.Rect(x, visual_top, width, visual_h)
         self._draw_fault_transformation_panel(surface, visual_rect, fault, active_step, local_progress, t)
 
@@ -4585,28 +4727,59 @@ class DashboardPanel:
 
     def _draw_panel_bg(self, surface, rect, title="", t=0.0):
         """Desenha fundo de painel com borda e header."""
+        # REFATORAÇÃO VISUAL: Painéis HUD Chanfrados
         panel_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(panel_surf, (*C_PANEL_BG, 210), (0, 0, rect.width, rect.height),
-                         border_radius=8)
-        pygame.draw.rect(panel_surf, (*C_PANEL_BORDER, 150), (0, 0, rect.width, rect.height),
-                         1, border_radius=8)
+        cut = 14
+        poly = [
+            (cut, 0), (rect.width - 1, 0), (rect.width - 1, rect.height - cut),
+            (rect.width - cut, rect.height - 1), (0, rect.height - 1), (0, cut),
+        ]
+        pygame.draw.polygon(panel_surf, (*C_PANEL_BG, 206), poly)
+        pygame.draw.polygon(panel_surf, (*C_PANEL_BORDER, 225), poly, 2)
+        inner_poly = [(x + (1 if x == 0 else -1 if x == rect.width - 1 else 0),
+                       y + (1 if y == 0 else -1 if y == rect.height - 1 else 0)) for x, y in poly]
+        pygame.draw.polygon(panel_surf, (*C_ACCENT_PURPLE, 56), inner_poly, 1)
+        for yy in range(42, rect.height - 8, 10):
+            pygame.draw.line(panel_surf, (255, 255, 255, 13), (10, yy), (rect.width - 14, yy), 1)
         surface.blit(panel_surf, (rect.x, rect.y))
 
         if title:
             header_rect = pygame.Rect(rect.x, rect.y, rect.width, 32)
             h_surf = pygame.Surface((header_rect.width, header_rect.height), pygame.SRCALPHA)
-            pygame.draw.rect(h_surf, (*C_PANEL_HEADER, 220),
-                             (0, 0, header_rect.width, header_rect.height),
-                             border_top_left_radius=8, border_top_right_radius=8)
+            header_poly = [(cut, 0), (header_rect.width - 1, 0), (header_rect.width - 1, header_rect.height - 1), (0, header_rect.height - 1), (0, cut)]
+            pygame.draw.polygon(h_surf, (*C_PANEL_HEADER, 226), header_poly)
+            pygame.draw.line(h_surf, C_ACCENT_CYAN, (cut, header_rect.height - 1), (header_rect.width - 8, header_rect.height - 1), 1)
             surface.blit(h_surf, (header_rect.x, header_rect.y))
 
-            # Indicador luminoso (circulo verde pulsante)
             glow = int(180 + 75 * math.sin(t * 2))
-            pygame.draw.circle(surface, (0, glow, int(glow * 0.8)),
+            pygame.draw.circle(surface, (0, glow, 255),
                                (rect.x + 14, rect.y + 16), 4)
 
             title_surf = FONT_SMALL.render(title, True, C_ACCENT_CYAN)
             surface.blit(title_surf, (rect.x + 26, rect.y + 8))
+
+    def _draw_hud_card(self, surface, rect, label, value, color):
+        # REFATORAÇÃO VISUAL: Cartão de Métrica HUD
+        cut = 8
+        points = [
+            (rect.x + cut, rect.y), (rect.right, rect.y), (rect.right, rect.bottom - cut),
+            (rect.right - cut, rect.bottom), (rect.x, rect.bottom), (rect.x, rect.y + cut),
+        ]
+        pygame.draw.polygon(surface, (8, 16, 32), points)
+        pygame.draw.polygon(surface, color, points, 1)
+        pygame.draw.line(surface, (*color, 90), (rect.x + 10, rect.bottom - 5), (rect.right - 10, rect.bottom - 5), 1)
+        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, rect.width - 18), (rect.x + 10, rect.y + 4))
+        surface.blit(self._render_clipped(FONT_BODY, value, color, rect.width - 18), (rect.x + 10, rect.y + 17))
+
+    def _draw_hud_button_shell(self, surface, rect, fill, border):
+        # REFATORAÇÃO VISUAL: Botão Chanfrado Compartilhado
+        cut = 6
+        points = [
+            (rect.x + cut, rect.y), (rect.right, rect.y), (rect.right, rect.bottom - cut),
+            (rect.right - cut, rect.bottom), (rect.x, rect.bottom), (rect.x, rect.y + cut),
+        ]
+        pygame.draw.polygon(surface, fill, points)
+        pygame.draw.polygon(surface, border, points, 1)
 
     def _compact_panel_height(self, content_height):
         available_height = max(0, HEIGHT - 110)
@@ -4629,6 +4802,7 @@ class DashboardPanel:
 
     def _draw_left_panel(self, surface, t, satellite):
         """Painel esquerdo: Falhas e integridade (foco da simulacao)."""
+        # REFATORAÇÃO VISUAL: Painel de Telemetria HUD
         pw = 300
         panel_rect = pygame.Rect(20, 55, pw, self._left_panel_height())
         self._draw_panel_bg(surface, panel_rect, "[SIMULAÇÃO PQC]", t)
@@ -4637,10 +4811,6 @@ class DashboardPanel:
         x = panel_rect.x + 14
         cw = pw - 28  # content width
 
-        # --- Sessao ---
-        lbl = FONT_LABEL.render("SESSÃO", True, C_TEXT_DIM)
-        surface.blit(lbl, (x, y))
-        y += 16
         if "DEGRADADO" in self.session_status:
             session_color = C_ACCENT_RED
         elif "DETECTOU" in self.session_status:
@@ -4649,29 +4819,22 @@ class DashboardPanel:
             session_color = C_ACCENT_CYAN
         else:
             session_color = C_ACCENT_GREEN
-        val = self._render_clipped(FONT_BODY, self.session_status, session_color, cw)
-        surface.blit(val, (x, y))
-        y += 28
-
-        # --- Algoritmo ---
-        lbl = FONT_LABEL.render("ALGORITMO", True, C_TEXT_DIM)
-        surface.blit(lbl, (x, y))
-        y += 16
-        val = self._render_clipped(FONT_BODY, self.pqc_algorithm, C_ACCENT_PURPLE, cw)
-        surface.blit(val, (x, y))
-        y += 28
-
-        # --- Guardiao ativo ---
-        lbl = FONT_LABEL.render("GUARDIÃO ATIVO", True, C_TEXT_DIM)
-        surface.blit(lbl, (x, y))
         guard_color = C_ACCENT_GREEN if self.checksum_enabled else C_ACCENT_ORANGE
         guard_text = "CRC32 ON" if self.checksum_enabled else "NONE"
-        val = self._render_clipped(FONT_BODY, guard_text, guard_color, cw - 142)
-        surface.blit(val, (x + 142, y - 2))
-        y += 38
+        rows = (
+            ("SESSÃO", self.session_status, session_color),
+            ("ML-KEM", self.pqc_algorithm, C_ACCENT_PURPLE),
+            ("GUARD", guard_text, guard_color),
+        )
+        card_h = 38
+        for label, value, color in rows:
+            card = pygame.Rect(x, y, cw, card_h)
+            self._draw_hud_card(surface, card, label, value, color)
+            y += card_h + 6
 
     def _draw_right_panel(self, surface, t):
         """Painel direito: Console de comandos."""
+        # REFATORAÇÃO VISUAL: Painel de Comandos HUD
         pw = 380
         cw = pw - 28
         panel_rect = pygame.Rect(WIDTH - pw - 20, 55, pw, self._right_panel_height(cw))
@@ -4683,6 +4846,7 @@ class DashboardPanel:
         self._draw_command_buttons(surface, x, y, cw, t)
 
     def _draw_command_buttons(self, surface, x, y, width, t):
+        # REFATORAÇÃO VISUAL: Botões HUD de Demonstração
         self.command_button_rects = []
         title = FONT_LABEL.render("COMANDOS DA DEMO", True, C_ACCENT_CYAN)
         surface.blit(title, (x, y))
@@ -4723,8 +4887,11 @@ class DashboardPanel:
                     border = C_ACCENT_GREEN
                     fill = (0, 50, 25) if not hovered else (0, 80, 40)
 
-            pygame.draw.rect(surface, fill, rect, border_radius=5)
-            pygame.draw.rect(surface, border, rect, 1, border_radius=5)
+            cut = 7
+            points = [(rect.x + cut, rect.y), (rect.right, rect.y), (rect.right, rect.bottom - cut), (rect.right - cut, rect.bottom), (rect.x, rect.bottom), (rect.x, rect.y + cut)]
+            pygame.draw.polygon(surface, fill, points)
+            pygame.draw.polygon(surface, border, points, 1)
+            pygame.draw.line(surface, (*border, 120), (rect.x + 8, rect.bottom - 4), (rect.right - 10, rect.bottom - 4), 1)
 
             label_surf = self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, button_w - 14)
             surface.blit(label_surf, (bx + 7, by + 8))
@@ -4734,13 +4901,16 @@ class DashboardPanel:
         return y + rows * button_h + max(0, rows - 1) * gap
 
     def _draw_live_payload_toggle(self, surface, x, y, width):
+        # REFATORAÇÃO VISUAL: Toggle HUD de Payload
         rect = pygame.Rect(x, y, width, 34)
         self.live_payload_toggle_rect = rect
         active = bool(self.live_payload_enabled)
         border = C_ACCENT_GREEN if active else C_PANEL_BORDER
         fill = (10, 42, 30) if active else (18, 20, 40)
-        pygame.draw.rect(surface, fill, rect, border_radius=5)
-        pygame.draw.rect(surface, border, rect, width=1, border_radius=5)
+        cut = 8
+        points = [(rect.x + cut, rect.y), (rect.right, rect.y), (rect.right, rect.bottom - cut), (rect.right - cut, rect.bottom), (rect.x, rect.bottom), (rect.x, rect.y + cut)]
+        pygame.draw.polygon(surface, fill, points)
+        pygame.draw.polygon(surface, border, points, 1)
 
         knob_rect = pygame.Rect(rect.right - 58, rect.y + 8, 42, 18)
         pygame.draw.rect(surface, (8, 12, 24), knob_rect, border_radius=9)
@@ -5334,6 +5504,7 @@ class DashboardPanel:
     def _draw_mission_stage(self, surface, area, kind, mission, color, progress, t):
         if area.height < 90 or area.width < 120:
             return
+        # REFATORAÇÃO VISUAL: Palco da Missão Ampliado
         theme = "space" if kind in {"payload", "send"} else "lab"
         stage = self._pix_stage(surface, area, color, t, theme)
         if kind == "send":
@@ -5346,8 +5517,8 @@ class DashboardPanel:
         sample = scene.get("sample")
         prog = max(0.0, min(1.0, progress))
 
-        card_w = int(min(150, stage.width * 0.30))
-        card_h = 38
+        card_w = int(min(190, stage.width * 0.34))
+        card_h = 50
         stack = max(len(inputs), len(outputs))
         row_h = card_h * stack + 8 * (stack - 1)
         mid_y = stage.y + 16 + row_h // 2
@@ -5355,9 +5526,9 @@ class DashboardPanel:
         right_x = stage.right - card_w // 2 - 12
         op_x = stage.centerx
 
-        line_col = self._mix_color((26, 34, 58), color, 0.45)
-        pygame.draw.line(surface, line_col, (left_x + card_w // 2, mid_y), (op_x - 22, mid_y), 2)
-        pygame.draw.line(surface, line_col, (op_x + 22, mid_y), (right_x - card_w // 2, mid_y), 2)
+        line_col = self._mix_color((26, 34, 58), color, 0.55)
+        pygame.draw.line(surface, line_col, (left_x + card_w // 2, mid_y), (op_x - 26, mid_y), 4)
+        pygame.draw.line(surface, line_col, (op_x + 26, mid_y), (right_x - card_w // 2, mid_y), 4)
 
         def column(cx, items, is_out):
             n = len(items)
@@ -5379,8 +5550,9 @@ class DashboardPanel:
         column(right_x, outputs, True)
 
         # operation core + plain name/verb below it
+        self._draw_soft_glow(surface, (op_x, mid_y), 34, color, 75)
         self._d_op_core(surface, op_x, mid_y, color, op_icon, prog, t)
-        name_y = max(mid_y + 26, mid_y + row_h // 2 + 8)
+        name_y = max(mid_y + 34, mid_y + row_h // 2 + 8)
         self._pix_tag(surface, op_x, name_y, op_name, color, 170)
         self._pix_tag(surface, op_x, name_y + 14, op_verb, C_TEXT_DIM, 180)
 
@@ -5389,9 +5561,9 @@ class DashboardPanel:
         span_r = right_x - card_w // 2 - 4
         tok_x = int(span_l + (span_r - span_l) * prog)
         tok_col = color if prog >= 0.5 else self._mix_color(C_PANEL_BORDER, color, 0.7)
-        self._draw_soft_glow(surface, (tok_x, mid_y), 7, tok_col, 55)
-        pygame.draw.rect(surface, tok_col, (tok_x - 7, mid_y - 6, 14, 12), border_radius=3)
-        pygame.draw.rect(surface, C_TEXT_PRIMARY, (tok_x - 7, mid_y - 6, 14, 12), 1, border_radius=3)
+        self._draw_soft_glow(surface, (tok_x, mid_y), 13, tok_col, 95)
+        pygame.draw.rect(surface, tok_col, (tok_x - 10, mid_y - 8, 20, 16), border_radius=3)
+        pygame.draw.rect(surface, C_TEXT_PRIMARY, (tok_x - 10, mid_y - 8, 20, 16), 1, border_radius=3)
 
         note_y = stage.bottom - 13
         if sample and stage.height >= 150:
@@ -5606,10 +5778,13 @@ class DashboardPanel:
 
     def _draw_top_bar(self, surface, t):
         """Barra superior com titulo e status."""
+        # REFATORAÇÃO VISUAL: Top Bar Cyber-HUD
         bar_h = 44
         bar_surf = pygame.Surface((WIDTH, bar_h), pygame.SRCALPHA)
-        pygame.draw.rect(bar_surf, (*C_PANEL_BG, 220), (0, 0, WIDTH, bar_h))
-        pygame.draw.line(bar_surf, C_PANEL_BORDER, (0, bar_h - 1), (WIDTH, bar_h - 1), 1)
+        pygame.draw.rect(bar_surf, (*C_PANEL_BG, 218), (0, 0, WIDTH, bar_h))
+        for yy in range(6, bar_h, 8):
+            pygame.draw.line(bar_surf, (255, 255, 255, 10), (0, yy), (WIDTH, yy), 1)
+        pygame.draw.line(bar_surf, C_ACCENT_CYAN, (0, bar_h - 1), (WIDTH, bar_h - 1), 2)
         surface.blit(bar_surf, (0, 0))
 
         # Titulo
@@ -5639,10 +5814,9 @@ class DashboardPanel:
         results_hovered = self.top_results_btn_rect.collidepoint(mouse_pos)
         onboarding_hovered = self.top_onboarding_btn_rect.collidepoint(mouse_pos)
 
-        fill_c = (28, 42, 82) if results_hovered else (18, 22, 50)
+        fill_c = (28, 42, 82) if results_hovered else (8, 16, 34)
         border_c = C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else (C_ACCENT_CYAN if results_hovered else C_PANEL_BORDER)
-        pygame.draw.rect(surface, fill_c, self.top_results_btn_rect, border_radius=4)
-        pygame.draw.rect(surface, border_c, self.top_results_btn_rect, width=1, border_radius=4)
+        self._draw_hud_button_shell(surface, self.top_results_btn_rect, fill_c, border_c)
 
         btn_label = "RESULTADOS CONSOLIDADOS" if WIDTH >= 1500 else "RESULTADOS"
         btn_txt = FONT_LABEL.render(btn_label, True, C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else C_TEXT_PRIMARY)
@@ -5654,10 +5828,9 @@ class DashboardPanel:
             ),
         )
 
-        intro_fill = (34, 36, 74) if onboarding_hovered else (18, 22, 50)
+        intro_fill = (34, 36, 74) if onboarding_hovered else (8, 16, 34)
         intro_border = C_ACCENT_ORANGE if onboarding_hovered else C_PANEL_BORDER
-        pygame.draw.rect(surface, intro_fill, self.top_onboarding_btn_rect, border_radius=4)
-        pygame.draw.rect(surface, intro_border, self.top_onboarding_btn_rect, width=1, border_radius=4)
+        self._draw_hud_button_shell(surface, self.top_onboarding_btn_rect, intro_fill, intro_border)
         intro_label = "ONBOARDING" if WIDTH >= 1500 else "INTRO"
         intro_txt = FONT_LABEL.render(intro_label, True, C_ACCENT_ORANGE if onboarding_hovered else C_TEXT_PRIMARY)
         surface.blit(
@@ -6562,6 +6735,12 @@ def main():
             dashboard.update(dt)
             dust.update(dt)
             shooting_stars.update(dt)
+            # OTIMIZAÇÃO SEMINÁRIO
+            # Offset aleatorio curto, aplicado apenas a satelite e popup de falha.
+            if dashboard.effect_timer > 0:
+                dashboard.impact_shake_offset = (random.randint(-4, 4), random.randint(-4, 4))
+            else:
+                dashboard.impact_shake_offset = (0, 0)
 
             # -- Desenho --
             if screen is None:
@@ -6574,7 +6753,7 @@ def main():
             shooting_stars.draw(screen)
             earth.draw(screen, t)
             if dashboard.satellite_online() or args.simulated:
-                satellite.draw(screen, t)
+                satellite.draw(screen, t, offset=dashboard.impact_shake_offset)
             else:
                 dashboard.draw_satellite_lock(screen, t)
             dashboard.draw(screen, t, satellite)
