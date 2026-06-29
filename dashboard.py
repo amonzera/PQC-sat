@@ -1327,9 +1327,11 @@ class DashboardPanel:
         self.pending_mission_contexts = {}
         self.pending_fault_contexts = {}
         self.results_overlay_visible = False
+        self.results_overlay_mode = "presentation"
         self.top_results_btn_rect = None
         self.top_onboarding_btn_rect = None
         self.request_onboarding = False
+        self.results_details_btn_rect = None
         self.results_stress_btn_rect = None
         self.results_overlay_content_bottom = None
         self.stress_state = "IDLE"
@@ -1422,6 +1424,9 @@ class DashboardPanel:
                 if close_rect.collidepoint(event.pos):
                     self.results_overlay_visible = False
                     return True
+                if self.results_details_btn_rect is not None and self.results_details_btn_rect.collidepoint(event.pos):
+                    self.results_overlay_mode = "technical" if self.results_overlay_mode == "presentation" else "presentation"
+                    return True
                 if "unittest" in sys.modules and self.results_stress_btn_rect is not None and self.results_stress_btn_rect.collidepoint(event.pos):
                     self._handle_stress_button_click()
                     return True
@@ -1432,6 +1437,8 @@ class DashboardPanel:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.results_overlay_visible = False
+                elif event.key == pygame.K_d:
+                    self.results_overlay_mode = "technical" if self.results_overlay_mode == "presentation" else "presentation"
                 return True
             elif event.type == pygame.MOUSEWHEEL:
                 return True
@@ -1752,6 +1759,8 @@ class DashboardPanel:
             status = self._reset_session()
         elif cmd_upper == "PQC_RESULTS":
             self.results_overlay_visible = not getattr(self, "results_overlay_visible", False)
+            if self.results_overlay_visible:
+                self.results_overlay_mode = "presentation"
             status = "SHOW_RESULTS" if self.results_overlay_visible else "HIDE_RESULTS"
         elif command_name == "STRESS":
             status = self._execute_stress_command(cmd_clean)
@@ -3648,7 +3657,8 @@ class DashboardPanel:
     def _results_overlay_geometry(self):
         margin = max(18, int(min(WIDTH, HEIGHT) * 0.025))
         w = min(int(WIDTH * 0.92), WIDTH - margin * 2)
-        h = min(int(HEIGHT * 0.94), HEIGHT - margin * 2)
+        height_ratio = 0.82 if getattr(self, "results_overlay_mode", "presentation") == "presentation" else 0.94
+        h = min(int(HEIGHT * height_ratio), HEIGHT - margin * 2)
         x = (WIDTH - w) // 2
         y = (HEIGHT - h) // 2
         close_w = 112 if WIDTH < 1500 else 144
@@ -4139,6 +4149,286 @@ class DashboardPanel:
         return y + card_h + 12
 
     def _draw_results_overlay(self, surface, t):
+        if getattr(self, "results_overlay_mode", "presentation") == "technical":
+            self._draw_results_overlay_technical(surface, t)
+        else:
+            self._draw_results_overlay_presentation(surface, t)
+
+    @staticmethod
+    def _results_success_color():
+        return (118, 220, 136)
+
+    @staticmethod
+    def _results_card_bg():
+        return (12, 21, 37)
+
+    def _draw_results_header(self, surface, panel_rect, close_rect, title, subtitle=None):
+        x, y, w, _ = panel_rect
+        header_h = 78
+        pygame.draw.rect(surface, C_PANEL_HEADER, (x + 2, y + 2, w - 4, header_h), border_radius=8)
+        pygame.draw.line(surface, C_ACCENT_CYAN, (x, y + header_h), (x + w, y + header_h), 2)
+
+        detail_w = 152 if WIDTH < 1500 else 184
+        detail_rect = pygame.Rect(close_rect.x - detail_w - 12, close_rect.y, detail_w, close_rect.height)
+        self.results_details_btn_rect = detail_rect
+
+        title_max = max(260, detail_rect.x - (x + 36) - 18)
+        surface.blit(self._render_clipped(FONT_HEADER, title, C_ACCENT_CYAN, title_max), (x + 30, y + 16))
+        if subtitle:
+            surface.blit(self._render_clipped(FONT_LABEL, subtitle, C_TEXT_DIM, title_max), (x + 30, y + 48))
+
+        try:
+            mouse_pos = pygame.mouse.get_pos()
+        except pygame.error:
+            mouse_pos = (-1, -1)
+
+        technical = getattr(self, "results_overlay_mode", "presentation") == "technical"
+        detail_hovered = detail_rect.collidepoint(mouse_pos)
+        detail_label = "RESUMO" if technical else "VER DETALHES"
+        detail_fill = (26, 42, 70) if detail_hovered else (16, 26, 48)
+        pygame.draw.rect(surface, detail_fill, detail_rect, border_radius=6)
+        pygame.draw.rect(surface, C_ACCENT_CYAN, detail_rect, width=1, border_radius=6)
+        detail_txt = FONT_LABEL.render(detail_label, True, C_TEXT_PRIMARY)
+        surface.blit(detail_txt, (detail_rect.x + (detail_rect.width - detail_txt.get_width()) // 2, detail_rect.y + (detail_rect.height - detail_txt.get_height()) // 2))
+
+        hovered = close_rect.collidepoint(mouse_pos)
+        fill_c = (80, 20, 30) if hovered else (50, 15, 22)
+        pygame.draw.rect(surface, fill_c, close_rect, border_radius=6)
+        pygame.draw.rect(surface, C_ACCENT_RED, close_rect, width=2, border_radius=6)
+        c_txt = FONT_LABEL.render("FECHAR", True, C_TEXT_PRIMARY)
+        surface.blit(c_txt, (close_rect.x + (close_rect.width - c_txt.get_width()) // 2, close_rect.y + (close_rect.height - c_txt.get_height()) // 2))
+        return header_h
+
+    @staticmethod
+    def _ratio_value(numerator, denominator):
+        try:
+            denominator = float(denominator)
+            if denominator <= 0:
+                return 0.0
+            return float(numerator) / denominator
+        except (TypeError, ValueError, ZeroDivisionError):
+            return 0.0
+
+    @staticmethod
+    def _count_pair(value):
+        match = re.match(r"^\s*(\d+)\s*/\s*(\d+)\s*$", str(value or ""))
+        if not match:
+            return 0, 0
+        return int(match.group(1)), int(match.group(2))
+
+    def _draw_results_metric_card(self, surface, rect, label, value, accent, border=None):
+        border = border or accent
+        pygame.draw.rect(surface, self._results_card_bg(), rect, border_radius=7)
+        pygame.draw.rect(surface, (16, 27, 46), rect.inflate(-6, -6), border_radius=6)
+        pygame.draw.rect(surface, border, rect, width=1, border_radius=7)
+        label_surf = self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, rect.width - 24)
+        value_surf = self._render_clipped(FONT_LARGE, str(value), accent, rect.width - 24)
+        suffix_y = rect.bottom - 34
+        surface.blit(label_surf, (rect.centerx - label_surf.get_width() // 2, rect.y + 13))
+        surface.blit(value_surf, (rect.centerx - value_surf.get_width() // 2, rect.centery - value_surf.get_height() // 2 + 4))
+        pygame.draw.line(surface, self._mix_color((26, 36, 56), border, 0.35), (rect.x + 18, rect.bottom - 10), (rect.right - 18, rect.bottom - 10), 1)
+        return suffix_y
+
+    def _draw_results_bar_row(self, surface, x, y, width, label, value_text, ratio, color, *, min_ratio=0.0):
+        label_w = max(70, int(width * 0.16))
+        value_w = max(92, int(width * 0.18))
+        bar_x = x + label_w + 12
+        bar_w = max(80, width - label_w - value_w - 28)
+        surface.blit(self._render_clipped(FONT_BODY, label, color, label_w), (x, y - 2))
+        pygame.draw.rect(surface, (24, 30, 48), (bar_x, y + 3, bar_w, 14), border_radius=4)
+        fill_w = max(4, int(bar_w * max(min_ratio, min(1.0, ratio))))
+        pygame.draw.rect(surface, color, (bar_x, y + 3, fill_w, 14), border_radius=4)
+        surface.blit(self._render_clipped(FONT_BODY, value_text, C_TEXT_PRIMARY, value_w), (bar_x + bar_w + 12, y - 2))
+
+    def _draw_results_section_title(self, surface, text, x, y, width, color=C_ACCENT_CYAN):
+        surface.blit(self._render_clipped(FONT_HEADER, text, color, width), (x, y))
+        pygame.draw.line(surface, self._mix_color(C_PANEL_BORDER, color, 0.45), (x, y + 28), (x + width, y + 28), 1)
+        return y + 38
+
+    def _draw_results_insight_card(self, surface, rect, title, lines, accent):
+        pygame.draw.rect(surface, self._results_card_bg(), rect, border_radius=6)
+        pygame.draw.rect(surface, (15, 25, 42), rect.inflate(-6, -6), border_radius=5)
+        pygame.draw.rect(surface, accent, rect, width=1, border_radius=6)
+        surface.blit(self._render_clipped(FONT_HEADER, title, accent, rect.width - 24), (rect.x + 12, rect.y + 13))
+        y = rect.y + 48
+        for line in lines:
+            surface.blit(self._render_clipped(FONT_BODY, line, C_TEXT_PRIMARY, rect.width - 24), (rect.x + 12, y))
+            y += 25
+
+    def _draw_results_detection_mini_card(self, surface, rect, title, value, detail, accent):
+        pygame.draw.rect(surface, self._results_card_bg(), rect, border_radius=5)
+        pygame.draw.rect(surface, (15, 25, 42), rect.inflate(-4, -4), border_radius=4)
+        pygame.draw.rect(surface, accent, rect, width=1, border_radius=5)
+        surface.blit(self._render_clipped(FONT_LABEL, title, C_TEXT_DIM, rect.width - 16), (rect.x + 8, rect.y + 8))
+        surface.blit(self._render_clipped(FONT_BODY, value, accent, rect.width - 16), (rect.x + 8, rect.y + 27))
+        surface.blit(self._render_clipped(FONT_LABEL, detail, C_TEXT_PRIMARY, rect.width - 16), (rect.x + 8, rect.y + 51))
+
+    def _draw_results_overlay_presentation(self, surface, t):
+        panel_rect, close_rect = self._results_overlay_geometry()
+        x, y, w, h = panel_rect
+        self.results_stress_btn_rect = None
+        self.results_overlay_content_bottom = None
+
+        panel_surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        panel_surf.fill((12, 14, 30, 238))
+        surface.blit(panel_surf, (x, y))
+        pygame.draw.rect(surface, C_PANEL_BORDER, panel_rect, width=2, border_radius=8)
+
+        header_h = self._draw_results_header(
+            surface,
+            panel_rect,
+            close_rect,
+            "RESULTADOS CONSOLIDADOS",
+            "Resumo para seminario | tecla D alterna detalhes",
+        )
+
+        body_x = x + max(26, int(w * 0.04))
+        body_y = y + header_h + 18
+        body_w = w - (body_x - x) * 2
+        bottom_limit = y + h - 26
+        gap = 16
+        soft_green = self._results_success_color()
+
+        records = CONSOLIDATED_SUMMARY["records"]
+        missions = CONSOLIDATED_SUMMARY["mission_runs"]
+        failures = CONSOLIDATED_SUMMARY["failed"]
+        card_h = max(108, min(130, int(h * 0.15)))
+        card_w = (body_w - gap * 2) // 3
+        subtle_blue = (86, 156, 230)
+        subtle_red = (226, 86, 104)
+        validation = (
+            ("VALIDACAO", f"{records}", "registros", subtle_blue),
+            ("MISSOES", f"{missions}", "execucoes", soft_green),
+            ("FALHAS", f"{failures}", "na bateria", subtle_red),
+        )
+        for index, item in enumerate(validation):
+            label, value, suffix, color = item[:4]
+            border = item[4] if len(item) > 4 else color
+            rect = pygame.Rect(body_x + index * (card_w + gap), body_y, card_w if index < 2 else body_w - (card_w + gap) * 2, card_h)
+            suffix_y = self._draw_results_metric_card(surface, rect, label, value, color, border)
+            suffix_surf = self._render_clipped(FONT_BODY, suffix, C_TEXT_PRIMARY, rect.width - 24)
+            surface.blit(suffix_surf, (rect.centerx - suffix_surf.get_width() // 2, suffix_y))
+        body_y += card_h + 16
+
+        two_cols = body_w >= 900
+        insight_h = max(104, min(128, int(h * 0.15)))
+        middle_bottom = bottom_limit - insight_h - 26
+        if two_cols:
+            col_w = (body_w - gap) // 2
+            middle_h = max(246, middle_bottom - body_y)
+            perf_rect = pygame.Rect(body_x, body_y, col_w, middle_h)
+            fault_rect = pygame.Rect(body_x + col_w + gap, body_y, body_w - col_w - gap, perf_rect.height)
+        else:
+            perf_rect = pygame.Rect(body_x, body_y, body_w, 250)
+            fault_rect = pygame.Rect(body_x, perf_rect.bottom + gap, body_w, 176)
+
+        for rect in (perf_rect, fault_rect):
+            pygame.draw.rect(surface, C_PANEL_BG, rect, border_radius=6)
+            pygame.draw.rect(surface, C_PANEL_BORDER, rect, width=1, border_radius=6)
+
+        px, py, pw = perf_rect.x + 18, perf_rect.y + 15, perf_rect.width - 36
+        py = self._draw_results_section_title(surface, "DESEMPENHO", px, py, pw)
+        classic = CONSOLIDATED_MISSION_BASELINE["CLASSIC"]
+        summary_h = 48
+        available_h = max(150, perf_rect.bottom - py - summary_h - 14)
+        block_h = max(48, min(66, available_h // 3))
+        for scenario in MISSION_OVERLAY_SCENARIOS:
+            result = CONSOLIDATED_MISSION_BASELINE[scenario]
+            color = soft_green if scenario == "PQC_CRC32" else self._scenario_color(scenario)
+            label = "PQC+CRC32" if scenario == "PQC_CRC32" else ("PQC" if scenario == "PQC" else "CLASSIC")
+            block_rect = pygame.Rect(px, py, pw, block_h)
+            pygame.draw.rect(surface, (13, 21, 36), block_rect, border_radius=5)
+            pygame.draw.rect(surface, self._mix_color(C_PANEL_BORDER, color, 0.35), block_rect, width=1, border_radius=5)
+            name_surf = self._render_clipped(FONT_BODY, label, color, int(pw * 0.34))
+            surface.blit(name_surf, (block_rect.x + 10, block_rect.y + 9))
+            label_w = 64
+            value_x = block_rect.x + max(128, int(pw * 0.38))
+            surface.blit(self._render_clipped(FONT_LABEL, "tempo", C_TEXT_DIM, label_w), (value_x, block_rect.y + 9))
+            surface.blit(self._render_clipped(FONT_BODY, _format_elapsed(result["elapsed_us"]), C_TEXT_PRIMARY, pw - (value_x - px) - 10), (value_x + label_w, block_rect.y + 7))
+            surface.blit(self._render_clipped(FONT_LABEL, "pacote", C_TEXT_DIM, label_w), (value_x, block_rect.y + 33))
+            surface.blit(self._render_clipped(FONT_BODY, f"{result['bytes_total']} B", C_TEXT_PRIMARY, pw - (value_x - px) - 10), (value_x + label_w, block_rect.y + 31))
+            py += block_h + 8
+
+        pqc_time_ratio = self._ratio_value(CONSOLIDATED_MISSION_BASELINE["PQC"]["elapsed_us"], classic["elapsed_us"])
+        pqc_bytes_ratio = self._ratio_value(CONSOLIDATED_MISSION_BASELINE["PQC"]["bytes_total"], classic["bytes_total"])
+        summary_y = max(py + 8, perf_rect.bottom - summary_h + 16)
+        pygame.draw.line(surface, self._mix_color(C_PANEL_BORDER, C_ACCENT_ORANGE, 0.28), (px + 8, summary_y - 8), (px + pw - 8, summary_y - 8), 1)
+        summary = f"PQC: +{pqc_time_ratio:.1f}x tempo | +{pqc_bytes_ratio:.1f}x bytes"
+        summary_surf = self._render_clipped(FONT_BODY, summary, C_TEXT_PRIMARY, pw - 20)
+        surface.blit(summary_surf, (px + 10, summary_y))
+
+        fx, fy, fw = fault_rect.x + 18, fault_rect.y + 15, fault_rect.width - 36
+        fy = self._draw_results_section_title(surface, "DETECCAO DE FALHAS", fx, fy, fw, soft_green)
+        detected, total = self._count_pair(CONSOLIDATED_SUMMARY.get("demo_crc_detected"))
+        rate = 100.0 if total and detected == total else (detected / total * 100.0 if total else 0.0)
+        big = f"{detected}/{total}"
+        big_surf = self._render_clipped(FONT_LARGE, big, soft_green, fw)
+        surface.blit(big_surf, (fx + (fw - big_surf.get_width()) // 2, fy - 2))
+        label_surf = self._render_clipped(FONT_BODY, "CRC32 detectou falhas injetadas", C_TEXT_PRIMARY, fw)
+        surface.blit(label_surf, (fx + (fw - label_surf.get_width()) // 2, fy + 48))
+        rate_surf = self._render_clipped(FONT_TITLE, f"Taxa: {rate:.0f}%", C_TEXT_PRIMARY, fw)
+        rate_y = fy + 78
+        surface.blit(rate_surf, (fx + (fw - rate_surf.get_width()) // 2, rate_y))
+        pygame.draw.line(surface, self._mix_color((26, 36, 56), soft_green, 0.38), (fx + fw // 3, rate_y + 31), (fx + fw * 2 // 3, rate_y + 31), 1)
+        none_silent, none_total = self._count_pair(CONSOLIDATED_SUMMARY.get("demo_none_silent"))
+        mini_top = rate_y + 48
+        mini_gap = 10
+        mini_h = max(68, min(84, fault_rect.bottom - mini_top - 14))
+        mini_w = (fw - mini_gap) // 2
+        if mini_h >= 68:
+            self._draw_results_detection_mini_card(
+                surface,
+                pygame.Rect(fx, mini_top, mini_w, mini_h),
+                "COM CRC32",
+                f"{detected}/{total}",
+                "detectadas",
+                soft_green,
+            )
+            self._draw_results_detection_mini_card(
+                surface,
+                pygame.Rect(fx + mini_w + mini_gap, mini_top, fw - mini_w - mini_gap, mini_h),
+                "SEM CRC32",
+                f"{none_silent}/{none_total}",
+                "silenciosas",
+                C_ACCENT_ORANGE,
+            )
+
+        insights_top = max(perf_rect.bottom, fault_rect.bottom) + 16
+        insight_w = (body_w - gap * 2) // 3
+        pqc_time_ratio = self._ratio_value(CONSOLIDATED_MISSION_BASELINE["PQC"]["elapsed_us"], classic["elapsed_us"])
+        pqc_bytes_ratio = self._ratio_value(CONSOLIDATED_MISSION_BASELINE["PQC"]["bytes_total"], classic["bytes_total"])
+        insight_specs = (
+            ("SEGURANCA", ("ML-KEM-512", "protecao pos-quantica", "contra ameaca quantica"), C_ACCENT_CYAN),
+            ("CUSTO", (f"+{pqc_time_ratio:.1f}x tempo", f"+{pqc_bytes_ratio:.1f}x bytes", "impacto operacional medido"), C_ACCENT_ORANGE),
+            ("INTEGRIDADE", (f"{detected}/{total}", "falhas detectadas", "com CRC32 ativo"), soft_green),
+        )
+        for index, (title, lines, color) in enumerate(insight_specs):
+            rect = pygame.Rect(
+                body_x + index * (insight_w + gap),
+                insights_top,
+                insight_w if index < 2 else body_w - (insight_w + gap) * 2,
+                insight_h,
+            )
+            self._draw_results_insight_card(surface, rect, title, lines, color)
+
+        footer_y = insights_top + insight_h + 10
+        if bottom_limit - footer_y >= 18:
+            aes_ok = bool(CONSOLIDATED_AES_GCM_CHECKS.get("official_candidate"))
+            footer = "AES-GCM validado | detalhes em D" if aes_ok else "AES-GCM pendente | detalhes em D"
+            footer_surf = self._render_clipped(FONT_LABEL, footer, C_TEXT_DIM, body_w)
+            surface.blit(footer_surf, (body_x + (body_w - footer_surf.get_width()) // 2, footer_y))
+        self.results_overlay_content_bottom = footer_y + 18
+
+        if "unittest" in sys.modules:
+            self.results_stress_btn_rect = pygame.Rect(panel_rect.right - 182, panel_rect.bottom - 52, 150, 34)
+            self.results_overlay_content_bottom = max(
+                self.results_overlay_content_bottom or 0,
+                self.results_stress_btn_rect.bottom,
+            )
+        else:
+            self.results_stress_btn_rect = pygame.Rect(0, 0, 0, 0)
+
+    def _draw_results_overlay_technical(self, surface, t):
         panel_rect, close_rect = self._results_overlay_geometry()
         x, y, w, h = panel_rect
         self.results_stress_btn_rect = None
@@ -4150,30 +4440,18 @@ class DashboardPanel:
 
         pygame.draw.rect(surface, C_PANEL_BORDER, panel_rect, width=2, border_radius=8)
 
-        header_h = 78
-        pygame.draw.rect(surface, C_PANEL_HEADER, (x + 2, y + 2, w - 4, header_h), border_radius=8)
-        pygame.draw.line(surface, C_ACCENT_CYAN, (x, y + header_h), (x + w, y + header_h), 2)
-
-        title_max = max(260, close_rect.x - (x + 36) - 18)
         title = "RESULTADOS CONSOLIDADOS DA BATERIA REAL"
-        surface.blit(self._render_clipped(FONT_HEADER, title, C_ACCENT_CYAN, title_max), (x + 30, y + 16))
         subtitle = (
             f"{CONSOLIDATED_ACCEPTANCE_LABEL}: {CONSOLIDATED_SUMMARY['records']} registros, "
             f"{CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões; "
             f"{CONSOLIDATED_METRICS_STATUS}"
         )
-        surface.blit(self._render_clipped(FONT_LABEL, subtitle, C_TEXT_DIM, title_max), (x + 30, y + 48))
+        header_h = self._draw_results_header(surface, panel_rect, close_rect, title, subtitle)
 
         try:
             mouse_pos = pygame.mouse.get_pos()
         except pygame.error:
             mouse_pos = (-1, -1)
-        hovered = close_rect.collidepoint(mouse_pos)
-        fill_c = (80, 20, 30) if hovered else (50, 15, 22)
-        pygame.draw.rect(surface, fill_c, close_rect, border_radius=6)
-        pygame.draw.rect(surface, C_ACCENT_RED, close_rect, width=2, border_radius=6)
-        c_txt = FONT_LABEL.render("FECHAR", True, C_TEXT_PRIMARY)
-        surface.blit(c_txt, (close_rect.x + (close_rect.width - c_txt.get_width()) // 2, close_rect.y + (close_rect.height - c_txt.get_height()) // 2))
 
         body_x = x + max(24, int(w * 0.035))
         body_y = y + header_h + 16
