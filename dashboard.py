@@ -5045,9 +5045,9 @@ class DashboardPanel:
         ]
         pygame.draw.polygon(surface, (8, 16, 32), points)
         pygame.draw.polygon(surface, color, points, 1)
-        pygame.draw.line(surface, (*color, 90), (rect.x + 10, rect.bottom - 5), (rect.right - 10, rect.bottom - 5), 1)
-        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, rect.width - 18), (rect.x + 10, rect.y + 4))
-        surface.blit(self._render_clipped(FONT_BODY, value, color, rect.width - 18), (rect.x + 10, rect.y + 17))
+        pygame.draw.line(surface, (*color, 90), (rect.x + 12, rect.bottom - 6), (rect.right - 12, rect.bottom - 6), 1)
+        surface.blit(self._render_clipped(FONT_BODY, label, C_TEXT_DIM, rect.width - 24), (rect.x + 12, rect.y + 7))
+        surface.blit(self._render_clipped(FONT_HEADER, value, color, rect.width - 24), (rect.x + 12, rect.y + 28))
 
     def _draw_hud_button_shell(self, surface, rect, fill, border):
         # REFATORAÇÃO VISUAL: Botão Chanfrado Compartilhado
@@ -5063,10 +5063,16 @@ class DashboardPanel:
         available_height = max(0, HEIGHT - 110)
         return min(available_height, max(0, content_height))
 
+    def _left_panel_width(self):
+        return min(380, max(360, int(WIDTH * 0.195)))
+
+    def _right_panel_width(self):
+        return min(510, max(475, int(WIDTH * 0.265)))
+
     def _left_panel_height(self):
-        header_and_top_padding = 42
-        row_heights = (16 + 28, 16 + 28, 24)
-        bottom_padding = 18
+        header_and_top_padding = 48
+        row_heights = (54 + 9, 54 + 9, 54)
+        bottom_padding = 20
         return self._compact_panel_height(
             header_and_top_padding + sum(row_heights) + bottom_padding
         )
@@ -5074,20 +5080,20 @@ class DashboardPanel:
     def _right_panel_height(self, width):
         columns = 2 if width >= 260 else 1
         rows = math.ceil(len(COMMAND_BUTTONS) / columns)
-        button_block_h = 20 + rows * 30 + max(0, rows - 1) * 8
-        content_h = 42 + 34 + 14 + button_block_h + 16
+        button_block_h = 26 + rows * 44 + max(0, rows - 1) * 10
+        content_h = 48 + 46 + 18 + button_block_h + 22
         return self._compact_panel_height(content_h)
 
     def _draw_left_panel(self, surface, t, satellite):
         """Painel esquerdo: Falhas e integridade (foco da simulacao)."""
         # REFATORAÇÃO VISUAL: Painel de Telemetria HUD
-        pw = 300
+        pw = self._left_panel_width()
         panel_rect = pygame.Rect(20, 55, pw, self._left_panel_height())
         self._draw_panel_bg(surface, panel_rect, "[SIMULAÇÃO PQC]", t)
 
-        y = panel_rect.y + 42
-        x = panel_rect.x + 14
-        cw = pw - 28  # content width
+        y = panel_rect.y + 48
+        x = panel_rect.x + 18
+        cw = pw - 36  # content width
 
         if "DEGRADADO" in self.session_status:
             session_color = C_ACCENT_RED
@@ -5104,35 +5110,35 @@ class DashboardPanel:
             ("ML-KEM", self.pqc_algorithm, C_ACCENT_PURPLE),
             ("GUARD", guard_text, guard_color),
         )
-        card_h = 38
+        card_h = 54
         for label, value, color in rows:
             card = pygame.Rect(x, y, cw, card_h)
             self._draw_hud_card(surface, card, label, value, color)
-            y += card_h + 6
+            y += card_h + 9
 
     def _draw_right_panel(self, surface, t):
         """Painel direito: Console de comandos."""
         # REFATORAÇÃO VISUAL: Painel de Comandos HUD
-        pw = 380
-        cw = pw - 28
+        pw = self._right_panel_width()
+        cw = pw - 36
         panel_rect = pygame.Rect(WIDTH - pw - 20, 55, pw, self._right_panel_height(cw))
         self._draw_panel_bg(surface, panel_rect, "[DEMO AO VIVO]", t)
 
-        y = panel_rect.y + 42
-        x = panel_rect.x + 14
-        y = self._draw_live_payload_toggle(surface, x, y, cw) + 14
+        y = panel_rect.y + 48
+        x = panel_rect.x + 18
+        y = self._draw_live_payload_toggle(surface, x, y, cw) + 18
         self._draw_command_buttons(surface, x, y, cw, t)
 
     def _draw_command_buttons(self, surface, x, y, width, t):
         # REFATORAÇÃO VISUAL: Botões HUD de Demonstração
         self.command_button_rects = []
-        title = FONT_LABEL.render("COMANDOS DA DEMO", True, C_ACCENT_CYAN)
+        title = FONT_BODY.render("COMANDOS DA DEMO", True, C_ACCENT_CYAN)
         surface.blit(title, (x, y))
-        y += 20
+        y += 26
 
         columns = 2 if width >= 260 else 1
-        gap = 8
-        button_h = 30
+        gap = 10
+        button_h = 44
         button_w = (width - gap * (columns - 1)) // columns
         try:
             mouse_pos = pygame.mouse.get_pos()
@@ -5171,8 +5177,8 @@ class DashboardPanel:
             pygame.draw.polygon(surface, border, points, 1)
             pygame.draw.line(surface, (*border, 120), (rect.x + 8, rect.bottom - 4), (rect.right - 10, rect.bottom - 4), 1)
 
-            label_surf = self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, button_w - 14)
-            surface.blit(label_surf, (bx + 7, by + 8))
+            label_surf = self._render_clipped(FONT_BODY, label, C_TEXT_PRIMARY, button_w - 18)
+            surface.blit(label_surf, (rect.centerx - label_surf.get_width() // 2, rect.centery - label_surf.get_height() // 2))
             self.command_button_rects.append((rect, command))
 
         rows = math.ceil(len(COMMAND_BUTTONS) / columns)
@@ -5180,7 +5186,7 @@ class DashboardPanel:
 
     def _draw_live_payload_toggle(self, surface, x, y, width):
         # REFATORAÇÃO VISUAL: Toggle HUD de Payload
-        rect = pygame.Rect(x, y, width, 34)
+        rect = pygame.Rect(x, y, width, 46)
         self.live_payload_toggle_rect = rect
         active = bool(self.live_payload_enabled)
         border = C_ACCENT_GREEN if active else C_PANEL_BORDER
@@ -5190,17 +5196,18 @@ class DashboardPanel:
         pygame.draw.polygon(surface, fill, points)
         pygame.draw.polygon(surface, border, points, 1)
 
-        knob_rect = pygame.Rect(rect.right - 58, rect.y + 8, 42, 18)
+        knob_rect = pygame.Rect(rect.right - 66, rect.y + 12, 48, 22)
         pygame.draw.rect(surface, (8, 12, 24), knob_rect, border_radius=9)
-        knob_x = knob_rect.right - 15 if active else knob_rect.x + 5
-        pygame.draw.circle(surface, C_ACCENT_GREEN if active else C_TEXT_DIM, (knob_x, knob_rect.centery), 6)
+        knob_x = knob_rect.right - 17 if active else knob_rect.x + 7
+        pygame.draw.circle(surface, C_ACCENT_GREEN if active else C_TEXT_DIM, (knob_x, knob_rect.centery), 7)
 
         label = "Payload vivo"
         status = "ON" if active else "OFF"
-        surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, width - 86), (rect.x + 9, rect.y + 5))
+        surface.blit(self._render_clipped(FONT_BODY, label, C_TEXT_PRIMARY, width - 104), (rect.x + 12, rect.y + 7))
         detail = "sensores -> MISSION" if active else "payload fixo"
-        surface.blit(self._render_clipped(FONT_LABEL, detail, C_TEXT_DIM, width - 86), (rect.x + 9, rect.y + 19))
-        surface.blit(FONT_LABEL.render(status, True, C_ACCENT_GREEN if active else C_TEXT_DIM), (knob_rect.x - 28, rect.y + 11))
+        surface.blit(self._render_clipped(FONT_BODY, detail, C_TEXT_DIM, width - 104), (rect.x + 12, rect.y + 27))
+        status_surf = FONT_BODY.render(status, True, C_ACCENT_GREEN if active else C_TEXT_DIM)
+        surface.blit(status_surf, (knob_rect.x - status_surf.get_width() - 10, rect.y + (rect.height - status_surf.get_height()) // 2))
         return rect.bottom
 
 
@@ -6142,23 +6149,25 @@ class DashboardPanel:
 
     def _draw_top_metrics(self, surface, t):
         """Faixa central de métricas sempre visíveis durante a animação."""
-        left_edge = 340
-        right_edge = WIDTH - 420
+        side_margin = 20
+        gap = 18
+        left_edge = side_margin + self._left_panel_width() + gap
+        right_edge = WIDTH - side_margin - self._right_panel_width() - gap
         width = right_edge - left_edge
         if width < 320:
             return
 
         tiles = self._metric_tiles()
         columns = max(1, min(len(tiles), 2))
-        gap = 8
+        tile_gap = 10
         tile_h = 52
-        tile_w = (width - gap * (columns - 1)) // columns
+        tile_w = (width - tile_gap * (columns - 1)) // columns
         start_y = 56
 
         for index, (label, value, detail, color) in enumerate(tiles):
             row = index // columns
             col = index % columns
-            x = left_edge + col * (tile_w + gap)
+            x = left_edge + col * (tile_w + tile_gap)
             y = start_y + row * (tile_h + gap)
             rect = pygame.Rect(x, y, tile_w, tile_h)
 
