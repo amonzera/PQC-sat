@@ -11,12 +11,14 @@ import json
 
 import dashboard
 import pygame
+from tools.serial_protocol import parse_frame
 
 
 class FakeSerialClient:
     def __init__(self):
         self.sent = []
         self.last_timeout = None
+        self.events = []
         self.responses = {
             "SENSOR_READ TEMP_HUM": {"temp_c_x100": "2450", "hum_x100": "5530"},
             "SENSOR_READ ACCEL": {"x_mg": "12", "y_mg": "-34", "z_mg": "1001"},
@@ -42,7 +44,9 @@ class FakeSerialClient:
         return {"command": command_line.upper(), "status": "OK", "payload": dict(payload), "raw_payload": ""}
 
     def poll(self):
-        return []
+        events = list(self.events)
+        self.events.clear()
+        return events
 
 
 class ExperimentEngineTests(unittest.TestCase):
@@ -59,6 +63,30 @@ class ExperimentEngineTests(unittest.TestCase):
 
         self.assertTrue(args.simulated)
         self.assertTrue(args.no_splash)
+
+    def test_serial_client_publishes_unsolicited_button_ping_event(self):
+        client = dashboard.DashboardSerialClient()
+
+        class FakeBridge:
+            @staticmethod
+            def poll_events():
+                return [parse_frame("V1|0|EVENT|BUTTON_PING|button=1|uptime_ms=42")]
+
+        client._publish_protocol_events(FakeBridge())
+
+        self.assertEqual(
+            client.poll(),
+            [
+                (
+                    "event",
+                    {
+                        "name": "BUTTON_PING",
+                        "payload": {"button": "1", "uptime_ms": "42"},
+                        "raw_payload": "BUTTON_PING button=1 uptime_ms=42",
+                    },
+                )
+            ],
+        )
 
     def test_same_seed_repeats_fault_sequence(self):
         first = dashboard.ExperimentEngine(seed=123)
@@ -652,6 +680,24 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertTrue(panel.classic_enabled)
         self.assertFalse(panel.pqc_enabled)
 
+    def test_mlkem_indicator_follows_selected_preset(self):
+        panel = dashboard.DashboardPanel()
+
+        panel._execute_command("SET_PRESET_CLASSIC")
+        label, color = panel._pqc_indicator()
+        self.assertEqual(label, "INATIVO")
+        self.assertEqual(color, dashboard.C_ACCENT_ORANGE)
+
+        panel._execute_command("SET_PRESET_PQC")
+        label, color = panel._pqc_indicator()
+        self.assertIn("ML-KEM-512", label)
+        self.assertEqual(color, dashboard.C_ACCENT_PURPLE)
+
+        panel._execute_command("SET_PRESET_PQC_CRC32")
+        label, color = panel._pqc_indicator()
+        self.assertIn("ML-KEM-512", label)
+        self.assertEqual(color, dashboard.C_ACCENT_PURPLE)
+
     def test_dashboard_send_message_routes_to_correct_mission(self):
         fake = FakeSerialClient()
         panel = dashboard.DashboardPanel(serial_client=fake)
@@ -991,6 +1037,34 @@ class DashboardCommandTests(unittest.TestCase):
 
         self.assertNotIn("TELEMETRY", fake.sent)
 
+    def test_physical_button_event_triggers_non_blocking_ping_animation(self):
+        fake = FakeSerialClient()
+        panel = dashboard.DashboardPanel(serial_client=fake)
+        fake.events.append(
+            (
+                "event",
+                {
+                    "name": "BUTTON_PING",
+                    "payload": {"button": "1", "uptime_ms": "42"},
+                },
+            )
+        )
+
+        panel.update(0.01)
+
+        self.assertEqual(panel.ping_effect_count, 1)
+        self.assertGreater(panel.ping_effect_timer, 0.0)
+        self.assertEqual(panel.session_status, "PING PARA TERRA")
+
+        surface = pygame.Surface((dashboard.WIDTH, dashboard.HEIGHT), pygame.SRCALPHA)
+        earth = dashboard.Earth()
+        satellite = dashboard.Satellite(earth)
+        panel._draw_ping_effect(surface, 0.5, satellite)
+        self.assertIsNotNone(panel.ping_effect_last_segment)
+
+        panel.update(dashboard.PING_ANIMATION_SECONDS + 0.1)
+        self.assertEqual(panel.ping_effect_timer, 0.0)
+
     def test_dashboard_draws_in_projector_target_resolutions(self):
         old_size = (dashboard.WIDTH, dashboard.HEIGHT)
         try:
@@ -1042,6 +1116,23 @@ class DashboardCommandTests(unittest.TestCase):
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
 
+    def test_top_bar_connection_label_fits_projector_target_resolutions(self):
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            for width, height in ((1920, 1080), (1366, 768)):
+                dashboard.WIDTH, dashboard.HEIGHT = width, height
+                surface = pygame.Surface((width, height), pygame.SRCALPHA)
+                panel = dashboard.DashboardPanel(serial_client=FakeSerialClient())
+                panel.serial_connected = True
+
+                panel._draw_top_bar(surface, 0.5)
+
+                self.assertIsNotNone(panel.top_connection_text_rect)
+                self.assertLessEqual(panel.top_connection_text_rect.right, width - 20)
+                self.assertGreaterEqual(panel.top_connection_text_rect.left, 0)
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
     def test_results_overlay_content_fits_projector_target_resolutions(self):
         old_size = (dashboard.WIDTH, dashboard.HEIGHT)
         try:
@@ -1058,6 +1149,11 @@ class DashboardCommandTests(unittest.TestCase):
                 self.assertLessEqual(panel.results_stress_btn_rect.bottom, panel_rect.bottom - 8)
                 self.assertIsNotNone(panel.results_overlay_content_bottom)
                 self.assertLessEqual(panel.results_overlay_content_bottom, panel_rect.bottom - 8)
+                self.assertEqual(len(panel.results_insight_rects), 3)
+                required_card_h = 48 + 2 * 25 + dashboard.FONT_BODY.get_height() + 8
+                for rect in panel.results_insight_rects:
+                    self.assertGreaterEqual(rect.height, required_card_h)
+                    self.assertLessEqual(rect.bottom, panel_rect.bottom - 20)
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
 
@@ -1364,6 +1460,12 @@ class DashboardCommandTests(unittest.TestCase):
                 self.assertIn("PQC_CRC32", panel.mission_overlay_rects)
                 self.assertIn("PQC_CRC32", panel.mission_flow_control_rects)
                 self.assertIn("PQC_CRC32", panel.mission_flow_scrub_rects)
+                self.assertIn("PQC_CRC32", panel.mission_flow_stage_rects)
+                popup_rect = panel.mission_overlay_rects["PQC_CRC32"]
+                stage_rect = panel.mission_flow_stage_rects["PQC_CRC32"]
+                self.assertAlmostEqual(stage_rect.centerx, popup_rect.centerx, delta=1)
+                self.assertLessEqual(stage_rect.bottom, popup_rect.bottom)
+                self.assertLessEqual(panel.mission_flow_explanation_line_counts["PQC_CRC32"], 4)
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
 

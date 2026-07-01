@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import itertools
+from collections import deque
 import sys
 import time
 from dataclasses import dataclass
@@ -77,6 +78,7 @@ class SerialBridge:
         self.startup_delay = startup_delay
         self._request_ids = itertools.count(1)
         self._ser = None
+        self._events = deque()
 
     def open(self) -> None:
         if self._ser is not None and self._ser.is_open:
@@ -135,6 +137,10 @@ class SerialBridge:
                 malformed_lines.append(raw.decode("utf-8", errors="replace").strip())
                 continue
 
+            if frame.message_type == "EVENT":
+                self._events.append(frame)
+                continue
+
             if frame.request_id == request_id and frame.is_result:
                 return frame
 
@@ -142,3 +148,21 @@ class SerialBridge:
         if malformed_lines:
             detail += f"; malformed={malformed_lines[-3:]}"
         raise SerialBridgeTimeout(detail)
+
+    def poll_events(self) -> list[ProtocolFrame]:
+        """Return unsolicited EVENT frames without blocking command traffic."""
+        if self._ser is not None and self._ser.is_open:
+            while getattr(self._ser, "in_waiting", 0) > 0:
+                raw = self._ser.readline()
+                if not raw:
+                    break
+                try:
+                    frame = parse_frame(raw)
+                except ProtocolError:
+                    continue
+                if frame.message_type == "EVENT":
+                    self._events.append(frame)
+
+        events = list(self._events)
+        self._events.clear()
+        return events

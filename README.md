@@ -25,6 +25,8 @@ O repositório contém hoje:
 - splash inicial opcional, autosave no encerramento, métricas superiores
   essenciais de CPU/RAM, onboarding, botão `RESULTADOS` e testes headless para
   1920x1080 e 1366x768;
+- botão físico da Wisdom emitindo `BUTTON_PING` pela serial para acionar um
+  pulso visual curto do satélite até a Terra, sem telemetria automática;
 - animação dos popups de missão e falha em diagrama limpo de três blocos
   `[ENTRADA] → [OPERAÇÃO] → [SAÍDA]` com ícones line-art, selos de resultado
   check/cross, partículas de dados e efeito de raio cósmico no bit-flip;

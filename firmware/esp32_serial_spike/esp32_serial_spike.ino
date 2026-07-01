@@ -87,6 +87,7 @@ static constexpr int PIN_SOUND = 36;  // VP / A36
 static constexpr int PIN_POT = 39;    // VN / A39
 static constexpr int PIN_ACCEL_INT1 = 34;
 static constexpr int PIN_ACCEL_INT2 = 35;
+static constexpr uint32_t BUTTON_DEBOUNCE_MS = 40;
 
 #if !defined(LED_BUILTIN)
 #define LED_BUILTIN 2
@@ -123,6 +124,9 @@ static uint8_t rgb_g = 0;
 static uint8_t rgb_b = 0;
 static uint8_t bar_level = 0;
 static uint8_t bar_percent = 0;
+static bool button_stable_pressed = false;
+static bool button_candidate_pressed = false;
+static uint32_t button_candidate_since_ms = 0;
 static int servo_angle = -1;
 
 static bool apds_present = false;
@@ -977,6 +981,32 @@ static void print_boot_event() {
   Serial.print("V1|0|EVENT|BOOT|node=PQC-SAT-WISDOM|proto=V1|baud=");
   Serial.print(SERIAL_BAUD);
   Serial.println("|crypto=ML-KEM-512|pqc=ready|fault=payload_crc32|board=BlackBoard-Wisdom");
+}
+
+static void initialize_button_event_state() {
+  const bool pressed = digitalRead(PIN_BUTTON) == LOW;
+  button_stable_pressed = pressed;
+  button_candidate_pressed = pressed;
+  button_candidate_since_ms = millis();
+}
+
+static void poll_button_ping_event() {
+  const bool pressed = digitalRead(PIN_BUTTON) == LOW;
+  const uint32_t now = millis();
+  if (pressed != button_candidate_pressed) {
+    button_candidate_pressed = pressed;
+    button_candidate_since_ms = now;
+    return;
+  }
+  if (pressed == button_stable_pressed || now - button_candidate_since_ms < BUTTON_DEBOUNCE_MS) {
+    return;
+  }
+
+  button_stable_pressed = pressed;
+  if (pressed) {
+    Serial.print("V1|0|EVENT|BUTTON_PING|button=1|uptime_ms=");
+    Serial.println(now);
+  }
 }
 
 // ---- Command handlers -------------------------------------------------------
@@ -2588,6 +2618,7 @@ void setup() {
   boot_cpu_mhz = ESP.getCpuFreqMHz();
   disable_radios();
   configure_board_io();
+  initialize_button_event_state();
 
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   Wire.setClock(100000);
@@ -2624,4 +2655,5 @@ void loop() {
 
     rx_buffer[rx_len++] = c;
   }
+  poll_button_ping_event();
 }
