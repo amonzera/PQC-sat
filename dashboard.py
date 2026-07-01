@@ -823,6 +823,91 @@ class Earth:
         ]:
             pygame.draw.ellipse(land_single, (*land_color, 250),
                                 (ix2, iy2, max(3, iw), max(3, ih)))
+
+        def draw_continent(offsets, fill, highlight=(78, 190, 92, 65)):
+            points = [
+                (int(cx + ox * scale), int(cy + oy * scale))
+                for ox, oy in offsets
+            ]
+            pygame.draw.polygon(land_single, (*fill, 255), points)
+            pygame.draw.polygon(land_single, highlight, points)
+            pygame.draw.polygon(land_single, (30, 120, 50, 190), points, 2)
+            return points
+
+        # Europa e massa eurasiática, posicionadas no hemisfério oposto às Américas.
+        draw_continent(
+            [
+                (-142, -70), (-132, -92), (-108, -108), (-74, -112),
+                (-44, -98), (-28, -78), (-42, -58), (-70, -48),
+                (-92, -54), (-112, -44), (-132, -52),
+            ],
+            (55, 165, 78),
+        )
+
+        # África, com uma faixa desértica sutil para facilitar o reconhecimento.
+        draw_continent(
+            [
+                (-126, -48), (-98, -55), (-72, -38), (-62, -8),
+                (-72, 26), (-88, 66), (-106, 94), (-122, 68),
+                (-136, 34), (-142, -6),
+            ],
+            (48, 158, 70),
+        )
+        sahara = [
+            (int(cx - 126 * scale), int(cy - 35 * scale)),
+            (int(cx - 82 * scale), int(cy - 34 * scale)),
+            (int(cx - 68 * scale), int(cy - 10 * scale)),
+            (int(cx - 132 * scale), int(cy - 4 * scale)),
+        ]
+        pygame.draw.polygon(land_single, (190, 170, 75, 105), sahara)
+
+        # Índia, Sudeste Asiático e ilhas próximas.
+        draw_continent(
+            [
+                (-72, -44), (-54, -40), (-40, -22), (-48, 2),
+                (-61, 20), (-70, -4), (-82, -24),
+            ],
+            (52, 168, 76),
+        )
+        for ox, oy, radius in ((-44, 8, 5), (-34, 16, 4), (-25, 24, 3), (-118, 82, 4)):
+            pygame.draw.circle(
+                land_single,
+                (*land_color, 245),
+                (int(cx + ox * scale), int(cy + oy * scale)),
+                max(2, int(radius * scale)),
+            )
+
+        # Austrália e Nova Zelândia.
+        draw_continent(
+            [
+                (-72, 62), (-46, 52), (-24, 66), (-18, 88),
+                (-38, 106), (-66, 104), (-84, 86),
+            ],
+            (58, 164, 72),
+        )
+        pygame.draw.ellipse(
+            land_single,
+            (*land_color, 245),
+            (
+                int(cx - 12 * scale),
+                int(cy + 94 * scale),
+                max(3, int(5 * scale)),
+                max(5, int(12 * scale)),
+            ),
+        )
+
+        # Antártida estilizada fecha a borda sul da textura.
+        antarctica = [
+            (int(cx + ox * scale), int(cy + oy * scale))
+            for ox, oy in (
+                (-118, 118), (-82, 112), (-48, 120), (-12, 114),
+                (26, 121), (62, 114), (102, 120), (116, 132),
+                (72, 137), (24, 134), (-26, 139), (-76, 134),
+            )
+        ]
+        pygame.draw.polygon(land_single, (190, 218, 205, 235), antarctica)
+        pygame.draw.polygon(land_single, (140, 180, 170, 170), antarctica, 1)
+
         self.land_texture = pygame.Surface((size * 2, size), pygame.SRCALPHA)
         self.land_texture.blit(land_single, (0, 0))
         self.land_texture.blit(land_single, (size, 0))
