@@ -62,12 +62,27 @@ FAULT_FLOW_ANIMATION_SECONDS = 7.5
 POPUP_ENTER_SECONDS = 0.20
 POPUP_EXIT_SECONDS = 0.16
 PING_ANIMATION_SECONDS = 1.6
-COMMAND_BUTTONS = (
-    ("ENVIAR MSG", "SEND_MESSAGE"),
-    ("CLÁSSICA", "SET_PRESET_CLASSIC"),
-    ("PQC", "SET_PRESET_PQC"),
-    ("PQC+CRC", "SET_PRESET_PQC_CRC32"),
-    ("FALHA", "INJECT_FAULT"),
+COMMAND_BUTTON_GROUPS = (
+    (
+        "CONFIGURAÇÃO",
+        (
+            ("CLÁSSICA", "SET_PRESET_CLASSIC"),
+            ("PQC", "SET_PRESET_PQC"),
+            ("PQC+CRC", "SET_PRESET_PQC_CRC32"),
+        ),
+    ),
+    (
+        "ENVIO",
+        (
+            ("ENVIAR MSG", "SEND_MESSAGE"),
+            ("FALHA", "INJECT_FAULT"),
+        ),
+    ),
+)
+COMMAND_BUTTONS = tuple(
+    button
+    for _section, buttons in COMMAND_BUTTON_GROUPS
+    for button in buttons
 )
 MISSION_PRESET_COMMANDS = {
     "SET_PRESET_CLASSIC": "CLASSIC",
@@ -5656,11 +5671,30 @@ class DashboardPanel:
         )
 
     def _right_panel_height(self, width):
-        columns = 2 if width >= 260 else 1
-        rows = math.ceil(len(COMMAND_BUTTONS) / columns)
-        button_block_h = 26 + rows * 44 + max(0, rows - 1) * 10
-        content_h = 48 + 46 + 18 + button_block_h + 22
+        button_block_h = self._command_buttons_height(width)
+        content_h = 48 + button_block_h + 22
         return self._compact_panel_height(content_h)
+
+    @staticmethod
+    def _command_group_columns(button_count, width):
+        if width >= 400:
+            return min(button_count, 3)
+        if width >= 260:
+            return min(button_count, 2)
+        return 1
+
+    def _command_buttons_height(self, width):
+        section_label_h = 22
+        button_h = 44
+        row_gap = 10
+        section_gap = 14
+        total = 0
+        for _section, buttons in COMMAND_BUTTON_GROUPS:
+            columns = self._command_group_columns(len(buttons), width)
+            rows = math.ceil(len(buttons) / columns)
+            total += section_label_h + rows * button_h + max(0, rows - 1) * row_gap
+        total += max(0, len(COMMAND_BUTTON_GROUPS) - 1) * section_gap
+        return total
 
     def _draw_left_panel(self, surface, t, satellite):
         """Painel esquerdo: Falhas e integridade (foco da simulacao)."""
@@ -5705,90 +5739,73 @@ class DashboardPanel:
 
         y = panel_rect.y + 48
         x = panel_rect.x + 18
-        y = self._draw_live_payload_toggle(surface, x, y, cw) + 18
         self._draw_command_buttons(surface, x, y, cw, t)
 
     def _draw_command_buttons(self, surface, x, y, width, t):
         # REFATORAÇÃO VISUAL: Botões HUD de Demonstração
         self.command_button_rects = []
-        title = FONT_BODY.render("COMANDOS DA DEMO", True, C_ACCENT_CYAN)
-        surface.blit(title, (x, y))
-        y += 26
-
-        columns = 2 if width >= 260 else 1
         gap = 10
         button_h = 44
-        button_w = (width - gap * (columns - 1)) // columns
+        section_gap = 14
         try:
             mouse_pos = pygame.mouse.get_pos()
         except pygame.error:
             mouse_pos = (-1, -1)
 
-        for index, (label, command) in enumerate(COMMAND_BUTTONS):
-            col = index % columns
-            row = index // columns
-            bx = x + col * (button_w + gap)
-            by = y + row * (button_h + gap)
-            rect = pygame.Rect(bx, by, button_w, button_h)
-            hovered = rect.collidepoint(mouse_pos)
+        for section_index, (section, buttons) in enumerate(COMMAND_BUTTON_GROUPS):
+            section_color = C_ACCENT_PURPLE if section == "CONFIGURAÇÃO" else C_ACCENT_GREEN
+            section_label = FONT_LABEL.render(section, True, section_color)
+            surface.blit(section_label, (x, y + 2))
+            line_x = x + section_label.get_width() + 10
+            pygame.draw.line(surface, (*section_color, 100), (line_x, y + 9), (x + width, y + 9), 1)
+            y += 22
 
-            fill = (22, 30, 58) if not hovered else (28, 42, 82)
-            border = C_ACCENT_CYAN if hovered else C_PANEL_BORDER
+            columns = self._command_group_columns(len(buttons), width)
+            rows = math.ceil(len(buttons) / columns)
+            button_w = (width - gap * (columns - 1)) // columns
+            for index, (label, command) in enumerate(buttons):
+                col = index % columns
+                row = index // columns
+                bx = x + col * (button_w + gap)
+                by = y + row * (button_h + gap)
+                rect = pygame.Rect(bx, by, button_w, button_h)
+                hovered = rect.collidepoint(mouse_pos)
 
-            if command == "SEND_MESSAGE":
-                border = C_ACCENT_CYAN
-                fill = (0, 45, 60) if not hovered else (0, 70, 90)
-            elif command in MISSION_PRESET_COMMANDS:
-                active = self._current_message_scenario() == MISSION_PRESET_COMMANDS[command]
-                if command == "SET_PRESET_CLASSIC" and active:
-                    border = C_ACCENT_BLUE
-                    fill = (0, 35, 80) if not hovered else (0, 55, 120)
-                elif command == "SET_PRESET_PQC" and active:
-                    border = C_ACCENT_PURPLE
-                    fill = (50, 20, 80) if not hovered else (75, 30, 120)
-                elif command == "SET_PRESET_PQC_CRC32" and active:
-                    border = C_ACCENT_GREEN
-                    fill = (0, 50, 25) if not hovered else (0, 80, 40)
+                fill = (22, 30, 58) if not hovered else (28, 42, 82)
+                border = C_ACCENT_CYAN if hovered else C_PANEL_BORDER
 
-            cut = 7
-            points = [(rect.x + cut, rect.y), (rect.right, rect.y), (rect.right, rect.bottom - cut), (rect.right - cut, rect.bottom), (rect.x, rect.bottom), (rect.x, rect.y + cut)]
-            pygame.draw.polygon(surface, fill, points)
-            pygame.draw.polygon(surface, border, points, 1)
-            pygame.draw.line(surface, (*border, 120), (rect.x + 8, rect.bottom - 4), (rect.right - 10, rect.bottom - 4), 1)
+                if command == "SEND_MESSAGE":
+                    border = C_ACCENT_CYAN
+                    fill = (0, 45, 60) if not hovered else (0, 70, 90)
+                elif command == "INJECT_FAULT":
+                    border = C_ACCENT_RED
+                    fill = (52, 16, 30) if not hovered else (78, 22, 42)
+                elif command in MISSION_PRESET_COMMANDS:
+                    active = self._current_message_scenario() == MISSION_PRESET_COMMANDS[command]
+                    if command == "SET_PRESET_CLASSIC" and active:
+                        border = C_ACCENT_BLUE
+                        fill = (0, 35, 80) if not hovered else (0, 55, 120)
+                    elif command == "SET_PRESET_PQC" and active:
+                        border = C_ACCENT_PURPLE
+                        fill = (50, 20, 80) if not hovered else (75, 30, 120)
+                    elif command == "SET_PRESET_PQC_CRC32" and active:
+                        border = C_ACCENT_GREEN
+                        fill = (0, 50, 25) if not hovered else (0, 80, 40)
 
-            label_surf = self._render_clipped(FONT_BODY, label, C_TEXT_PRIMARY, button_w - 18)
-            surface.blit(label_surf, (rect.centerx - label_surf.get_width() // 2, rect.centery - label_surf.get_height() // 2))
-            self.command_button_rects.append((rect, command))
+                cut = 7
+                points = [(rect.x + cut, rect.y), (rect.right, rect.y), (rect.right, rect.bottom - cut), (rect.right - cut, rect.bottom), (rect.x, rect.bottom), (rect.x, rect.y + cut)]
+                pygame.draw.polygon(surface, fill, points)
+                pygame.draw.polygon(surface, border, points, 1)
+                pygame.draw.line(surface, (*border, 120), (rect.x + 8, rect.bottom - 4), (rect.right - 10, rect.bottom - 4), 1)
 
-        rows = math.ceil(len(COMMAND_BUTTONS) / columns)
-        return y + rows * button_h + max(0, rows - 1) * gap
+                label_surf = self._render_clipped(FONT_BODY, label, C_TEXT_PRIMARY, button_w - 18)
+                surface.blit(label_surf, (rect.centerx - label_surf.get_width() // 2, rect.centery - label_surf.get_height() // 2))
+                self.command_button_rects.append((rect, command))
 
-    def _draw_live_payload_toggle(self, surface, x, y, width):
-        # REFATORAÇÃO VISUAL: Toggle HUD de Payload
-        rect = pygame.Rect(x, y, width, 46)
-        self.live_payload_toggle_rect = rect
-        active = bool(self.live_payload_enabled)
-        border = C_ACCENT_GREEN if active else C_PANEL_BORDER
-        fill = (10, 42, 30) if active else (18, 20, 40)
-        cut = 8
-        points = [(rect.x + cut, rect.y), (rect.right, rect.y), (rect.right, rect.bottom - cut), (rect.right - cut, rect.bottom), (rect.x, rect.bottom), (rect.x, rect.y + cut)]
-        pygame.draw.polygon(surface, fill, points)
-        pygame.draw.polygon(surface, border, points, 1)
-
-        knob_rect = pygame.Rect(rect.right - 66, rect.y + 12, 48, 22)
-        pygame.draw.rect(surface, (8, 12, 24), knob_rect, border_radius=9)
-        knob_x = knob_rect.right - 17 if active else knob_rect.x + 7
-        pygame.draw.circle(surface, C_ACCENT_GREEN if active else C_TEXT_DIM, (knob_x, knob_rect.centery), 7)
-
-        label = "Payload vivo"
-        status = "ON" if active else "OFF"
-        surface.blit(self._render_clipped(FONT_BODY, label, C_TEXT_PRIMARY, width - 104), (rect.x + 12, rect.y + 7))
-        detail = "sensores -> MISSION" if active else "payload fixo"
-        surface.blit(self._render_clipped(FONT_BODY, detail, C_TEXT_DIM, width - 104), (rect.x + 12, rect.y + 27))
-        status_surf = FONT_BODY.render(status, True, C_ACCENT_GREEN if active else C_TEXT_DIM)
-        surface.blit(status_surf, (knob_rect.x - status_surf.get_width() - 10, rect.y + (rect.height - status_surf.get_height()) // 2))
-        return rect.bottom
-
+            y += rows * button_h + max(0, rows - 1) * gap
+            if section_index < len(COMMAND_BUTTON_GROUPS) - 1:
+                y += section_gap
+        return y
 
     @staticmethod
     def _render_clipped(font, text, color, max_width):
@@ -6843,6 +6860,7 @@ class DashboardPanel:
         pygame.draw.rect(bar_surf, (*C_PANEL_BG, 200), (0, 0, WIDTH, bar_h))
         pygame.draw.line(bar_surf, C_PANEL_BORDER, (0, 0), (WIDTH, 0), 1)
         surface.blit(bar_surf, (0, bar_y))
+        self.live_payload_toggle_rect = None
 
         if self.serial_client is None:
             esp32_item = "SAT: SIMULADO"
@@ -6878,8 +6896,23 @@ class DashboardPanel:
                 color = C_ACCENT_GREEN
             elif "PENDENTE" in item:
                 color = C_ACCENT_ORANGE
+            is_payload_toggle = item.startswith("PAYLOAD:")
+            if is_payload_toggle:
+                probe = FONT_LABEL.render(item, True, color)
+                toggle_rect = probe.get_rect(topleft=(ix, bar_y + 8)).inflate(12, 8)
+                try:
+                    hovered = toggle_rect.collidepoint(pygame.mouse.get_pos())
+                except pygame.error:
+                    hovered = False
+                self.live_payload_toggle_rect = toggle_rect
+                if hovered:
+                    pygame.draw.rect(surface, (18, 45, 42), toggle_rect, border_radius=3)
+                    pygame.draw.rect(surface, payload_color, toggle_rect, width=1, border_radius=3)
+                    color = C_TEXT_PRIMARY
             surf = FONT_LABEL.render(item, True, color)
             surface.blit(surf, (ix, bar_y + 8))
+            if is_payload_toggle:
+                pygame.draw.line(surface, payload_color, (ix, bar_y + 25), (ix + surf.get_width(), bar_y + 25), 1)
             ix += surf.get_width() + 30
             if ix >= item_limit_x:
                 break

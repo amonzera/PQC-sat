@@ -533,6 +533,17 @@ class DashboardCommandTests(unittest.TestCase):
     def test_presentation_buttons_focus_live_mission_scenarios(self):
         commands = [command for _label, command in dashboard.COMMAND_BUTTONS]
 
+        self.assertEqual(
+            commands,
+            [
+                "SET_PRESET_CLASSIC",
+                "SET_PRESET_PQC",
+                "SET_PRESET_PQC_CRC32",
+                "SEND_MESSAGE",
+                "INJECT_FAULT",
+            ],
+        )
+        self.assertEqual([section for section, _buttons in dashboard.COMMAND_BUTTON_GROUPS], ["CONFIGURAÇÃO", "ENVIO"])
         self.assertIn("SEND_MESSAGE", commands)
         self.assertIn("SET_PRESET_CLASSIC", commands)
         self.assertIn("SET_PRESET_PQC", commands)
@@ -548,6 +559,47 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertNotIn("TELEMETRY", commands)
         self.assertNotIn("PING", commands)
         self.assertNotIn("STRESS", commands)
+
+    def test_presentation_buttons_are_grouped_by_configuration_and_send_action(self):
+        panel = dashboard.DashboardPanel()
+        surface = pygame.Surface((600, 400), pygame.SRCALPHA)
+        width = 439
+
+        bottom = panel._draw_command_buttons(surface, 20, 20, width, 0.5)
+        rects = {command: rect for rect, command in panel.command_button_rects}
+
+        config_commands = ("SET_PRESET_CLASSIC", "SET_PRESET_PQC", "SET_PRESET_PQC_CRC32")
+        self.assertEqual({rects[command].y for command in config_commands}, {rects["SET_PRESET_CLASSIC"].y})
+        self.assertEqual(rects["SEND_MESSAGE"].y, rects["INJECT_FAULT"].y)
+        self.assertGreater(rects["SEND_MESSAGE"].y, rects["SET_PRESET_CLASSIC"].y)
+        self.assertEqual(bottom, 20 + panel._command_buttons_height(width))
+        self.assertLessEqual(max(rect.bottom for rect in rects.values()), bottom)
+
+    def test_live_payload_toggle_is_the_bottom_status_text(self):
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            dashboard.WIDTH, dashboard.HEIGHT = 1366, 768
+            surface = pygame.Surface((1366, 768), pygame.SRCALPHA)
+            panel = dashboard.DashboardPanel()
+
+            panel._draw_right_panel(surface, 0.5)
+            self.assertIsNone(panel.live_payload_toggle_rect)
+
+            panel._draw_bottom_bar(surface, 0.5)
+            toggle_rect = panel.live_payload_toggle_rect
+            self.assertIsNotNone(toggle_rect)
+            self.assertGreaterEqual(toggle_rect.top, dashboard.HEIGHT - 32)
+            self.assertLessEqual(toggle_rect.bottom, dashboard.HEIGHT)
+
+            previous = panel.live_payload_enabled
+            click = pygame.event.Event(
+                pygame.MOUSEBUTTONDOWN,
+                {"button": 1, "pos": toggle_rect.center},
+            )
+            panel.handle_event(click)
+            self.assertNotEqual(panel.live_payload_enabled, previous)
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
 
     def test_stress_button_requires_second_click_and_uses_long_timeout(self):
         fake = FakeSerialClient()
