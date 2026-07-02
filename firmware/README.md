@@ -62,7 +62,7 @@ O dashboard da apresentação usa apenas o subconjunto visual documentado no
 e expansão fica em:
 
 ```text
-../hardware_command_reference.md
+../docs/hardware_command_reference.md
 ```
 
 Use essa referência para testes de firmware, debug de perifericos e manutenção
@@ -156,7 +156,8 @@ BARGRAPH 75
 BARGRAPH 0
 ```
 
-Para a sequência completa de bancada, use `../hardware_command_reference.md`.
+Para a sequência completa de bancada, use
+`../docs/hardware_command_reference.md`.
 
 ## Limites desta etapa
 
@@ -181,14 +182,13 @@ Para a sequência completa de bancada, use `../hardware_command_reference.md`.
   `PQC_FAULT` foi validado em placa real para `CONFIRM` e `NONE`; os testes
   automatizados cobrem o parser Python e o engine deterministico do dashboard.
 
-## Próximo incremento
+## Manutenção
 
-O próximo marco do firmware e manter esta base estável enquanto a etapa de
-apresentação automatizada é implementada. Novas mudanças de firmware devem
-preservar `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32`, `PQC_KAT`,
-`PQC_FAULT`, `PQC_BENCH 100` e `FAULT CRC32` como testes de regressão, sem
-expor chave privada, segredo compartilhado completo ou material suficiente
-para reconstruir a sessão.
+O MVP do firmware está concluído. Novas mudanças devem preservar
+`MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32`, `PQC_KAT`,
+`PQC_FAULT`, `PQC_BENCH 100`, `FAULT CRC32` e `BUTTON_PING` como testes de
+regressão, sem expor chave privada, segredo compartilhado completo ou material
+suficiente para reconstruir a sessão.
 
 Sequência minima de bancada:
 
@@ -220,9 +220,9 @@ FAULT CRC32 ... 0 0x01        result=DETECTED_GUARD crc_before=0xDFFEC3A1 crc_af
 Validação funcional do novo fluxo de apresentação:
 
 ```text
-MISSION CLASSIC      result=DELIVERED crypto=HMAC-SHA256 checksum=NONE tag_match=1 elapsed_us=<medido>
-MISSION PQC          result=DELIVERED crypto=ML-KEM-512 checksum=NONE key_match=1 tag_match=1 elapsed_us=<medido>
-MISSION PQC_CRC32    result=DELIVERED crypto=ML-KEM-512 checksum=CRC32 key_match=1 tag_match=1 crc_match=1 elapsed_us=<medido>
+MISSION CLASSIC      result=DELIVERED crypto=AES-128-GCM cipher=AES-128-GCM checksum=NONE aead_match=1 elapsed_us=<medido>
+MISSION PQC          result=DELIVERED crypto=ML-KEM-512 cipher=AES-128-GCM checksum=NONE key_match=1 aead_match=1 elapsed_us=<medido>
+MISSION PQC_CRC32    result=DELIVERED crypto=ML-KEM-512 cipher=AES-128-GCM checksum=CRC32 key_match=1 aead_match=1 crc_match=1 elapsed_us=<medido>
 ```
 
 Medição comparativa registrada em 2026-06-17:

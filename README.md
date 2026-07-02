@@ -30,10 +30,8 @@ O repositório contém hoje:
 - animação dos popups de missão e falha em diagrama limpo de três blocos
   `[ENTRADA] → [OPERAÇÃO] → [SAÍDA]` com ícones line-art, selos de resultado
   check/cross, partículas de dados e efeito de raio cósmico no bit-flip;
-- roteiro de apresentação orientado ao dashboard, sequência de demo e limites
-  científicos;
-- guia didático completo para conduzir a apresentação com público leigo em
-  criptografia;
+- guia final centralizado para estudar o projeto, conduzir a demonstração,
+  interpretar os resultados e responder às perguntas da banca;
 - uma proposta acadêmica em DOCX;
 - um roadmap consolidado como histórico final das etapas implementadas.
 
@@ -246,7 +244,7 @@ comandos avançados, inclusive comandos fora do escopo visual da demo:
 | `HELP` | Mostra ajuda completa do terminal avançado no painel. |
 
 Comandos de bancada, inventário, debug e expansão ficam centralizados em
-[`hardware_command_reference.md`](hardware_command_reference.md). Eles podem
+[`docs/hardware_command_reference.md`](docs/hardware_command_reference.md). Eles podem
 ser usados pelo `tools/serial_console.py` ou digitados no terminal textual do
 dashboard; eles não aparecem como blocos clicáveis da demonstração visual.
 Isso inclui `PING`, `TELEMETRY`, `RUN_BATTERY`, `LED`, `RGB`, `BARGRAPH`,
@@ -279,7 +277,7 @@ tamanhos e CRCs curtos, sem exportar segredos completos.
 
 Estado atual:
 
-- Etapas 01 a 07: concluídas no código e consolidadas no `ROADMAP.md`; os
+- Etapas 01 a 07: concluídas no código e consolidadas no `docs/ROADMAP.md`; os
   markdowns dessas etapas foram removidos para não duplicar a fonte de verdade.
 - Etapa 04: validada em hardware com firmware gravado, `PQC_KAT`,
   `PQC_FAULT`, `PQC_BENCH 100` em `BASELINE` e `OBC-1U-LIMITED`, payload
@@ -293,20 +291,22 @@ Estado atual:
 - Etapa 08: implementada no software com `--no-splash`, splash opcional,
   autosave no fechamento, cleanup preservando traceback, cache de superfícies,
   métricas essenciais no topo, testes headless de resoluções, runner de aceitação em
-  `tools/stage8_acceptance.py` e roteiro em `APRESENTACAO_ROTEIRO.md`.
-  A aceitação de hardware passou e a coleta final de métricas foi consolidada
-  em `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json` com 1.681,24 s,
-  3.074 registros, 0 falhas, 1.800 MISSION runs, 10 benchmarks PQC e 1.200
-  testes de falha.
+  `tools/stage8_acceptance.py` e preparação oral em
+  `GUIA_FINAL_APRESENTACAO.md`.
+  A aceitação de hardware passou e a coleta oficial pós-AES-GCM foi
+  consolidada em
+  `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`, com 1.038
+  registros, 0 falhas, 600 MISSION runs, 6 benchmarks PQC e 400 testes de
+  falha.
 
 Validação real em placa após upload em 2026-06-18: `PQC_KAT` retornou
 `kat=pass` com `ss_crc32=0xD9DA8D6C`; `PQC_FAULT 0 0x01 CONFIRM` retornou
 `PROTOCOL_REJECT`; `PQC_FAULT 0 0x01 NONE` retornou `KEY_MISMATCH`;
-na coleta final, `PQC_BENCH 100` em `BASELINE` teve médias
+na coleta oficial pós-AES-GCM, `PQC_BENCH 100` em `BASELINE` teve médias
 `keygen_avg_us=3302`, `encap_avg_us=3866`, `decap_avg_us=4990`; em
-`OBC-1U-LIMITED` teve médias `keygen_avg_us=10066`,
-`encap_avg_us=11787`, `decap_avg_us=15217`; `FAULT CRC32 ...`
-retornou `DETECTED_GUARD` na coleta final (600/600 detectados). Nenhum comando imprime chave privada, segredo
+`OBC-1U-LIMITED` teve médias `keygen_avg_us=10067`,
+`encap_avg_us=11789`, `decap_avg_us=15217`; `FAULT CRC32 ...`
+retornou `DETECTED_GUARD` em 200/200 casos. Nenhum comando imprime chave privada, segredo
 compartilhado completo ou material suficiente para reconstruir a sessão.
 
 ## Estrutura
@@ -317,16 +317,13 @@ compartilhado completo ou material suficiente para reconstruir a sessão.
 | `firmware/` | Spike de firmware ESP32 para transporte serial. |
 | `tools/` | Parser, bridge e console serial no computador. |
 | `tests/` | Testes automatizados do protocolo serial Python. |
-| `hardware_blackboard_wisdom.md` | Inventário e procedimento de bancada da placa RoboCore Wisdom. |
-| `hardware_command_reference.md` | Referência única de comandos completos de hardware/bancada. |
-| `ALGORITMOS_DO_PROJETO.md` | Explicação detalhada de HMAC-SHA256, ML-KEM-512, CRC32, bit-flips e métricas. |
-| `METRICAS_CONSOLIDADAS.md` | Metodologia de comparação CLASSIC, PQC e PQC+CRC32 para o seminário. |
-| `GUIA_DIDATICO_APRESENTACAO.md` | Explicação passo a passo, leiga e completa, do projeto e da demonstração. |
-| `APRESENTACAO_ROTEIRO.md` | Roteiro de 20 minutos, blocos do dashboard, sequência da demo e limites. |
-| `PERGUNTAS_E_RESPOSTAS_SEMINARIO.md` | Perguntas prováveis da banca/turma com respostas alinhadas ao projeto real. |
-| `projeto_final_pqc_esp32_cubesat.docx` | Proposta acadêmica formal. |
-| `ROADMAP.md` | Plano consolidado, critérios e ordem recomendada. |
-| `agents.md` | Regras e contexto para agentes de IA. |
+| `docs/hardware_blackboard_wisdom.md` | Inventário e procedimento de bancada da placa RoboCore Wisdom. |
+| `docs/hardware_command_reference.md` | Referência única de comandos completos de hardware/bancada. |
+| `docs/METRICAS_CONSOLIDADAS.md` | Metodologia, estatísticas e critérios de consolidação das baterias. |
+| `GUIA_FINAL_APRESENTACAO.md` | Artefato central de estudo: fundamentos, arquitetura, resultados, roteiro e defesa oral. |
+| `docs/projeto_final_pqc_esp32_cubesat.docx` | Proposta acadêmica formal. |
+| `docs/ROADMAP.md` | Plano consolidado, critérios e ordem recomendada. |
+| `AGENTS.md` | Regras e contexto para agentes de IA. |
 | `requirements.txt` | Dependência reproduzível do dashboard. |
 
 ## Limites científicos

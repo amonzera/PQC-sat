@@ -75,14 +75,14 @@ MISSION_PRESET_COMMANDS = {
     "SET_PRESET_PQC_CRC32": "PQC_CRC32",
 }
 MISSION_OVERLAY_SCENARIOS = ("CLASSIC", "PQC", "PQC_CRC32")
-CONSOLIDATED_ACCEPTANCE_LOG = "logs/20260626T051412Z_aes_gcm_metrics_dev-ttyusb0.json"
-CONSOLIDATED_ACCEPTANCE_LABEL = "20260626T051412Z"
+CONSOLIDATED_ACCEPTANCE_LOG = "logs/20260702T044907Z_final_metrics_dev-ttyusb0.json"
+CONSOLIDATED_ACCEPTANCE_LABEL = "20260702T044907Z"
 CONSOLIDATED_METRICS_STATUS = "versão cifrada oficial com AES-128-GCM"
 CONSOLIDATED_SUMMARY = {
     "crc_acceptance": "200/200",
     "demo_crc_detected": "200/200",
     "demo_none_silent": "200/200",
-    "elapsed_s": 343.16,
+    "elapsed_s": 336.62,
     "failed": 0,
     "mission_runs": 600,
     "pqc_bench_runs": 6,
@@ -94,68 +94,98 @@ CONSOLIDATED_MISSION_BASELINE = {
         "label": "CLASSIC",
         "crypto": "AES-128-GCM",
         "checksum": "NONE",
-        "elapsed_us": 624,
-        "bytes_total": 62,
-        "bytes_payload": 34,
+        "elapsed_us": 611,
+        "bytes_total": 69,
+        "bytes_payload": 41,
         "bytes_crypto": 28,
         "bytes_checksum": 0,
         "keygen_us": 0,
         "encap_us": 0,
         "decap_us": 0,
-        "tag_us": 374,
-        "verify_us": 116,
+        "tag_us": 365,
+        "verify_us": 125,
         "crc_us": 0,
         "heap": 201412,
+        "min_heap": 197624,
         "result": "DELIVERED"
     },
     "PQC": {
         "label": "PQC (ML-KEM)",
         "crypto": "ML-KEM-512 + AES-GCM",
         "checksum": "NONE",
-        "elapsed_us": 14075,
-        "bytes_total": 830,
-        "bytes_payload": 34,
+        "elapsed_us": 14152,
+        "bytes_total": 837,
+        "bytes_payload": 41,
         "bytes_crypto": 796,
         "bytes_checksum": 0,
-        "keygen_us": 3709,
-        "encap_us": 3939,
-        "decap_us": 5022,
-        "tag_us": 383,
-        "verify_us": 108,
+        "keygen_us": 3743,
+        "encap_us": 3953,
+        "decap_us": 5029,
+        "tag_us": 389,
+        "verify_us": 124,
         "crc_us": 0,
         "heap": 201412,
+        "min_heap": 197624,
         "result": "DELIVERED"
     },
     "PQC_CRC32": {
         "label": "PQC + CRC32",
         "crypto": "ML-KEM-512 + AES-GCM",
         "checksum": "CRC32",
-        "elapsed_us": 14034,
-        "bytes_total": 834,
-        "bytes_payload": 34,
+        "elapsed_us": 14097,
+        "bytes_total": 841,
+        "bytes_payload": 41,
         "bytes_crypto": 796,
         "bytes_checksum": 4,
-        "keygen_us": 3695,
-        "encap_us": 3925,
-        "decap_us": 5022,
-        "tag_us": 394,
-        "verify_us": 108,
-        "crc_us": 21,
+        "keygen_us": 3678,
+        "encap_us": 3934,
+        "decap_us": 5019,
+        "tag_us": 416,
+        "verify_us": 125,
+        "crc_us": 32,
         "heap": 201412,
+        "min_heap": 197624,
         "result": "DELIVERED"
     }
 }
+CONSOLIDATED_MISSION_LIMITED = {
+    "CLASSIC": {
+        **CONSOLIDATED_MISSION_BASELINE["CLASSIC"],
+        "elapsed_us": 1028,
+        "tag_us": 554,
+        "verify_us": 314,
+    },
+    "PQC": {
+        **CONSOLIDATED_MISSION_BASELINE["PQC"],
+        "elapsed_us": 40197,
+        "keygen_us": 10524,
+        "encap_us": 11882,
+        "decap_us": 15259,
+        "tag_us": 600,
+        "verify_us": 313,
+    },
+    "PQC_CRC32": {
+        **CONSOLIDATED_MISSION_BASELINE["PQC_CRC32"],
+        "elapsed_us": 40077,
+        "keygen_us": 10450,
+        "encap_us": 11833,
+        "decap_us": 15221,
+        "tag_us": 607,
+        "verify_us": 316,
+        "crc_us": 53,
+    },
+}
 CONSOLIDATED_PQC_BENCH = (
-    ("BASELINE 240 MHz", "3.323", "3.878", "5.001"),
-    ("LIMITED 80 MHz", "10.079", "11.794", "15.222"),
+    ("BASELINE 240 MHz", "3.302", "3.866", "4.990"),
+    ("LIMITED 80 MHz", "10.067", "11.789", "15.217"),
 )
 CONSOLIDATED_MISSION_TITLE = "DESEMPENHO DA MISSÃO (AES-GCM)"
 CONSOLIDATED_NOTES = (
     "Resultados oficiais com cifragem AES-GCM ativa nas missões.",
-    "PQC foi 22.6x mais lento e 13.4x maior em bytes que CLASSIC.",
+    "PQC foi 23.2x mais lento e 12.1x maior em bytes que CLASSIC.",
     "PQC+CRC32 adicionou 4 bytes ao pacote, com verificação ativa de integridade.",
     "Heap médio estável em 201.412 B no baseline de 240 MHz.",
-    "A 80 MHz (limited), PQC subiu para 40.0 ms (38.5x o clássico).",
+    "A 80 MHz (limited), PQC subiu para 40.2 ms (39.1x o clássico).",
 )
 CONSOLIDATED_METRICS_FILE = DEFAULT_LOG_DIR / "metrics_consolidated.json"
 
@@ -197,6 +227,11 @@ def _load_consolidated_metrics():
         g["CONSOLIDATED_MISSION_BASELINE"] = {
             s: {**CONSOLIDATED_MISSION_BASELINE[s], **baseline[s]} for s in MISSION_OVERLAY_SCENARIOS
         }
+    limited = data.get("mission_limited")
+    if isinstance(limited, dict) and all(s in limited for s in MISSION_OVERLAY_SCENARIOS):
+        g["CONSOLIDATED_MISSION_LIMITED"] = {
+            s: {**CONSOLIDATED_MISSION_LIMITED[s], **limited[s]} for s in MISSION_OVERLAY_SCENARIOS
+        }
     bench = data.get("pqc_bench")
     if isinstance(bench, list) and bench:
         g["CONSOLIDATED_PQC_BENCH"] = tuple(tuple(row) for row in bench)
@@ -216,6 +251,38 @@ MOTIVATION_REFERENCES = (
     ("NIST PQC Project", "ameaca quantica e migracao para PQC"),
     ("NASA SmallSat SoA", "SmallSats exigem escolhas de plataforma"),
     ("Mikaelian 2009", "radiacao e charging ameacam eletronica espacial"),
+)
+DETAILED_RESULTS_REFERENCES = (
+    (
+        "NIST FIPS 203 — ML-KEM (2024)",
+        "Define KeyGen, Encaps, Decaps e tamanhos do ML-KEM. O KEM estabelece segredo; não cifra o payload.",
+        "doi.org/10.6028/NIST.FIPS.203",
+    ),
+    (
+        "NIST FIPS 197 — AES (atualização 2023)",
+        "Define AES-128/192/256 como cifras de bloco; sustenta a camada simétrica usada para cifrar os dados.",
+        "doi.org/10.6028/NIST.FIPS.197-upd1",
+    ),
+    (
+        "NIST SP 800-38D — GCM/GMAC (2007)",
+        "Define GCM como AEAD e os papéis de nonce, ciphertext e tag. No projeto, 12 B + 16 B explicam os 28 B.",
+        "doi.org/10.6028/NIST.SP.800-38D",
+    ),
+    (
+        "Koopman & Chakravarty — CRC (DSN 2004)",
+        "Base para escolher CRC em redes embarcadas. CRC detecta erros; não fornece autenticação criptográfica.",
+        "users.ece.cmu.edu/~koopman/crc",
+    ),
+    (
+        "NASA Small Spacecraft Avionics SoA (2024)",
+        "Contextualiza OBC, COTS, restrições SWaP-C e mitigação de radiação em pequenos satélites.",
+        "nasa.gov/smallsat-institute/sst-soa",
+    ),
+    (
+        "Mikaelian — Spacecraft Charging (2009)",
+        "Contextualiza charging e radiação na eletrônica espacial. Motiva o bit-flip sem alegar ensaio físico de radiação.",
+        "arXiv:0906.3884",
+    ),
 )
 
 # --- Paleta de Cores ----------------------------------------------------------
@@ -1437,11 +1504,13 @@ class DashboardPanel:
         self.pending_fault_contexts = {}
         self.results_overlay_visible = False
         self.results_overlay_mode = "presentation"
+        self.results_technical_page = 0
         self.top_results_btn_rect = None
         self.top_onboarding_btn_rect = None
         self.top_connection_text_rect = None
         self.request_onboarding = False
         self.results_details_btn_rect = None
+        self.results_technical_page_btn_rect = None
         self.results_stress_btn_rect = None
         self.results_overlay_content_bottom = None
         self.results_insight_rects = []
@@ -1542,6 +1611,15 @@ class DashboardPanel:
                     return True
                 if self.results_details_btn_rect is not None and self.results_details_btn_rect.collidepoint(event.pos):
                     self.results_overlay_mode = "technical" if self.results_overlay_mode == "presentation" else "presentation"
+                    if self.results_overlay_mode == "technical":
+                        self.results_technical_page = 0
+                    return True
+                if (
+                    self.results_overlay_mode == "technical"
+                    and self.results_technical_page_btn_rect is not None
+                    and self.results_technical_page_btn_rect.collidepoint(event.pos)
+                ):
+                    self.results_technical_page = 1 - self.results_technical_page
                     return True
                 if "unittest" in sys.modules and self.results_stress_btn_rect is not None and self.results_stress_btn_rect.collidepoint(event.pos):
                     self._handle_stress_button_click()
@@ -1555,6 +1633,10 @@ class DashboardPanel:
                     self.results_overlay_visible = False
                 elif event.key == pygame.K_d:
                     self.results_overlay_mode = "technical" if self.results_overlay_mode == "presentation" else "presentation"
+                    if self.results_overlay_mode == "technical":
+                        self.results_technical_page = 0
+                elif self.results_overlay_mode == "technical" and event.key in {pygame.K_LEFT, pygame.K_RIGHT}:
+                    self.results_technical_page = 1 - self.results_technical_page
                 return True
             elif event.type == pygame.MOUSEWHEEL:
                 return True
@@ -3149,8 +3231,6 @@ class DashboardPanel:
     def _trigger_ping_effect(self):
         self.ping_effect_timer = PING_ANIMATION_SECONDS
         self.ping_effect_count += 1
-        self.session_status = "PING PARA TERRA"
-        self._append_history("BUTTON_PING", "TX TERRA")
 
     @staticmethod
     def _ease_out_cubic(value):
@@ -4380,7 +4460,7 @@ class DashboardPanel:
 
         technical = getattr(self, "results_overlay_mode", "presentation") == "technical"
         detail_hovered = detail_rect.collidepoint(mouse_pos)
-        detail_label = "RESUMO" if technical else "VER DETALHES"
+        detail_label = "VOLTAR AO RESUMO" if technical else "DADOS TÉCNICOS"
         detail_fill = (26, 42, 70) if detail_hovered else (16, 26, 48)
         pygame.draw.rect(surface, detail_fill, detail_rect, border_radius=6)
         pygame.draw.rect(surface, C_ACCENT_CYAN, detail_rect, width=1, border_radius=6)
@@ -4441,6 +4521,70 @@ class DashboardPanel:
         pygame.draw.line(surface, self._mix_color(C_PANEL_BORDER, color, 0.45), (x, y + 28), (x + width, y + 28), 1)
         return y + 38
 
+    def _draw_results_detail_card(self, surface, rect, title, accent, subtitle=None):
+        pygame.draw.rect(surface, self._results_card_bg(), rect, border_radius=6)
+        pygame.draw.rect(surface, (15, 24, 40), rect.inflate(-4, -4), border_radius=5)
+        pygame.draw.rect(surface, self._mix_color(C_PANEL_BORDER, accent, 0.5), rect, width=1, border_radius=6)
+        title_surf = self._render_clipped(FONT_BODY, title, accent, rect.width - 24)
+        surface.blit(title_surf, (rect.x + 12, rect.y + 10))
+        divider_y = rect.y + 42
+        if subtitle:
+            subtitle_surf = self._render_clipped(FONT_LABEL, subtitle, C_TEXT_DIM, rect.width - 24)
+            surface.blit(subtitle_surf, (rect.x + 12, rect.y + 31))
+            divider_y = rect.y + 50
+        pygame.draw.line(
+            surface,
+            self._mix_color(C_PANEL_BORDER, accent, 0.32),
+            (rect.x + 10, divider_y),
+            (rect.right - 10, divider_y),
+            1,
+        )
+        return rect.x + 12, divider_y + 8, rect.width - 24
+
+    def _draw_results_metric_chart(self, surface, x, y, width, title, metric_key, formatter, dataset=None):
+        dataset = dataset or CONSOLIDATED_MISSION_BASELINE
+        values = [float(dataset[name][metric_key]) for name in MISSION_OVERLAY_SCENARIOS]
+        maximum = max(values) if values else 1.0
+        surface.blit(self._render_clipped(FONT_LABEL, title, C_TEXT_PRIMARY, width), (x, y))
+        y += 22
+        labels = {"CLASSIC": "CLASSIC", "PQC": "PQC", "PQC_CRC32": "PQC+CRC"}
+        for scenario, value in zip(MISSION_OVERLAY_SCENARIOS, values):
+            color = self._results_success_color() if scenario == "PQC_CRC32" else self._scenario_color(scenario)
+            self._draw_results_bar_row(
+                surface,
+                x,
+                y,
+                width,
+                labels[scenario],
+                formatter(value),
+                value / maximum if maximum else 0.0,
+                color,
+                min_ratio=0.025,
+            )
+            y += 28
+        return y
+
+    def _draw_results_technical_page_control(self, surface):
+        detail_rect = self.results_details_btn_rect
+        if detail_rect is None:
+            self.results_technical_page_btn_rect = pygame.Rect(0, 0, 0, 0)
+            return
+        control_w = 178 if WIDTH >= 1500 else 162
+        rect = pygame.Rect(detail_rect.x - control_w - 12, detail_rect.y, control_w, detail_rect.height)
+        self.results_technical_page_btn_rect = rect
+        try:
+            hovered = rect.collidepoint(pygame.mouse.get_pos())
+        except pygame.error:
+            hovered = False
+        page = getattr(self, "results_technical_page", 0)
+        label = "TEORIA E FONTES →" if page == 0 else "← MÉTRICAS"
+        fill = (34, 40, 70) if hovered else (18, 28, 50)
+        color = C_ACCENT_PURPLE if page == 0 else C_ACCENT_ORANGE
+        pygame.draw.rect(surface, fill, rect, border_radius=6)
+        pygame.draw.rect(surface, color, rect, width=1, border_radius=6)
+        label_surf = self._render_clipped(FONT_LABEL, label, C_TEXT_PRIMARY, rect.width - 12)
+        surface.blit(label_surf, (rect.centerx - label_surf.get_width() // 2, rect.centery - label_surf.get_height() // 2))
+
     def _draw_results_insight_card(self, surface, rect, title, lines, accent):
         pygame.draw.rect(surface, self._results_card_bg(), rect, border_radius=6)
         pygame.draw.rect(surface, (15, 25, 42), rect.inflate(-6, -6), border_radius=5)
@@ -4476,7 +4620,7 @@ class DashboardPanel:
             panel_rect,
             close_rect,
             "RESULTADOS CONSOLIDADOS",
-            "Resumo para seminario | tecla D alterna detalhes",
+            "Visão para apresentação | tecla D abre os dados técnicos",
         )
 
         body_x = x + max(26, int(w * 0.04))
@@ -4630,10 +4774,17 @@ class DashboardPanel:
             self.results_stress_btn_rect = pygame.Rect(0, 0, 0, 0)
 
     def _draw_results_overlay_technical(self, surface, t):
+        if getattr(self, "results_technical_page", 0) == 1:
+            self._draw_results_overlay_technical_theory(surface, t)
+        else:
+            self._draw_results_overlay_technical_metrics(surface, t)
+
+    def _draw_results_overlay_technical_metrics(self, surface, t):
         panel_rect, close_rect = self._results_overlay_geometry()
         x, y, w, h = panel_rect
         self.results_stress_btn_rect = None
         self.results_overlay_content_bottom = None
+        self.results_technical_sections = []
 
         panel_surf = pygame.Surface((w, h), pygame.SRCALPHA)
         panel_surf.fill((12, 14, 30, 236))
@@ -4641,195 +4792,421 @@ class DashboardPanel:
 
         pygame.draw.rect(surface, C_PANEL_BORDER, panel_rect, width=2, border_radius=8)
 
-        title = "RESULTADOS CONSOLIDADOS DA BATERIA REAL"
+        title = "DADOS TÉCNICOS DA BATERIA"
         subtitle = (
-            f"{CONSOLIDATED_ACCEPTANCE_LABEL}: {CONSOLIDATED_SUMMARY['records']} registros, "
-            f"{CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões; "
-            f"{CONSOLIDATED_METRICS_STATUS}"
+            f"Leia da esquerda para a direita: custo → validação → conclusão | fonte {CONSOLIDATED_ACCEPTANCE_LABEL}"
         )
         header_h = self._draw_results_header(surface, panel_rect, close_rect, title, subtitle)
-
-        try:
-            mouse_pos = pygame.mouse.get_pos()
-        except pygame.error:
-            mouse_pos = (-1, -1)
+        self._draw_results_technical_page_control(surface)
 
         body_x = x + max(24, int(w * 0.035))
-        body_y = y + header_h + 16
+        body_y = y + header_h + 14
         body_w = w - (body_x - x) * 2
-        gap = 18
-        two_cols = body_w >= 920
-        col_w = (body_w - gap) // 2 if two_cols else body_w
-        col_h = h - (body_y - y) - 24
+        body_bottom = panel_rect.bottom - 20
+        body_h = body_bottom - body_y
+        gap = 12
+        left_w = int(body_w * 0.58)
+        left = pygame.Rect(body_x, body_y, left_w, body_h)
+        right = pygame.Rect(left.right + gap, body_y, body_w - left_w - gap, body_h)
 
-        if two_cols:
-            left = pygame.Rect(body_x, body_y, col_w, col_h)
-            right = pygame.Rect(body_x + col_w + gap, body_y, col_w, col_h)
-        else:
-            stacked_h = (col_h - gap) // 2
-            left = pygame.Rect(body_x, body_y, col_w, stacked_h)
-            right = pygame.Rect(body_x, body_y + stacked_h + gap, col_w, stacked_h)
-        for rect in (left, right):
-            pygame.draw.rect(surface, C_PANEL_BG, rect, border_radius=6)
-            pygame.draw.rect(surface, C_PANEL_BORDER, rect, width=1, border_radius=6)
-
-        # Coluna esquerda: custo das missões.
-        pad = 18
-        lx = left.x + pad
-        ly = left.y + 14
-        lw = left.width - pad * 2
-        surface.blit(self._render_clipped(FONT_HEADER, CONSOLIDATED_MISSION_TITLE, C_ACCENT_CYAN, lw), (lx, ly))
-        ly += 32
-
-        table_h = min(154, max(132, int(left.height * 0.32)))
-        pygame.draw.rect(surface, C_PANEL_HEADER, (lx, ly, lw, table_h), border_radius=4)
-        pygame.draw.rect(surface, C_PANEL_BORDER, (lx, ly, lw, table_h), width=1, border_radius=4)
-        headers = ("CENÁRIO", "TEMPO", "BYTES", "STATUS")
-        col_ws = (int(lw * 0.39), int(lw * 0.21), int(lw * 0.16), lw - int(lw * 0.39) - int(lw * 0.21) - int(lw * 0.16) - 8)
-        cx = lx + 10
+        # 1. Comparação exata dos três cenários nos dois perfis.
+        comparison_h = min(190, max(160, int(body_h * 0.22)))
+        comparison_rect = pygame.Rect(left.x, left.y, left.width, comparison_h)
+        self.results_technical_sections.append(comparison_rect)
+        tx, ty, tw = self._draw_results_detail_card(
+            surface,
+            comparison_rect,
+            "1. COMPARAÇÃO DIRETA — 240 MHz × 80 MHz",
+            C_ACCENT_CYAN,
+            "Mesmo firmware e pacote; 80 MHz é uma limitação experimental da CPU.",
+        )
+        headers = ("CENÁRIO", "240 MHz", "80 MHz", "80/240", "PACOTE", "RESULTADO")
+        col_ws = (int(tw * 0.19), int(tw * 0.16), int(tw * 0.16), int(tw * 0.13), int(tw * 0.13), tw - int(tw * 0.77))
+        cx = tx
         for index, head in enumerate(headers):
-            surface.blit(self._render_clipped(FONT_LABEL, head, C_ACCENT_CYAN, max(40, col_ws[index] - 6)), (cx, ly + 10))
+            surface.blit(self._render_clipped(FONT_LABEL, head, C_TEXT_DIM, max(38, col_ws[index] - 6)), (cx, ty))
             cx += col_ws[index]
-        pygame.draw.line(surface, C_PANEL_BORDER, (lx, ly + 33), (lx + lw, ly + 33), 1)
-
-        row_y = ly + 34
-        row_h = max(30, (table_h - 35) // 3)
-        for idx, scenario in enumerate(("CLASSIC", "PQC", "PQC_CRC32")):
-            result = CONSOLIDATED_MISSION_BASELINE[scenario]
-            if idx % 2:
-                pygame.draw.rect(surface, (15, 20, 38), (lx + 1, row_y, lw - 2, row_h))
+        ty += 21
+        for row_index, scenario in enumerate(MISSION_OVERLAY_SCENARIOS):
+            result_240 = CONSOLIDATED_MISSION_BASELINE[scenario]
+            result_80 = CONSOLIDATED_MISSION_LIMITED[scenario]
+            row_rect = pygame.Rect(tx - 4, ty - 3, tw + 8, 25)
+            if row_index % 2:
+                pygame.draw.rect(surface, (18, 28, 46), row_rect, border_radius=3)
+            label = "PQC+CRC" if scenario == "PQC_CRC32" else scenario
+            profile_ratio = self._ratio_value(result_80["elapsed_us"], result_240["elapsed_us"])
             cells = (
-                result["label"],
-                _format_elapsed(result["elapsed_us"]),
-                f"{result['bytes_total']} B",
-                result["result"],
+                label,
+                _format_elapsed(result_240["elapsed_us"]),
+                _format_elapsed(result_80["elapsed_us"]),
+                f"{profile_ratio:.1f}x",
+                f"{result_240['bytes_total']} B",
+                result_240["result"],
             )
-            cx = lx + 10
+            cx = tx
+            for cell_index, cell in enumerate(cells):
+                color = self._results_success_color() if scenario == "PQC_CRC32" and cell_index == 0 else (self._scenario_color(scenario) if cell_index == 0 else C_TEXT_PRIMARY)
+                surface.blit(self._render_clipped(FONT_SMALL, cell, color, max(38, col_ws[cell_index] - 6)), (cx, ty))
+                cx += col_ws[cell_index]
+            ty += 27
+
+        # Gráficos: a escala muda por perfil, mas é comum aos três cenários.
+        charts_y = comparison_rect.bottom + gap
+        charts_h = min(260, max(220, int(body_h * 0.30)))
+        charts_rect = pygame.Rect(left.x, charts_y, left.width, charts_h)
+        self.results_technical_sections.append(charts_rect)
+        gx, gy, gw = self._draw_results_detail_card(
+            surface,
+            charts_rect,
+            "GRÁFICOS DE IMPACTO",
+            C_ACCENT_ORANGE,
+            "O valor escrito é absoluto; a barra compara os cenários dentro de cada perfil.",
+        )
+        chart_gap = 18
+        chart_w = (gw - chart_gap) // 2
+        self._draw_results_metric_chart(
+            surface,
+            gx,
+            gy,
+            chart_w,
+            "TEMPO — 240 MHz",
+            "elapsed_us",
+            lambda value: _format_elapsed(int(round(value))),
+            CONSOLIDATED_MISSION_BASELINE,
+        )
+        self._draw_results_metric_chart(
+            surface,
+            gx + chart_w + chart_gap,
+            gy,
+            gw - chart_w - chart_gap,
+            "TEMPO — 80 MHz",
+            "elapsed_us",
+            lambda value: _format_elapsed(int(round(value))),
+            CONSOLIDATED_MISSION_LIMITED,
+        )
+        classic = CONSOLIDATED_MISSION_BASELINE["CLASSIC"]
+        time_ratio = self._ratio_value(CONSOLIDATED_MISSION_BASELINE["PQC"]["elapsed_us"], classic["elapsed_us"])
+        bytes_ratio = self._ratio_value(CONSOLIDATED_MISSION_BASELINE["PQC"]["bytes_total"], classic["bytes_total"])
+        frequency_ratio = self._ratio_value(CONSOLIDATED_MISSION_LIMITED["PQC"]["elapsed_us"], CONSOLIDATED_MISSION_BASELINE["PQC"]["elapsed_us"])
+        chart_note = f"PQC: 14,2 → 40,2 ms ({frequency_ratio:.1f}x ao limitar CPU); pacote permanece 837 B."
+        surface.blit(self._render_clipped(FONT_LABEL, chart_note, C_ACCENT_ORANGE, gw), (gx, charts_rect.bottom - 24))
+
+        # Decomposição preserva o detalhamento das fases internas.
+        phases_y = charts_rect.bottom + gap
+        phases_available = left.bottom - phases_y
+        show_packet_composition = phases_available >= 330
+        phases_h = (phases_available - gap) // 2 if show_packet_composition else phases_available
+        phases_rect = pygame.Rect(left.x, phases_y, left.width, phases_h)
+        self.results_technical_sections.append(phases_rect)
+        px, py, pw = self._draw_results_detail_card(
+            surface,
+            phases_rect,
+            "FASES INTERNAS — 240 MHz",
+            C_ACCENT_PURPLE,
+            "A tabela separa o total: AES mostra cifragem/decifragem; CRC é o custo positivo do guardião.",
+        )
+        phase_headers = ("CENÁRIO", "KEYGEN", "ENCAP", "DECAP", "AES TX/RX", "CRC")
+        phase_col_ws = (int(pw * 0.18), int(pw * 0.15), int(pw * 0.15), int(pw * 0.15), int(pw * 0.23), pw - int(pw * 0.18) - int(pw * 0.15) * 3 - int(pw * 0.23))
+        cx = px
+        for index, head in enumerate(phase_headers):
+            surface.blit(self._render_clipped(FONT_LABEL, head, C_TEXT_DIM, max(36, phase_col_ws[index] - 5)), (cx, py))
+            cx += phase_col_ws[index]
+        py += 22
+        for row_index, scenario in enumerate(MISSION_OVERLAY_SCENARIOS):
+            result = CONSOLIDATED_MISSION_BASELINE[scenario]
+            label = "PQC+CRC" if scenario == "PQC_CRC32" else scenario
+            cells = (
+                label,
+                _format_elapsed(result["keygen_us"]) if result["keygen_us"] else "—",
+                _format_elapsed(result["encap_us"]) if result["encap_us"] else "—",
+                _format_elapsed(result["decap_us"]) if result["decap_us"] else "—",
+                f"{_format_elapsed(result['tag_us'])} / {_format_elapsed(result['verify_us'])}",
+                _format_elapsed(result["crc_us"]) if result["crc_us"] else "—",
+            )
+            if row_index % 2:
+                pygame.draw.rect(surface, (18, 28, 46), (px - 4, py - 3, pw + 8, 25), border_radius=3)
+            cx = px
             for cell_index, cell in enumerate(cells):
                 color = self._scenario_color(scenario) if cell_index == 0 else C_TEXT_PRIMARY
-                surface.blit(self._render_clipped(FONT_SMALL, cell, color, max(42, col_ws[cell_index] - 8)), (cx, row_y + 8))
-                cx += col_ws[cell_index]
-            if idx < 2:
-                pygame.draw.line(surface, C_PANEL_BORDER, (lx, row_y + row_h), (lx + lw, row_y + row_h), 1)
-            row_y += row_h
+                surface.blit(self._render_clipped(FONT_SMALL, cell, color, max(34, phase_col_ws[cell_index] - 5)), (cx, py))
+                cx += phase_col_ws[cell_index]
+            py += 27
 
-        ly += table_h + 18
-        notes = CONSOLIDATED_NOTES
-        for note in notes:
-            if ly > left.bottom - 42:
-                break
-            ly = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, lx, ly, lw, line_spacing=18, max_lines=2)
-            ly += 3
-        ref_y = ly + 8
-        if left.bottom - ref_y >= 84:
-            pygame.draw.line(surface, C_PANEL_BORDER, (lx, ref_y), (lx + lw, ref_y), 1)
-            ref_y += 9
-            groups = (
-                ("MOTIVACAO DO PROBLEMA", MOTIVATION_REFERENCES, C_ACCENT_ORANGE),
-                ("BASE TECNICA", RESULTS_REFERENCES, C_ACCENT_GREEN),
+        if show_packet_composition:
+            packet_y = phases_rect.bottom + gap
+            packet_rect = pygame.Rect(left.x, packet_y, left.width, left.bottom - packet_y)
+            self.results_technical_sections.append(packet_rect)
+            qx, qy, qw = self._draw_results_detail_card(
+                surface,
+                packet_rect,
+                "COMPOSIÇÃO DO PACOTE",
+                C_ACCENT_BLUE,
+                "Barras empilhadas: payload, ciphertext ML-KEM, nonce + tag GCM e CRC32.",
             )
-            for group_index, (heading, refs, heading_color) in enumerate(groups):
-                if group_index and left.bottom - ref_y >= 24:
-                    ref_y += 5
-                if left.bottom - ref_y < 36:
-                    break
-                surface.blit(self._render_clipped(FONT_LABEL, heading, heading_color, lw), (lx, ref_y))
-                ref_y += 18
-                max_refs = max(0, min(len(refs), (left.bottom - ref_y - 4) // 15))
-                for name, detail in refs[:max_refs]:
-                    line = f"{name}: {detail}"
-                    surface.blit(self._render_clipped(FONT_SMALL, line, C_TEXT_DIM, lw), (lx, ref_y))
-                    ref_y += 15
-                if max_refs < len(refs):
-                    break
-            ly = max(ly, ref_y)
+            legend = (
+                ("PAYLOAD", C_ACCENT_BLUE),
+                ("ML-KEM CT", C_ACCENT_PURPLE),
+                ("NONCE + TAG", C_ACCENT_CYAN),
+                ("CRC32", C_ACCENT_GREEN),
+            )
+            legend_x = qx
+            for label, color in legend:
+                pygame.draw.rect(surface, color, (legend_x, qy, 10, 10), border_radius=2)
+                surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, 104), (legend_x + 14, qy - 2))
+                legend_x += min(132, max(104, qw // 4))
+            qy += 28
+            maximum_packet = max(CONSOLIDATED_MISSION_BASELINE[name]["bytes_total"] for name in MISSION_OVERLAY_SCENARIOS)
+            packet_labels = {"CLASSIC": "CLASSIC", "PQC": "PQC", "PQC_CRC32": "PQC+CRC"}
+            label_w = 92
+            value_w = 64
+            bar_x = qx + label_w
+            bar_w = max(120, qw - label_w - value_w - 16)
+            for scenario in MISSION_OVERLAY_SCENARIOS:
+                result = CONSOLIDATED_MISSION_BASELINE[scenario]
+                surface.blit(self._render_clipped(FONT_BODY, packet_labels[scenario], self._scenario_color(scenario), label_w - 8), (qx, qy - 2))
+                segments = (
+                    (result["bytes_payload"], C_ACCENT_BLUE),
+                    (max(0, result["bytes_crypto"] - 28), C_ACCENT_PURPLE),
+                    (28, C_ACCENT_CYAN),
+                    (result["bytes_checksum"], C_ACCENT_GREEN),
+                )
+                cursor_x = bar_x
+                for amount, color in segments:
+                    segment_w = int(bar_w * amount / maximum_packet) if maximum_packet else 0
+                    if amount and segment_w < 3:
+                        segment_w = 3
+                    if segment_w:
+                        pygame.draw.rect(surface, color, (cursor_x, qy + 2, segment_w, 16), border_radius=2)
+                        cursor_x += segment_w
+                surface.blit(self._render_clipped(FONT_BODY, f"{result['bytes_total']} B", C_TEXT_PRIMARY, value_w), (bar_x + bar_w + 10, qy - 2))
+                qy += 30
 
-        # Coluna direita: segurança, campanha e próximos passos.
-        rx = right.x + pad
-        ry = right.y + 14
-        rw = right.width - pad * 2
-        surface.blit(self._render_clipped(FONT_HEADER, "SEGURANÇA E BENCHMARK", C_ACCENT_CYAN, rw), (rx, ry))
-        ry += 32
-
-        bench_h = min(112, max(96, int(right.height * 0.21)))
-        pygame.draw.rect(surface, C_PANEL_HEADER, (rx, ry, rw, bench_h), border_radius=4)
-        pygame.draw.rect(surface, C_PANEL_BORDER, (rx, ry, rw, bench_h), width=1, border_radius=4)
-        surface.blit(self._render_clipped(FONT_LABEL, "ML-KEM-512, média em us, 100 rounds", C_ACCENT_ORANGE, rw - 20), (rx + 10, ry + 10))
-        b_col_ws = (int(rw * 0.38), int(rw * 0.2), int(rw * 0.2), rw - int(rw * 0.38) - int(rw * 0.2) - int(rw * 0.2) - 8)
-        by = ry + 32
-        for row_index, row in enumerate(CONSOLIDATED_PQC_BENCH):
-            cx = rx + 10
-            for col_index, cell in enumerate(row):
-                surface.blit(self._render_clipped(FONT_SMALL, cell, C_TEXT_PRIMARY, max(40, b_col_ws[col_index] - 8)), (cx, by))
-                cx += b_col_ws[col_index]
-            if row_index == 0:
-                pygame.draw.line(surface, C_PANEL_BORDER, (rx, by + 24), (rx + rw, by + 24), 1)
-            by += 32
-        ry += bench_h + 12
-
+        # 2. Validação: traduz campos técnicos em perguntas que o aluno explica.
         aes_ok = bool(CONSOLIDATED_AES_GCM_CHECKS.get("official_candidate"))
         aes_color = C_ACCENT_GREEN if aes_ok else C_ACCENT_ORANGE
-        validation_h = 82
-        validation_rect = pygame.Rect(rx, ry, rw, validation_h)
-        pygame.draw.rect(surface, (18, 18, 34), validation_rect, border_radius=5)
-        pygame.draw.rect(surface, aes_color, validation_rect, width=1, border_radius=5)
-        validation_title = "VALIDAÇÃO AES-GCM: OFICIAL" if aes_ok else "VALIDAÇÃO AES-GCM: REJEITADA"
-        surface.blit(self._render_clipped(FONT_LABEL, validation_title, aes_color, rw - 18), (rx + 9, ry + 7))
-        validation_lines = (
-            f"official_candidate={str(aes_ok).lower()} | non_aes={CONSOLIDATED_AES_GCM_CHECKS.get('non_aes_gcm_records', 0)}/{CONSOLIDATED_AES_GCM_CHECKS.get('mission_records', CONSOLIDATED_SUMMARY['mission_runs'])}",
-            f"campos AES ausentes={CONSOLIDATED_AES_GCM_CHECKS.get('missing_required_fields', 0)} | falhas AEAD={CONSOLIDATED_AES_GCM_CHECKS.get('aead_failures', 0)}",
-            f"fonte: {CONSOLIDATED_ACCEPTANCE_LOG}",
+        small_gap = 8
+        validation_h = min(160, max(138, int(body_h * 0.19)))
+        validation_rect = pygame.Rect(right.x, right.y, right.width, validation_h)
+        self.results_technical_sections.append(validation_rect)
+        vx, vy, vw = self._draw_results_detail_card(
+            surface,
+            validation_rect,
+            "2. A COLETA É VÁLIDA?",
+            aes_color,
+            f"{'SIM — AES-GCM OFICIAL' if aes_ok else 'NÃO — REVISAR FIRMWARE'} | {CONSOLIDATED_SUMMARY['records']} regs; {CONSOLIDATED_SUMMARY['failed']} falhas de execução",
         )
-        line_y = ry + 27
-        for line in validation_lines:
-            surface.blit(self._render_clipped(FONT_SMALL, line, C_TEXT_PRIMARY, rw - 18), (rx + 9, line_y))
-            line_y += 16
-        ry += validation_h + 12
+        validation_items = (
+            ("MISSÕES AES", f"{CONSOLIDATED_AES_GCM_CHECKS.get('mission_records', 0)}/600"),
+            ("NÃO-AES", str(CONSOLIDATED_AES_GCM_CHECKS.get("non_aes_gcm_records", 0))),
+            ("CAMPOS AUSENTES", str(CONSOLIDATED_AES_GCM_CHECKS.get("missing_required_fields", 0))),
+            ("FALHAS AEAD", str(CONSOLIDATED_AES_GCM_CHECKS.get("aead_failures", 0))),
+            ("NONCES REPETIDOS", str(CONSOLIDATED_AES_GCM_CHECKS.get("nonce_crc32_duplicates", 0))),
+            ("PQC_KAT", "PASS"),
+        )
+        item_w = vw // 3
+        for index, (label, value) in enumerate(validation_items):
+            col = index % 3
+            row = index // 3
+            ix = vx + col * item_w
+            iy = vy + row * 35
+            surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, item_w - 8), (ix, iy))
+            surface.blit(self._render_clipped(FONT_BODY, value, aes_color if value in {"0", "PASS", "600/600"} else C_TEXT_PRIMARY, item_w - 8), (ix, iy + 15))
 
-        security_notes = (
-            f"Aceite: {CONSOLIDATED_SUMMARY['records']} registros, {CONSOLIDATED_SUMMARY['failed']} falhas, {CONSOLIDATED_SUMMARY['mission_runs']} missões.",
-            "PQC_KAT aprovado: ss_crc32=0xD9DA8D6C.",
-            f"Falhas payload: {CONSOLIDATED_SUMMARY['demo_none_silent']} silenciosas sem CRC32; {CONSOLIDATED_SUMMARY['demo_crc_detected']} detectadas com CRC32.",
-            f"Coleta final: {CONSOLIDATED_SUMMARY['pqc_bench_runs']} PQC_BENCH de 100 rounds, todos OK.",
-            "AES-GCM oficial: validado na bateria atual." if aes_ok else "AES-GCM oficial: pendente de nova gravação do firmware.",
-            "Demo de falha visual: payload com NONE versus payload com CRC32.",
+        # 3. Benchmark isolado de ML-KEM.
+        bench_y = validation_rect.bottom + small_gap
+        bench_h = min(140, max(120, int(body_h * 0.16)))
+        bench_rect = pygame.Rect(right.x, bench_y, right.width, bench_h)
+        self.results_technical_sections.append(bench_rect)
+        bx, by, bw = self._draw_results_detail_card(
+            surface,
+            bench_rect,
+            "3. ONDE ML-KEM GASTA TEMPO?",
+            C_ACCENT_ORANGE,
+            "PQC_BENCH: média em ms por operação, 100 rounds.",
         )
-        for note in security_notes:
-            if ry > right.bottom - 188:
+        bench_headers = ("PERFIL", "KEYGEN", "ENCAP", "DECAP")
+        bench_col_ws = (int(bw * 0.40), int(bw * 0.20), int(bw * 0.20), bw - int(bw * 0.80))
+        cx = bx
+        for index, head in enumerate(bench_headers):
+            surface.blit(self._render_clipped(FONT_LABEL, head, C_TEXT_DIM, bench_col_ws[index] - 4), (cx, by))
+            cx += bench_col_ws[index]
+        by += 22
+        for row_index, row in enumerate(CONSOLIDATED_PQC_BENCH):
+            cx = bx
+            for col_index, cell in enumerate(row):
+                color = C_ACCENT_ORANGE if col_index == 3 else C_TEXT_PRIMARY
+                surface.blit(self._render_clipped(FONT_SMALL, cell, color, bench_col_ws[col_index] - 4), (cx, by))
+                cx += bench_col_ws[col_index]
+            by += 25
+
+        # 4. Falhas: resultado objetivo, sem misturar CRC e autenticação.
+        fault_y = bench_rect.bottom + small_gap
+        fault_h = min(130, max(105, int(body_h * 0.14)))
+        fault_rect = pygame.Rect(right.x, fault_y, right.width, fault_h)
+        self.results_technical_sections.append(fault_rect)
+        fx, fy, fw = self._draw_results_detail_card(surface, fault_rect, "4. O BIT-FLIP FOI PERCEBIDO?", C_ACCENT_GREEN)
+        none_silent, none_total = self._count_pair(CONSOLIDATED_SUMMARY.get("demo_none_silent"))
+        detected, detected_total = self._count_pair(CONSOLIDATED_SUMMARY.get("demo_crc_detected"))
+        fault_gap = 10
+        fault_w = (fw - fault_gap) // 2
+        fault_specs = (
+            ("SEM CRC32", f"{none_silent}/{none_total} SILENT", "corrupção aceita sem aviso", C_ACCENT_ORANGE),
+            ("COM CRC32", f"{detected}/{detected_total} DETECTED", "corrupção observada", C_ACCENT_GREEN),
+        )
+        for index, (label, value, detail, color) in enumerate(fault_specs):
+            cell = pygame.Rect(fx + index * (fault_w + fault_gap), fy, fault_w, max(44, fault_rect.bottom - fy - 10))
+            pygame.draw.rect(surface, (18, 28, 46), cell, border_radius=4)
+            pygame.draw.rect(surface, color, cell, width=1, border_radius=4)
+            surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, cell.width - 14), (cell.x + 7, cell.y + 6))
+            surface.blit(self._render_clipped(FONT_BODY, value, color, cell.width - 14), (cell.x + 7, cell.y + 23))
+            if cell.height >= 65:
+                surface.blit(self._render_clipped(FONT_LABEL, detail, C_TEXT_PRIMARY, cell.width - 14), (cell.x + 7, cell.y + 45))
+
+        # 5. Conclusão oral e referências permanecem visíveis, mas separadas dos dados.
+        explain_y = fault_rect.bottom + small_gap
+        explain_h = min(120, max(98, int(body_h * 0.13)))
+        explain_rect = pygame.Rect(right.x, explain_y, right.width, explain_h)
+        self.results_technical_sections.append(explain_rect)
+        ex, ey, ew = self._draw_results_detail_card(surface, explain_rect, "COMO EXPLICAR", C_ACCENT_CYAN)
+        explanation_lines = (
+            "1. ML-KEM funcionou; DECAP foi a fase mais cara.",
+            f"2. PQC: {time_ratio:.1f}x em tempo; {bytes_ratio:.1f}x em bytes.",
+            "3. CRC32 detecta bit-flip; AES-GCM autentica.",
+        )
+        for line in explanation_lines:
+            surface.blit(self._render_clipped(FONT_LABEL, line, C_TEXT_PRIMARY, ew), (ex, ey))
+            ey += 18
+
+        refs_y = explain_rect.bottom + small_gap
+        refs_rect = pygame.Rect(right.x, refs_y, right.width, right.bottom - refs_y)
+        self.results_technical_sections.append(refs_rect)
+        pygame.draw.rect(surface, self._results_card_bg(), refs_rect, border_radius=6)
+        pygame.draw.rect(surface, C_PANEL_BORDER, refs_rect, width=1, border_radius=6)
+        surface.blit(self._render_clipped(FONT_LABEL, "FONTES QUE SUSTENTAM A LEITURA", C_TEXT_DIM, refs_rect.width - 20), (refs_rect.x + 10, refs_rect.y + 8))
+        ref_top = refs_rect.y + 29
+        ref_gap = 10
+        ref_w = (refs_rect.width - 20 - ref_gap) // 2
+        groups = (("MOTIVAÇÃO", MOTIVATION_REFERENCES, C_ACCENT_ORANGE), ("BASE TÉCNICA", RESULTS_REFERENCES, C_ACCENT_GREEN))
+        for group_index, (heading, refs, color) in enumerate(groups):
+            ref_x = refs_rect.x + 10 + group_index * (ref_w + ref_gap)
+            surface.blit(self._render_clipped(FONT_LABEL, heading, color, ref_w), (ref_x, ref_top))
+            line_y = ref_top + 17
+            for name, detail in refs:
+                if line_y > refs_rect.bottom - 15:
+                    break
+                reference = f"{name}: {detail}" if ref_w >= 280 else name
+                surface.blit(self._render_clipped(FONT_LABEL, reference, C_TEXT_DIM, ref_w), (ref_x, line_y))
+                line_y += 15
+
+        self.results_stress_btn_rect = pygame.Rect(0, 0, 0, 0)
+        self.results_overlay_content_bottom = max(phases_rect.bottom, refs_rect.bottom)
+
+    def _draw_results_overlay_technical_theory(self, surface, t):
+        panel_rect, close_rect = self._results_overlay_geometry()
+        x, y, w, h = panel_rect
+        self.results_stress_btn_rect = pygame.Rect(0, 0, 0, 0)
+        self.results_overlay_content_bottom = None
+        self.results_technical_sections = []
+
+        panel_surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        panel_surf.fill((12, 14, 30, 236))
+        surface.blit(panel_surf, (x, y))
+        pygame.draw.rect(surface, C_PANEL_BORDER, panel_rect, width=2, border_radius=8)
+
+        header_h = self._draw_results_header(
+            surface,
+            panel_rect,
+            close_rect,
+            "TEORIA, INTERPRETAÇÃO E FONTES",
+            "Cada número responde a uma pergunta; correlação entre médias não implica causalidade.",
+        )
+        self._draw_results_technical_page_control(surface)
+
+        body_x = x + max(24, int(w * 0.035))
+        body_y = y + header_h + 14
+        body_w = w - (body_x - x) * 2
+        body_bottom = panel_rect.bottom - 20
+        body_h = body_bottom - body_y
+        gap = 12
+        left_w = int(body_w * 0.56)
+        left = pygame.Rect(body_x, body_y, left_w, body_h)
+        right = pygame.Rect(left.right + gap, body_y, body_w - left_w - gap, body_h)
+
+        pqc_240 = CONSOLIDATED_MISSION_BASELINE["PQC"]
+        crc_240 = CONSOLIDATED_MISSION_BASELINE["PQC_CRC32"]
+        pqc_80 = CONSOLIDATED_MISSION_LIMITED["PQC"]
+        crc_80 = CONSOLIDATED_MISSION_LIMITED["PQC_CRC32"]
+        classic_240 = CONSOLIDATED_MISSION_BASELINE["CLASSIC"]
+        pqc_clock_ratio = self._ratio_value(pqc_80["elapsed_us"], pqc_240["elapsed_us"])
+        crc_delta_240 = crc_240["elapsed_us"] - pqc_240["elapsed_us"]
+        crc_delta_80 = crc_80["elapsed_us"] - pqc_80["elapsed_us"]
+
+        theory_cards = (
+            (
+                "1. O QUE O TEMPO TOTAL SOMA?",
+                "240 MHz: 611 us / 14,152 ms / 14,097 ms",
+                "elapsed_us soma RNG/KEM/KDF/AES/CRC. KeyGen cria par; Encaps gera ct+segredo; Decaps recupera/valida e foi a mais cara. AES TX/RX cifra e verifica.",
+                C_ACCENT_CYAN,
+            ),
+            (
+                "2. POR QUE PQC+CRC PARECE MAIS RÁPIDO?",
+                f"Diferença total: {crc_delta_240:+d} us em 240 MHz; {crc_delta_80:+d} us em 80 MHz | CRC: +32/+53 us",
+                "São médias de execuções distintas. Variações de KeyGen, Encaps, Decaps, KDF e interrupções superam o pequeno CRC. crc_us positivo prova que CRC não acelera; a diferença total é ruído amostral.",
+                C_ACCENT_ORANGE,
+            ),
+            (
+                "3. DE ONDE VÊM 69 / 837 / 841 BYTES?",
+                "CLASSIC = 41 + 12 + 16 | PQC = CLASSIC + 768 | PQC+CRC = PQC + 4",
+                "41 B de payload + nonce GCM de 12 B + tag de 16 B = 69 B. PQC soma o ciphertext ML-KEM de 768 B; CRC soma 4 B. Esses tamanhos são determinísticos.",
+                C_ACCENT_BLUE,
+            ),
+            (
+                "4. O QUE 80 MHz MUDA?",
+                f"PQC: 14,152 → 40,197 ms ({pqc_clock_ratio:.1f}x) | bytes: 837 → 837",
+                "A 80 MHz a CPU opera a 1/3 do clock; as fases intensivas aproximam 3x. Não dá exatamente 3x porque timers, memória, periféricos e custos fixos não escalam linearmente.",
+                C_ACCENT_PURPLE,
+            ),
+            (
+                "5. O QUE RAM E CONTAGENS PROVAM?",
+                f"heap={classic_240['heap']} B | min_heap={classic_240.get('min_heap', 197624)} B | AES 600/600 | falhas de execução=0",
+                "Heap estável sugere não retenção; min_heap é mínimo do boot. 200/200 SILENT/DETECTED valem só no bit-flip; 600/600 valida apenas esta campanha.",
+                C_ACCENT_GREEN,
+            ),
+        )
+        card_gap = 8
+        card_h = (left.height - card_gap * (len(theory_cards) - 1)) // len(theory_cards)
+        for index, (title, subtitle, explanation, color) in enumerate(theory_cards):
+            rect = pygame.Rect(left.x, left.y + index * (card_h + card_gap), left.width, card_h)
+            self.results_technical_sections.append(rect)
+            cx, cy, cw = self._draw_results_detail_card(surface, rect, title, color, subtitle)
+            max_lines = max(2, (rect.bottom - cy - 8) // 17)
+            self._draw_wrapped_text(surface, FONT_LABEL, explanation, C_TEXT_PRIMARY, cx, cy, cw, line_spacing=17, max_lines=max_lines)
+
+        bibliography_rect = pygame.Rect(right.x, right.y, right.width, right.height)
+        self.results_technical_sections.append(bibliography_rect)
+        bx, by, bw = self._draw_results_detail_card(
+            surface,
+            bibliography_rect,
+            "BIBLIOGRAFIA COM FUNÇÃO NO PROJETO",
+            C_ACCENT_GREEN,
+            "Conceitos vêm das fontes; números vêm do JSON da placa.",
+        )
+        reference_gap = 5
+        reference_h = max(68, (bibliography_rect.bottom - by - reference_gap * (len(DETAILED_RESULTS_REFERENCES) - 1) - 8) // len(DETAILED_RESULTS_REFERENCES))
+        for index, (title, support, locator) in enumerate(DETAILED_RESULTS_REFERENCES):
+            item_y = by + index * (reference_h + reference_gap)
+            item = pygame.Rect(bx, item_y, bw, reference_h)
+            if item.bottom > bibliography_rect.bottom - 6:
                 break
-            ry = self._draw_wrapped_text(surface, FONT_SMALL, f"- {note}", C_TEXT_PRIMARY, rx, ry, rw, line_spacing=17, max_lines=1)
-            ry += 3
+            color = (C_ACCENT_CYAN, C_ACCENT_BLUE, C_ACCENT_ORANGE, C_ACCENT_GREEN, C_ACCENT_PURPLE, C_TEXT_PRIMARY)[index % 6]
+            pygame.draw.rect(surface, (17, 27, 44), item, border_radius=4)
+            pygame.draw.rect(surface, self._mix_color(C_PANEL_BORDER, color, 0.35), item, width=1, border_radius=4)
+            surface.blit(self._render_clipped(FONT_LABEL, title, color, item.width - 16), (item.x + 8, item.y + 6))
+            support_y = item.y + 23
+            self._draw_wrapped_text(surface, FONT_LABEL, support, C_TEXT_PRIMARY, item.x + 8, support_y, item.width - 16, line_spacing=15, max_lines=2)
+            surface.blit(self._render_clipped(FONT_LABEL, locator, C_TEXT_DIM, item.width - 16), (item.x + 8, item.bottom - 17))
 
-        if "unittest" in sys.modules:
-            ry = self._draw_stress_results_control(surface, rx, ry + 4, rw, mouse_pos)
-            min_space = 86
-        else:
-            self.results_stress_btn_rect = pygame.Rect(0, 0, 0, 0)
-            ry += 4
-            min_space = 64
-        content_bottom = ry
-        if right.bottom - ry >= min_space:
-            pygame.draw.line(surface, C_PANEL_BORDER, (rx, ry), (rx + rw, ry), 1)
-            ry += 10
-            surface.blit(self._render_clipped(FONT_LABEL, "TRÊS MENSAGENS PARA FECHAR", C_ACCENT_GREEN, rw), (rx, ry))
-            ry += 22
-            block_gap = 8
-            block_w = max(120, (rw - block_gap * 2) // 3)
-            block_h = min(54, max(44, right.bottom - ry - 8))
-            narrative_blocks = (
-                ("BATERIA", f"{CONSOLIDATED_SUMMARY['records']} regs; {CONSOLIDATED_SUMMARY['failed']} falhas.", C_ACCENT_ORANGE),
-                ("FALHAS", f"{CONSOLIDATED_SUMMARY['demo_none_silent']} silent; {CONSOLIDATED_SUMMARY['demo_crc_detected']} CRC.", C_ACCENT_GREEN),
-                ("AES-GCM", "Validada." if aes_ok else "Rejeitada no firmware.", C_ACCENT_CYAN),
-            )
-            for index, (label, body, color) in enumerate(narrative_blocks):
-                bx = rx + index * (block_w + block_gap)
-                bw = block_w if index < 2 else rw - (block_w + block_gap) * 2
-                pygame.draw.rect(surface, (15, 20, 38), (bx, ry, bw, block_h), border_radius=5)
-                pygame.draw.rect(surface, color, (bx, ry, bw, block_h), width=1, border_radius=5)
-                surface.blit(self._render_clipped(FONT_LABEL, label, color, bw - 12), (bx + 7, ry + 6))
-                self._draw_wrapped_text(surface, FONT_LABEL, body, C_TEXT_PRIMARY, bx + 7, ry + 24, bw - 14, line_spacing=14, max_lines=2)
-            content_bottom = ry + block_h
-        self.results_overlay_content_bottom = max(ly, content_bottom)
+        self.results_overlay_content_bottom = max(left.bottom, bibliography_rect.bottom)
 
     def _draw_fault_effect(self, surface, t, satellite):
         if self.effect_timer <= 0:

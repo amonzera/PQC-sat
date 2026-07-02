@@ -26,8 +26,8 @@ Nunca apresente uma funcionalidade planejada como concluída.
 Use esta precedência quando houver divergência:
 
 1. comportamento verificado por testes;
-2. `ROADMAP.md`, que consolida o plano técnico;
-3. `projeto_final_pqc_esp32_cubesat.docx`, que define o objetivo acadêmico;
+2. `docs/ROADMAP.md`, que consolida o plano técnico;
+3. `docs/projeto_final_pqc_esp32_cubesat.docx`, que define o objetivo acadêmico;
 4. documentos `etapa_*.md`, que detalham tarefas;
 5. este guia e o `README.md`.
 
@@ -91,13 +91,14 @@ implementar.
 - aceitação hardware da etapa 8 validada e consolidada em
   `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`, com 1.817,23 s,
   83 registros, 0 falhas, 27 MISSION runs, 2 benchmarks PQC e demo headless OK;
-- coleta final de métricas concluída em
-  `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`, com 1.681,24 s,
-  3.074 registros, 0 falhas, 1.800 MISSION runs, 10 benchmarks PQC e 1.200
-  testes de falha; essa é a fonte principal atual para `RESULTADOS`;
-- roteiro de apresentação criado em `APRESENTACAO_ROTEIRO.md`, com cinco
-  slides, sequência de demo, limites científicos e checklist pré-apresentação;
-- metodologia de métricas consolidada em `METRICAS_CONSOLIDADAS.md`.
+- coleta oficial pós-AES-GCM concluída em
+  `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`, com 1.038
+  registros, 0 falhas, 600 MISSION runs, 6 benchmarks PQC e 400 testes de
+  falha; essa é a fonte principal atual para `RESULTADOS`;
+- preparação da apresentação centralizada em
+  `GUIA_FINAL_APRESENTACAO.md`, com fundamentos, resultados, roteiro de demo,
+  limites científicos e perguntas de defesa;
+- metodologia de métricas consolidada em `docs/METRICAS_CONSOLIDADAS.md`;
 - projetor/legibilidade confirmados pelo usuário em 2026-06-18 após ajuste de
   botões e métricas do dashboard.
 
@@ -164,7 +165,7 @@ ML-KEM/FIPS 203.
   usar resposta serial real da Wisdom; modo `--simulated` é apenas ensaio
   visual/layout.
 - Todo comando útil que não pertença à apresentação deve continuar registrado
-  para uso técnico em outro lugar: `hardware_command_reference.md`,
+  para uso técnico em outro lugar: `docs/hardware_command_reference.md`,
   `tools/serial_console.py --all-commands`, documentação de etapa ou scripts de
   bancada. Não apague capacidade técnica só porque ela não aparece no
   conjunto de botões; apenas separe a superfície visual da demo da superfície
@@ -187,9 +188,10 @@ ML-KEM/FIPS 203.
   Smoke tests curtos podem ser executados pelo agente apenas quando forem
   necessários e autorizados.
   Para gerar uma nova coleta estatística final, indique ao operador:
-  `python3 tools/final_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 100 --pause 0.25 --bench-repeats 3 --bench-rounds 100`.
-  O resumo esperado é `ok=true`, `failed=0`, `mission_runs=600`,
-  `pqc_bench_runs=6` e `fault_runs=400`.
+  `python3 tools/aes_gcm_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 100 --pause 0.25 --bench-repeats 3 --bench-rounds 100`.
+  O resumo esperado inclui `official_candidate=true`, `failed=0`,
+  `mission_runs=600`, `pqc_bench_runs=6`, `fault_runs=400`,
+  `aead_failures=0` e `non_aes_gcm_records=0`.
   Para repetir o aceite longo deste projeto, indique ao operador:
   `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 tools/stage8_acceptance.py --port /dev/ttyUSB0 --timeout 12 --duration 1800 --interval 30`.
   O resumo esperado é `ok=true`, `failed=0`, `dashboard_demo_ok=true` e
@@ -276,4 +278,4 @@ compilação.
 1. Atualizar relatório/slides finais com os resultados JSON medidos.
 2. Ensaiar a apresentação sem reintroduzir comandos ruidosos nos botões.
 
-Última revisão: 2026-06-18.
+Última revisão: 2026-07-02.

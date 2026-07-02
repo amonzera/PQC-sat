@@ -92,12 +92,18 @@ def aes_checks(data, mission_records):
         1 for record in mission_records
         if str(payload_of(record).get("aead_match")) not in {"1", "true", "True"}
     )
+    nonce_values = [
+        str(payload_of(record).get("nonce_crc32"))
+        for record in mission_records
+        if payload_of(record).get("nonce_crc32") not in {None, ""}
+    ]
+    nonce_duplicates = len(nonce_values) - len(set(nonce_values))
     checks = {
         "mission_records": len(mission_records),
         "missing_required_fields": missing_required,
         "non_aes_gcm_records": non_aes,
         "aead_failures": aead_failures,
-        "nonce_crc32_duplicates": 0,
+        "nonce_crc32_duplicates": nonce_duplicates,
         "official_candidate": bool(mission_records) and missing_required == 0 and non_aes == 0 and aead_failures == 0,
     }
     original_checks = data.get("summary", {}).get("aes_gcm", {}).get("checks")
@@ -107,11 +113,11 @@ def aes_checks(data, mission_records):
 
 
 def metrics_status(data, checks) -> str:
+    if checks.get("official_candidate"):
+        return "versão cifrada oficial com AES-128-GCM"
     if data.get("schema_version") == "pqc-sat-aes-gcm-metrics-v1":
-        if checks.get("official_candidate"):
-            return "versão cifrada oficial com AES-128-GCM"
-        return "bateria AES-GCM rejeitada: firmware retornou HMAC-SHA256 legado"
-    return "bateria histórica pré-AES-GCM"
+        return "bateria AES-GCM rejeitada: campos obrigatórios inválidos"
+    return "bateria geral incompatível com a consolidação AES-GCM"
 
 
 def crypto_label(scenario, payloads):
@@ -129,6 +135,55 @@ def crypto_label(scenario, payloads):
         suffix = f" + {confirmation}" if confirmation and confirmation != crypto else ""
         return f"{crypto}{suffix} (legado)"
     return "sem dados"
+
+
+def mission_profile_stats(profile_records):
+    profile_stats = {}
+    for scenario in MISSION_SCENARIOS:
+        scenario_records = [record for record in profile_records if mission_scenario_of(record) == scenario]
+        payloads = [payload_of(record) for record in scenario_records]
+
+        bytes_total = int(round(safe_mean(payload.get("bytes_total") for payload in payloads)))
+        bytes_payload = int(round(safe_mean(payload.get("bytes_payload") for payload in payloads)))
+        bytes_checksum = int(round(safe_mean(payload.get("bytes_checksum") for payload in payloads)))
+        bytes_crypto = int(round(safe_mean(payload.get("bytes_crypto") for payload in payloads)))
+        if bytes_total > 0 and bytes_crypto == 0:
+            bytes_crypto = bytes_total - bytes_payload - bytes_checksum
+
+        result = "DELIVERED"
+        results = {payload.get("result") for payload in payloads if payload.get("result")}
+        if len(results) == 1:
+            result = next(iter(results))
+
+        if scenario == "CLASSIC":
+            label, checksum = "CLASSIC", "NONE"
+        elif scenario == "PQC":
+            label, checksum = "PQC (ML-KEM)", "NONE"
+        else:
+            label, checksum = "PQC + CRC32", "CRC32"
+
+        heap = int(round(safe_mean(payload.get("heap") for payload in payloads))) or 201412
+        min_heap = int(round(safe_mean(payload.get("min_heap") for payload in payloads))) or 197624
+        profile_stats[scenario] = {
+            "label": label,
+            "crypto": crypto_label(scenario, payloads),
+            "checksum": checksum,
+            "elapsed_us": int(round(safe_mean(payload.get("elapsed_us") for payload in payloads))),
+            "bytes_total": bytes_total,
+            "bytes_payload": bytes_payload,
+            "bytes_crypto": bytes_crypto,
+            "bytes_checksum": bytes_checksum,
+            "keygen_us": int(round(safe_mean(payload.get("keygen_us") for payload in payloads))),
+            "encap_us": int(round(safe_mean(payload.get("encap_us") for payload in payloads))),
+            "decap_us": int(round(safe_mean(payload.get("decap_us") for payload in payloads))),
+            "tag_us": int(round(safe_mean(payload.get("tag_us") or payload.get("encrypt_us") for payload in payloads))),
+            "verify_us": int(round(safe_mean(payload.get("verify_us") or payload.get("decrypt_us") for payload in payloads))),
+            "crc_us": int(round(safe_mean(payload.get("crc_us") for payload in payloads))),
+            "heap": heap,
+            "min_heap": min_heap,
+            "result": result,
+        }
+    return profile_stats
 
 
 def main():
@@ -209,68 +264,13 @@ def main():
     if not baseline_mission_records:
         baseline_mission_records = mission_records
 
-    baseline_stats = {}
-    for scenario in MISSION_SCENARIOS:
-        scenario_records = [r for r in baseline_mission_records if mission_scenario_of(r) == scenario]
-        payloads = [payload_of(r) for r in scenario_records]
+    baseline_stats = mission_profile_stats(baseline_mission_records)
 
-        # Extract values
-        elapsed_us = int(round(safe_mean(p.get("elapsed_us") for p in payloads)))
-        bytes_total = int(round(safe_mean(p.get("bytes_total") for p in payloads)))
-        bytes_payload = int(round(safe_mean(p.get("bytes_payload") for p in payloads)))
-        bytes_checksum = int(round(safe_mean(p.get("bytes_checksum") for p in payloads)))
-        bytes_crypto = int(round(safe_mean(p.get("bytes_crypto") for p in payloads)))
-        if bytes_total > 0 and bytes_crypto == 0:
-            bytes_crypto = bytes_total - bytes_payload - bytes_checksum
-
-        keygen_us = int(round(safe_mean(p.get("keygen_us") for p in payloads)))
-        encap_us = int(round(safe_mean(p.get("encap_us") for p in payloads)))
-        decap_us = int(round(safe_mean(p.get("decap_us") for p in payloads)))
-        
-        # Tag/Verify alias decryption
-        tag_us = int(round(safe_mean(p.get("tag_us") or p.get("encrypt_us") for p in payloads)))
-        verify_us = int(round(safe_mean(p.get("verify_us") or p.get("decrypt_us") for p in payloads)))
-        crc_us = int(round(safe_mean(p.get("crc_us") for p in payloads)))
-        heap = int(round(safe_mean(p.get("heap") for p in payloads)))
-        if heap == 0:
-            heap = 201412  # default fallback
-
-        result = "DELIVERED"
-        if payloads:
-            results_set = {p.get("result") for p in payloads if p.get("result")}
-            if len(results_set) == 1:
-                result = list(results_set)[0]
-
-        # Labels & setup
-        if scenario == "CLASSIC":
-            label = "CLASSIC"
-            checksum = "NONE"
-        elif scenario == "PQC":
-            label = "PQC (ML-KEM)"
-            checksum = "NONE"
-        else:
-            label = "PQC + CRC32"
-            checksum = "CRC32"
-        crypto = crypto_label(scenario, payloads)
-
-        baseline_stats[scenario] = {
-            "label": label,
-            "crypto": crypto,
-            "checksum": checksum,
-            "elapsed_us": elapsed_us,
-            "bytes_total": bytes_total,
-            "bytes_payload": bytes_payload,
-            "bytes_crypto": bytes_crypto,
-            "bytes_checksum": bytes_checksum,
-            "keygen_us": keygen_us,
-            "encap_us": encap_us,
-            "decap_us": decap_us,
-            "tag_us": tag_us,
-            "verify_us": verify_us,
-            "crc_us": crc_us,
-            "heap": heap,
-            "result": result,
-        }
+    limited_mission_records = [
+        record for record in mission_records
+        if record.get("profile_requested") == "OBC-1U-LIMITED" or payload_of(record).get("profile") == "OBC-1U-LIMITED"
+    ]
+    limited_stats = mission_profile_stats(limited_mission_records)
 
     # PQC Benchmarks
     # BASELINE vs LIMITED
@@ -317,10 +317,6 @@ def main():
     heap_baseline = baseline_stats["CLASSIC"]["heap"]
 
     # Compute LIMITED PQC stats
-    limited_mission_records = [
-        r for r in mission_records
-        if r.get("profile_requested") == "OBC-1U-LIMITED" or r.get("payload", {}).get("profile") == "OBC-1U-LIMITED"
-    ]
     limited_classic = [r for r in limited_mission_records if mission_scenario_of(r) == "CLASSIC"]
     limited_pqc = [r for r in limited_mission_records if mission_scenario_of(r) == "PQC"]
 
@@ -360,6 +356,7 @@ def main():
         "summary": summary_dict,
         "aes_gcm_checks": dict(sorted(checks.items())),
         "mission_baseline": baseline_stats,
+        "mission_limited": limited_stats,
         "pqc_bench": [list(item) for item in pqc_bench_tuples],
         "notes": note_lines,
     }

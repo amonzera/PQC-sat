@@ -26,10 +26,10 @@ PQC      -> maior custo, preparo para ameaça quântica
 PQC+CRC  -> maior robustez contra corrupção acidental, com custo adicional
 ```
 
-> Estado dos números: a bateria consolidada registrada neste arquivo foi
-> coletada antes da inclusão de AES-128-GCM no fluxo `MISSION`. Ela continua
-> útil como histórico metodológico e comparação pré-AES, mas a versão atual
-> exige uma nova bateria para gerar os números oficiais finais.
+> Estado dos números: a fonte oficial atual é
+> `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`. As tabelas
+> pré-AES permanecem mais adiante apenas como histórico e estão identificadas
+> explicitamente.
 
 ## 2. O que a placa realmente faz
 
@@ -158,12 +158,13 @@ perceber o crescimento de custo.
 Fonte exibida atualmente na aba `RESULTADOS` do dashboard:
 
 ```text
-logs/20260626T051412Z_aes_gcm_metrics_dev-ttyusb0.json
+logs/20260702T044907Z_final_metrics_dev-ttyusb0.json
 ```
 
-Essa é a primeira bateria oficial pós-AES-GCM consolidada no dashboard. A
-placa respondeu todos os `MISSION` com `cipher=AES-128-GCM`, `nonce_bytes=12`,
-`gcm_tag_bytes=16`, `aead_match=1` e `decrypt_ok=1`.
+Essa é a bateria oficial mais recente consolidada no dashboard. Embora tenha
+sido produzida pelo runner geral, a validação foi recalculada diretamente dos
+600 registros `MISSION`: todos retornaram `cipher=AES-128-GCM`,
+`nonce_bytes=12`, `gcm_tag_bytes=16`, `aead_match=1` e `decrypt_ok=1`.
 
 Resumo da bateria mais recente:
 
@@ -172,8 +173,8 @@ Resumo da bateria mais recente:
 - 600 `MISSION runs`;
 - 400 testes `FAULT`;
 - 6 execuções `PQC_BENCH 100`;
-- duração de 343,16 s;
-- `summary.aes_gcm.checks.official_candidate=true`;
+- duração de 336,62 s;
+- consolidação AES-GCM com `official_candidate=true`;
 - `non_aes_gcm_records=0`;
 - `missing_required_fields=0`;
 - `aead_failures=0`;
@@ -196,49 +197,49 @@ execuções.
 
 | Campo | CLASSIC | PQC | PQC_CRC32 |
 |---|---:|---:|---:|
-| `elapsed_us` (avg) | 624 | 14.075 | 14.034 |
-| `bytes_total` | 62 | 830 | 834 |
-| `bytes_payload` | 34 | 34 | 34 |
+| `elapsed_us` (avg) | 611 | 14.152 | 14.097 |
+| `bytes_total` | 69 | 837 | 841 |
+| `bytes_payload` | 41 | 41 | 41 |
 | `bytes_crypto` | 28 | 796 | 796 |
 | `bytes_checksum` | 0 | 0 | 4 |
-| `bytes_ciphertext` | 34 | 34 | 38 |
-| `encrypt_us` (avg) | 374 | 383 | 394 |
-| `decrypt_us` (avg) | 116 | 108 | 108 |
-| `rng_us` (avg) | 29 | 18 | 17 |
-| `kdf_us` (avg) | 0 | 820 | 778 |
-| `keygen_us` (avg) | 0 | 3.709 | 3.695 |
-| `encap_us` (avg) | 0 | 3.939 | 3.925 |
-| `decap_us` (avg) | 0 | 5.022 | 5.022 |
-| `crc_us` (avg) | 0 | 0 | 21 |
+| `bytes_ciphertext` | 41 | 41 | 45 |
+| `encrypt_us` (avg) | 365 | 389 | 416 |
+| `decrypt_us` (avg) | 125 | 124 | 125 |
+| `rng_us` (avg) | 19 | 19 | 19 |
+| `kdf_us` (avg) | 0 | 831 | 814 |
+| `keygen_us` (avg) | 0 | 3.743 | 3.678 |
+| `encap_us` (avg) | 0 | 3.953 | 3.934 |
+| `decap_us` (avg) | 0 | 5.029 | 5.019 |
+| `crc_us` (avg) | 0 | 0 | 32 |
 | `result` | DELIVERED | DELIVERED | DELIVERED |
 
 ### MISSION AES-GCM — OBC-1U-LIMITED (80 MHz, 100 amostras por cenário)
 
 | Campo | CLASSIC | PQC | PQC_CRC32 |
 |---|---:|---:|---:|
-| `elapsed_us` (avg) | 1.038 | 39.965 | 40.005 |
-| `bytes_total` | 62 | 830 | 834 |
-| `bytes_payload` | 34 | 34 | 34 |
+| `elapsed_us` (avg) | 1.028 | 40.197 | 40.077 |
+| `bytes_total` | 69 | 837 | 841 |
+| `bytes_payload` | 41 | 41 | 41 |
 | `bytes_crypto` | 28 | 796 | 796 |
 | `bytes_checksum` | 0 | 0 | 4 |
-| `bytes_ciphertext` | 34 | 34 | 38 |
-| `encrypt_us` (avg) | 562 | 578 | 585 |
-| `decrypt_us` (avg) | 303 | 295 | 295 |
-| `rng_us` (avg) | 40 | 23 | 22 |
-| `kdf_us` (avg) | 0 | 1.488 | 1.445 |
-| `keygen_us` (avg) | 0 | 10.441 | 10.446 |
-| `encap_us` (avg) | 0 | 11.823 | 11.835 |
-| `decap_us` (avg) | 0 | 15.212 | 15.230 |
-| `crc_us` (avg) | 0 | 0 | 40 |
+| `bytes_ciphertext` | 41 | 41 | 45 |
+| `encrypt_us` (avg) | 554 | 600 | 607 |
+| `decrypt_us` (avg) | 314 | 313 | 316 |
+| `rng_us` (avg) | 29 | 24 | 23 |
+| `kdf_us` (avg) | 0 | 1.498 | 1.478 |
+| `keygen_us` (avg) | 0 | 10.524 | 10.450 |
+| `encap_us` (avg) | 0 | 11.882 | 11.833 |
+| `decap_us` (avg) | 0 | 15.259 | 15.221 |
+| `crc_us` (avg) | 0 | 0 | 53 |
 | `result` | DELIVERED | DELIVERED | DELIVERED |
 
 Razões observadas na bateria AES-GCM:
 
 | Comparação | BASELINE | OBC-1U-LIMITED |
 |---|---:|---:|
-| PQC / CLASSIC em tempo | 22,6x | 38,5x |
-| PQC+CRC / CLASSIC em tempo | 22,5x | 38,6x |
-| PQC / CLASSIC em bytes | 13,4x | 13,4x |
+| PQC / CLASSIC em tempo | 23,2x | 39,1x |
+| PQC+CRC / CLASSIC em tempo | 23,1x | 39,0x |
+| PQC / CLASSIC em bytes | 12,1x | 12,1x |
 | bytes extras do CRC32 | +4 B | +4 B |
 
 Falhas na bateria AES-GCM:
@@ -250,8 +251,17 @@ Falhas na bateria AES-GCM:
 
 | Perfil | keygen avg | encap avg | decap avg |
 |---|---:|---:|---:|
-| `BASELINE` 240 MHz | 3.323 us | 3.878 us | 5.001 us |
-| `OBC-1U-LIMITED` 80 MHz | 10.079 us | 11.794 us | 15.222 us |
+| `BASELINE` 240 MHz | 3.302 us | 3.866 us | 4.990 us |
+| `OBC-1U-LIMITED` 80 MHz | 10.067 us | 11.789 us | 15.217 us |
+
+Bateria oficial anterior pós-AES, preservada para comparação de payload:
+
+```text
+logs/20260626T051412Z_aes_gcm_metrics_dev-ttyusb0.json
+```
+
+Ela usava payload de 34 B, contra 41 B na coleta atual. Por isso os totais
+anteriores 62/830/834 B não devem substituir os atuais 69/837/841 B.
 
 Bateria diagnóstica anterior:
 
@@ -271,7 +281,7 @@ Fonte histórica principal pré-AES:
 logs/20260625T005330Z_final_metrics_dev-ttyusb0.json
 ```
 
-Coleta final: 3.074 registros, 0 falhas, 1.800 `MISSION runs`, 10
+Coleta histórica: 3.074 registros, 0 falhas, 1.800 `MISSION runs`, 10
 `PQC_BENCH` de 100 rounds, 1.200 testes `FAULT`, duracao 1.681,24 s.
 
 Configuração:
@@ -282,7 +292,7 @@ Configuração:
 - 5 execuções `PQC_BENCH 100` por perfil;
 - 300 `FAULT NONE` e 300 `FAULT CRC32` por perfil.
 
-### MISSION — BASELINE (240 MHz, 300 amostras por cenário)
+### Histórico pré-AES — MISSION BASELINE (240 MHz, 300 amostras por cenário)
 
 | Campo | CLASSIC | PQC | PQC_CRC32 |
 |---|---:|---:|---:|
@@ -307,7 +317,7 @@ Configuração:
 | `key_match` | 100% | 100% | 100% |
 | `crc_match` | 100% | 100% | 100% |
 
-### MISSION — OBC-1U-LIMITED (80 MHz, 300 amostras por cenário)
+### Histórico pré-AES — MISSION OBC-1U-LIMITED (80 MHz, 300 amostras por cenário)
 
 | Campo | CLASSIC | PQC | PQC_CRC32 |
 |---|---:|---:|---:|
@@ -332,7 +342,7 @@ Configuração:
 | `key_match` | 100% | 100% | 100% |
 | `crc_match` | 100% | 100% | 100% |
 
-### Razoes observadas
+### Razões históricas pré-AES
 
 | Comparacao | Tempo | Bytes |
 |---|---:|---:|
@@ -359,7 +369,7 @@ Leitura didática:
 - A heap permaneceu constante em todos os cenários: a criptografia PQC não
   causou fragmentacao perceptivel nos testes.
 
-### PQC_BENCH (100 rounds)
+### PQC_BENCH histórico (100 rounds)
 
 | Perfil | CPU | Runs | `keygen_avg_us` | `encap_avg_us` | `decap_avg_us` |
 |---|---:|---:|---:|---:|---:|
@@ -368,7 +378,7 @@ Leitura didática:
 
 Fator de desaceleracao 80/240 MHz: keygen ~3,0x, encap ~3,0x, decap ~3,0x.
 
-### Testes de segurança
+### Validações históricas
 
 | Teste | Resultado |
 |---|---|
@@ -378,7 +388,7 @@ Fator de desaceleracao 80/240 MHz: keygen ~3,0x, encap ~3,0x, decap ~3,0x.
 | FAULT NONE (coleta final) | 600/600 `SILENT` |
 | FAULT CRC32 (coleta final) | 600/600 `DETECTED_GUARD` |
 
-### Falhas de payload na coleta final
+### Falhas de payload na coleta histórica
 
 | Perfil | Sem CRC32 | Com CRC32 |
 |---|---:|---:|
@@ -397,16 +407,17 @@ Tempo médio da verificação de falha:
 1. O objetivo principal foi atingido: a Wisdom/ESP32 executou ML-KEM-512 real,
    entregou mensagens nos três cenários e exportou métricas de tempo, bytes e
    heap.
-2. O custo temporal de PQC e o resultado mais forte: `PQC` foi 25,9x mais
-   lento que `CLASSIC` a 240 MHz e 34,1x mais lento no perfil limitado de
+2. Na bateria oficial AES-GCM, `PQC` foi 23,2x mais lento que `CLASSIC` a
+   240 MHz e 39,1x mais lento no perfil limitado de
    80 MHz.
-3. O custo de trafego também é didático: `PQC` saiu de 73 bytes para 841
+3. O custo de tráfego também é didático: `PQC` saiu de 69 bytes para 837
    bytes por entrega consolidada.
-4. CRC32 adicionou custo pequeno no payload (+4 bytes e ~10 us a 240 MHz), mas
+4. CRC32 adicionou custo pequeno no payload (+4 bytes e 32 us em média a
+   240 MHz), mas
    tornou visível a diferença entre falha silenciosa e erro detectado:
-   600/600 `SILENT` sem CRC32 contra 600/600 `DETECTED_GUARD` com CRC32.
-5. A RAM livre permaneceu estável, então a evidencia principal desta versão e
-   tempo/trafego, não exaustao de heap.
+   200/200 `SILENT` sem CRC32 contra 200/200 `DETECTED_GUARD` com CRC32.
+5. A RAM livre permaneceu estável, então a evidência principal desta versão é
+   tempo/tráfego, não exaustão de heap.
 
 ### Próximos passos reais
 
@@ -417,7 +428,7 @@ Para o seminário atual:
 - não rodar bateria longa durante a apresentação;
 - demonstrar manualmente `CLÁSSICA`, `PQC`, `PQC+CRC`, `ENVIAR MSG` e
   `FALHA`;
-- citar `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json` como fonte
+- citar `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json` como fonte
   dos dados consolidados.
 
 Para evolucao cientifica futura:
@@ -465,9 +476,9 @@ Resultado esperado:
 
 ## 6. Bateria final robusta para novos resultados
 
-A bateria longa usada como fonte atual da apresentação foi realizada e
-consolidada em `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`. Não
-rode outra bateria durante o seminário.
+A bateria usada como fonte atual da apresentação foi consolidada em
+`logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`. Não rode outra
+bateria durante o seminário.
 
 Baterias longas não devem ser iniciadas pelo agente. Se a montagem física
 mudar e for necessário repetir a coleta, o operador roda no terminal e depois
@@ -580,7 +591,8 @@ tabelas. O campo principal para análise é `summary`, que já contém:
 - lista dos comandos com falha em `summary.failed_commands`.
 
 Use `tools/stage8_acceptance.py` apenas para aceite/regressão geral. Para
-métricas finais da apresentação, prefira `tools/final_metrics_battery.py`.
+métricas finais da apresentação pós-AES-GCM, prefira
+`tools/aes_gcm_metrics_battery.py`.
 
 ## 6.1. Aceite longo da etapa 8
 
@@ -602,7 +614,8 @@ mission_runs>=6
 ```
 
 Se os números mudarem, use o JSON novo como fonte principal e atualize
-`APRESENTACAO_ROTEIRO.md`, `GUIA_DIDATICO_APRESENTACAO.md` e este documento.
+`../GUIA_FINAL_APRESENTACAO.md` e este documento. Execute os comandos deste
+arquivo a partir da raiz do repositório.
 
 ## 7. O que não afirmar
 

@@ -86,9 +86,10 @@ projeto sem reconstruir decisões antigas:
   cache de superfícies grandes, faixa superior reduzida a CPU/RAM, exportação
   de métricas do processo e teste headless para
   1920x1080 e 1366x768.
-- 2026-06-18: criado `APRESENTACAO_ROTEIRO.md` com blocos narrativos do
-  dashboard, roteiro de 20 minutos, sequência de comandos da demo, limites
-  científicos e checklist pré-apresentação.
+- 2026-06-18: criado o primeiro roteiro com blocos narrativos do dashboard,
+  roteiro de 20 minutos, sequência de comandos da demo, limites científicos e
+  checklist pré-apresentação; esse conteúdo foi posteriormente consolidado em
+  `../GUIA_FINAL_APRESENTACAO.md`.
 - 2026-06-18: verificação final detectou a Wisdom em `/dev/ttyUSB0` como
   CP2102N/Silicon Labs. Após liberação da porta, a aceitação de hardware da
   etapa 8 passou e foi consolidada com `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`:
@@ -98,10 +99,9 @@ projeto sem reconstruir decisões antigas:
 - 2026-06-18: polimento final de apresentação removeu polling automático de
   `TELEMETRY`, reduziu os blocos clicáveis aos comandos centrais da demo e
   manteve comandos de bancada no HELP/terminal textual.
-- 2026-06-18: criado `GUIA_DIDATICO_APRESENTACAO.md` como material completo
-  de estudo e condução da apresentação para público leigo em criptografia,
-  consolidando objetivo, passo a passo, resultados, comandos, limites e fala
-  sugerida.
+- 2026-06-18: criado o primeiro guia didático de estudo e condução da
+  apresentação para público leigo em criptografia; esse conteúdo foi
+  posteriormente consolidado em `../GUIA_FINAL_APRESENTACAO.md`.
 - 2026-06-18: objetivo final do seminário consolidado como comparação de custo
   e segurança entre `CLASSIC`, `PQC` e `PQC_CRC32`; firmware ganhou
   `MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]`, dashboard ganhou botões
@@ -110,14 +110,10 @@ projeto sem reconstruir decisões antigas:
 - 2026-06-18: criado `METRICAS_CONSOLIDADAS.md` com metodologia de coleta,
   campos do JSON, comandos curtos/longos e limites científicos para a
   comparação final.
-- 2026-06-19: criado `PERGUNTAS_E_RESPOSTAS_SEMINARIO.md` com banco de
-  perguntas prováveis, respostas curtas e respostas técnicas para defender
-  objetivo, métricas, limitações, ML-KEM, HMAC, CRC32, bit-flips e próximos
-  passos.
-- 2026-06-19: criado `ALGORITMOS_DO_PROJETO.md` como material de estudo
-  detalhado dos algoritmos do seminário, explicando `CLASSIC`, `PQC`,
-  `PQC_CRC32`, HMAC-SHA256, SHA-256, ML-KEM-512, CRC32, bit-flip, comparação
-  em tempo constante, KAT, `PQC_BENCH` e origem das métricas.
+- 2026-06-19: criados materiais específicos de perguntas e algoritmos; suas
+  respostas, fundamentos, limites, ML-KEM, HMAC, CRC32, bit-flips, KAT,
+  benchmarks e próximos passos foram posteriormente centralizados em
+  `../GUIA_FINAL_APRESENTACAO.md`.
 - 2026-06-19: consolidação final do seminário ajustou o dashboard para usar
   onboarding completo de cinco telas e botão `RESULTADOS` com a bateria real
   `logs/20260618T234008Z_stage8_acceptance_dev-ttyusb0.json`; a documentação
@@ -267,6 +263,14 @@ projeto sem reconstruir decisões antigas:
   removida a estimativa inventada 69/837/841; os números 73/841/845 e os tempos
   511/13.234/13.130 us ficam como histórico pré-AES. `dashboard.py` reduziu
   ~211 linhas; 84/84 testes passam.
+- 2026-07-02: nova bateria geral válida com AES-GCM consolidada em
+  `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`: 336,62 s, 1.038
+  registros, 0 falhas, 600 `MISSION`, 6 `PQC_BENCH` e 400 `FAULT`. O payload
+  padrão medido tem 41 B, portanto os totais reais desta coleta são
+  69/837/841 B; eles coincidem numericamente com uma estimativa antiga, mas
+  agora têm origem experimental explícita. Os 600 `MISSION` passaram na
+  validação AES-GCM, com 600 nonces, ciphertexts e tags distintos. A tela
+  `RESULTADOS`, o guia final e a metodologia passaram a usar essa fonte.
 
 O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar
@@ -720,12 +724,12 @@ Entregas:
 - runner `tools/aes_gcm_metrics_battery.py` implementado para nova bateria
   oficial da versão cifrada com AES-128-GCM, incluindo validações específicas
   de AEAD, nonce, tag e ciphertext;
-- campanha final de métricas validada por
-  `logs/20260625T005330Z_final_metrics_dev-ttyusb0.json`;
+- campanha oficial pós-AES-GCM mais recente validada por
+  `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`;
 - projetor validado por confirmação do usuário em 2026-06-18, após ajuste
   visual para reduzir botões e métricas;
 - roteiro de 20 minutos, onboarding do dashboard e painel de resultados
-  descritos em `APRESENTACAO_ROTEIRO.md`;
+  descritos em `../GUIA_FINAL_APRESENTACAO.md`;
 - limitações científicas registradas no README, roadmap e roteiro.
 
 Não use a expressão "nenhum crash possível". O critério correto é "nenhuma
@@ -781,9 +785,9 @@ falha conhecida nos cenários testados".
 
 O hardware, a campanha prolongada anterior, o projetor validado, `MISSION` e o
 modo `DEMO` sustentam a demonstração.
-O guia didático, o roteiro, a metodologia de métricas e os limites científicos
-já estão documentados em `GUIA_DIDATICO_APRESENTACAO.md`,
-`METRICAS_CONSOLIDADAS.md` e `APRESENTACAO_ROTEIRO.md`.
+O estudo e a defesa oral estão centralizados em
+`../GUIA_FINAL_APRESENTACAO.md`; a metodologia experimental detalhada permanece
+em `METRICAS_CONSOLIDADAS.md`.
 
 ## 11. Referências técnicas para decisões
 

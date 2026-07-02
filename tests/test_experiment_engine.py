@@ -1040,6 +1040,8 @@ class DashboardCommandTests(unittest.TestCase):
     def test_physical_button_event_triggers_non_blocking_ping_animation(self):
         fake = FakeSerialClient()
         panel = dashboard.DashboardPanel(serial_client=fake)
+        previous_status = panel.session_status
+        previous_history = list(panel.command_history)
         fake.events.append(
             (
                 "event",
@@ -1054,7 +1056,8 @@ class DashboardCommandTests(unittest.TestCase):
 
         self.assertEqual(panel.ping_effect_count, 1)
         self.assertGreater(panel.ping_effect_timer, 0.0)
-        self.assertEqual(panel.session_status, "PING PARA TERRA")
+        self.assertEqual(panel.session_status, previous_status)
+        self.assertEqual(panel.command_history, previous_history)
 
         surface = pygame.Surface((dashboard.WIDTH, dashboard.HEIGHT), pygame.SRCALPHA)
         earth = dashboard.Earth()
@@ -1154,6 +1157,45 @@ class DashboardCommandTests(unittest.TestCase):
                 for rect in panel.results_insight_rects:
                     self.assertGreaterEqual(rect.height, required_card_h)
                     self.assertLessEqual(rect.bottom, panel_rect.bottom - 20)
+        finally:
+            dashboard.WIDTH, dashboard.HEIGHT = old_size
+
+    def test_results_technical_overlay_has_clear_sections_and_fits(self):
+        old_size = (dashboard.WIDTH, dashboard.HEIGHT)
+        try:
+            for width, height in ((1920, 1080), (1366, 768)):
+                dashboard.WIDTH, dashboard.HEIGHT = width, height
+                surface = pygame.Surface((width, height), pygame.SRCALPHA)
+                panel = dashboard.DashboardPanel()
+                panel.results_overlay_visible = True
+                panel.results_overlay_mode = "technical"
+
+                panel._draw_results_overlay(surface, 0.5)
+
+                panel_rect, _close_rect = panel._results_overlay_geometry()
+                self.assertGreaterEqual(len(panel.results_technical_sections), 8)
+                self.assertLessEqual(panel.results_overlay_content_bottom, panel_rect.bottom - 18)
+                for rect in panel.results_technical_sections:
+                    self.assertGreater(rect.width, 100)
+                    self.assertGreater(rect.height, 80)
+                    self.assertTrue(panel_rect.contains(rect))
+
+                self.assertIsNotNone(panel.results_technical_page_btn_rect)
+                self.assertFalse(panel.results_technical_page_btn_rect.colliderect(panel.results_details_btn_rect))
+
+                page_click = pygame.event.Event(
+                    pygame.MOUSEBUTTONDOWN,
+                    {"button": 1, "pos": panel.results_technical_page_btn_rect.center},
+                )
+                self.assertTrue(panel.handle_event(page_click))
+                self.assertEqual(panel.results_technical_page, 1)
+                panel._draw_results_overlay(surface, 0.6)
+                self.assertEqual(len(panel.results_technical_sections), 6)
+                self.assertLessEqual(panel.results_overlay_content_bottom, panel_rect.bottom - 18)
+                for rect in panel.results_technical_sections:
+                    self.assertGreater(rect.width, 100)
+                    self.assertGreater(rect.height, 80)
+                    self.assertTrue(panel_rect.contains(rect))
         finally:
             dashboard.WIDTH, dashboard.HEIGHT = old_size
 

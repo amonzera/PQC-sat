@@ -12,7 +12,7 @@ Arquivos editáveis:
 
 Material de apoio:
 
-- `ROTEIRO_APRESENTACAO.md`
+- `../GUIA_FINAL_APRESENTACAO.md`
 
 ## O que enviar
 
