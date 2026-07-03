@@ -1823,7 +1823,9 @@ class DashboardPanel:
         ratio = (mouse_x - scrub_rect.x) / max(1, scrub_rect.width)
         ratio = max(0.0, min(1.0, ratio))
         animation["age"] = duration * ratio
-        # scrubbing back below the end re-arms the per-step animation
+        # Match the mission popup: grabbing the bar pauses autoplay and keeps
+        # the fault flow exactly where the user leaves it.
+        animation["paused"] = True
         animation["awaiting_confirm"] = ratio >= 1.0
 
     def _close_fault_overlay(self):
@@ -3188,7 +3190,11 @@ class DashboardPanel:
                     animation["age"] = animation["duration"]
                     animation["awaiting_confirm"] = True
         self._sync_active_mission_flow_animation()
-        if self.fault_flow_animation is not None and not self.fault_flow_animation.get("awaiting_confirm"):
+        if (
+            self.fault_flow_animation is not None
+            and not self.fault_flow_animation.get("awaiting_confirm")
+            and not self.fault_flow_animation.get("paused")
+        ):
             self.fault_flow_animation["age"] += dt
             if self.fault_flow_animation["age"] >= self.fault_flow_animation["duration"]:
                 self.fault_flow_animation["age"] = self.fault_flow_animation["duration"]

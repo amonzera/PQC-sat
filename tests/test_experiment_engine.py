@@ -243,9 +243,31 @@ class DashboardCommandTests(unittest.TestCase):
                 {"button": 1, "pos": (scrub_rect.right, scrub_rect.centery)},
             )
             self.assertTrue(panel._handle_fault_overlay_event(scrub_release))
+            self.assertTrue(panel.fault_flow_animation.get("paused"))
+
+            # Like the message popup, dragging back pauses the flow at the
+            # selected point instead of letting autoplay move the handle.
+            scrub_middle = pygame.event.Event(
+                pygame.MOUSEBUTTONDOWN,
+                {"button": 1, "pos": (scrub_rect.centerx, scrub_rect.centery)},
+            )
+            self.assertTrue(panel._handle_fault_overlay_event(scrub_middle))
+            paused_age = panel.fault_flow_animation["age"]
+            self.assertFalse(panel.fault_flow_animation["awaiting_confirm"])
+            panel.update(0.5)
+            self.assertEqual(panel.fault_flow_animation["age"], paused_age)
+            self.assertTrue(
+                panel._handle_fault_overlay_event(
+                    pygame.event.Event(
+                        pygame.MOUSEBUTTONUP,
+                        {"button": 1, "pos": (scrub_rect.centerx, scrub_rect.centery)},
+                    )
+                )
+            )
 
             panel.fault_flow_animation["awaiting_confirm"] = False
             panel.fault_flow_animation["age"] = 0.0
+            panel.fault_flow_animation["paused"] = False
             control_rect = panel.fault_flow_control_rect
             click = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": control_rect.center})
             self.assertTrue(panel._handle_fault_overlay_event(click))
