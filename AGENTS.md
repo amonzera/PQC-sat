@@ -66,6 +66,16 @@ implementar.
 - comando `MISSION CLASSIC|PQC|PQC_CRC32` implementado no firmware para
   entregar mensagem curta e medir tempo total, bytes, heap, confirmação,
   checksum e resultado por cenário;
+- ECDH P-256 efêmero implementado em `MISSION CLASSIC`, com dois pares, dois
+  cálculos do segredo e uma chave pública não comprimida de 65 B contabilizada;
+  smoke test em placa retornou `crypto=ECDH-P256`, `bytes_ecdh=65`,
+  `key_match=1`, `aead_match=1` e `result=DELIVERED`; a regravação da revisão
+  final de métricas e a bateria oficial ECDH ainda estão pendentes;
+- benchmark de sessão `SESSION_BENCH` implementado para `ECDH_P256`, `X25519`
+  e `MLKEM512`, com 1/100/500/1000 mensagens, CPU fixa em 240 MHz, setup por
+  endpoint, caminho crítico, CPU agregada, amortização, tráfego, heap, stack e
+  flash; `tools/session_benchmark.py` rotaciona a ordem, valida condições e
+  exporta JSON/tabela; build passou, validação na placa está pendente;
 - exportação JSON com eventos, resumo e amostras de hardware.
 - checksum ativável/desativável no dashboard por `CHECKSUM ON|OFF|TOGGLE` e
   `GUARD NONE|CRC32`;
@@ -94,7 +104,8 @@ implementar.
 - coleta oficial pós-AES-GCM concluída em
   `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`, com 1.038
   registros, 0 falhas, 600 MISSION runs, 6 benchmarks PQC e 400 testes de
-  falha; essa é a fonte principal atual para `RESULTADOS`;
+  falha; após a implementação de ECDH, essa coleta é histórica pré-ECDH e uma
+  nova bateria oficial está pendente para `RESULTADOS`;
 - preparação da apresentação centralizada em
   `GUIA_FINAL_APRESENTACAO.md`, com fundamentos, resultados, roteiro de demo,
   limites científicos e perguntas de defesa;
@@ -103,8 +114,9 @@ implementar.
   botões e métricas do dashboard.
 
 ### Não implementado
-Nenhuma etapa técnica de implementação permanece aberta para o MVP do
-seminário. Extensões futuras devem ficar fora da superfície principal da demo.
+Nenhuma etapa técnica de implementação permanece aberta para o MVP visual.
+O benchmark de sessão novo ainda precisa ser gravado e medido na Wisdom antes
+de seus números serem promovidos a `RESULTADOS`.
 
 ## 4. Stack
 
@@ -187,11 +199,17 @@ ML-KEM/FIPS 203.
   chamar o agente novamente, o agente deve analisar os logs/resultados gerados.
   Smoke tests curtos podem ser executados pelo agente apenas quando forem
   necessários e autorizados.
+  Para a comparação de sessão ECDH/ML-KEM fixa em 240 MHz, indique:
+  `python3 tools/session_benchmark.py --port /dev/ttyUSB0 --timeout 20 --repeats 10 --pause 0.25`.
+  O resumo esperado inclui `ok=true`, `session_runs=120` e
+  `invalid_session_runs=0`, com JSON
+  `logs/<timestamp>_session_benchmark_dev-ttyusb0.json`.
   Para gerar uma nova coleta estatística final, indique ao operador:
   `python3 tools/aes_gcm_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 100 --pause 0.25 --bench-repeats 3 --bench-rounds 100`.
   O resumo esperado inclui `official_candidate=true`, `failed=0`,
   `mission_runs=600`, `pqc_bench_runs=6`, `fault_runs=400`,
-  `aead_failures=0` e `non_aes_gcm_records=0`.
+  `aead_failures=0`, `ecdh_invalid_records=0`, `pqc_invalid_records=0`,
+  `balanced_scenarios=true` e `non_aes_gcm_records=0`.
   Para repetir o aceite longo deste projeto, indique ao operador:
   `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 tools/stage8_acceptance.py --port /dev/ttyUSB0 --timeout 12 --duration 1800 --interval 30`.
   O resumo esperado é `ok=true`, `failed=0`, `dashboard_demo_ok=true` e
@@ -233,16 +251,15 @@ Para ML-KEM:
 
 Para `MISSION`:
 
-- `CLASSIC` é baseline clássico simétrico com `AES-128-GCM`, chave efêmera e
-  nonce aleatório gerados na Wisdom; não o apresente como ECDH nem como
-  criptografia assimétrica clássica completa;
+- `CLASSIC` usa ECDH P-256 efêmero para estabelecer o segredo e
+  `AES-128-GCM` para cifrar/autenticar; a Wisdom executa as duas pontas lógicas;
 - `PQC` é ML-KEM-512 para estabelecer segredo e `AES-128-GCM` para cifrar e
   autenticar a mensagem;
 - `PQC_CRC32` adiciona CRC32 ao plaintext protegido antes da cifragem AES-GCM;
 - compare `elapsed_us`, `bytes_total`, `heap`, `min_heap`, `key_match`,
   `aead_match`, `tag_match`, `crc_match` e `result`;
-- os resultados consolidados anteriores à implementação de AES-GCM devem ser
-  tratados como históricos pré-AES até uma nova bateria oficial;
+- os resultados consolidados anteriores à implementação de ECDH devem ser
+  tratados como históricos pré-ECDH até uma nova bateria oficial;
 - energia só pode ser proxy por tempo de CPU, exceto se houver medição elétrica
   externa.
 

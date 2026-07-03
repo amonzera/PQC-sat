@@ -110,7 +110,7 @@ processamento e custo relativo.
 
 | Uso | Significado |
 |---|---|
-| `MISSION CLASSIC` | Payload cifrado/autenticado por AES-128-GCM com chave efêmera gerada na placa. |
+| `MISSION CLASSIC` | ECDH P-256 efêmero estabelece o segredo; AES-128-GCM cifra e autentica a mensagem. |
 | `MISSION PQC` | ML-KEM-512 estabelece segredo; AES-128-GCM cifra e autentica a mensagem. |
 | `MISSION PQC_CRC32` | Mesmo fluxo PQC com CRC32 inserido no material protegido antes da cifragem. |
 | `MISSION CLASSIC payload_hex` | Executa o cenário clássico com payload hexadecimal escolhido. |
@@ -123,16 +123,18 @@ Campos retornados:
 |---|---|
 | `scenario` | `CLASSIC`, `PQC` ou `PQC_CRC32`. |
 | `result` | `DELIVERED` ou `REJECTED`. |
-| `crypto` | `AES-128-GCM` no clássico; `ML-KEM-512` nos cenários PQC. |
+| `crypto` | `ECDH-P256` no clássico; `ML-KEM-512` nos cenários PQC. |
 | `cipher` | Cifra AEAD usada no payload: `AES-128-GCM`. |
 | `checksum` | `NONE` ou `CRC32`. |
-| `key_source` | `RANDOM_SESSION` no clássico; `ML-KEM-512` no PQC. |
-| `key_match` | Segredos ML-KEM bateram; sempre verdadeiro no clássico. |
+| `key_source` | `ECDH-P256` no clássico; `ML-KEM-512` no PQC. |
+| `key_match` | As duas pontas chegaram ao mesmo segredo ECDH ou ML-KEM. |
 | `aead_match` / `tag_match` | A tag AES-GCM foi aceita e o plaintext verificado. `tag_match` fica como alias para compatibilidade. |
 | `crc_match` | CRC32 bateu quando checksum está ativo. |
-| `bytes_total` | Ciphertext do payload + ciphertext ML-KEM quando houver + nonce + tag GCM + CRC quando ativo. |
+| `bytes_total` | Ciphertext do payload + chave pública ECDH de 65 B ou ciphertext ML-KEM de 768 B + nonce + tag GCM + CRC. |
 | `elapsed_us` | Tempo total da entrega medida na placa. |
-| `keygen_us`, `encap_us`, `decap_us` | Subtempos ML-KEM; zero no cenário clássico. |
+| `keygen_us` | No clássico: carrega P-256, gera os dois pares e serializa a chave pública; em PQC: gera o par ML-KEM. |
+| `ecdh_tx_us`, `ecdh_rx_us` | Cálculo do segredo ECDH nas duas pontas; zero nos cenários PQC. |
+| `encap_us`, `decap_us` | Subtempos ML-KEM; zero no cenário clássico. |
 | `rng_us`, `kdf_us`, `encrypt_us`, `decrypt_us`, `crc_us` | Custo de RNG, derivação, cifragem, decifragem/verificação e checksum. |
 | `heap`, `min_heap`, `cpu_mhz`, `profile` | Métricas do ESP32 no cenário. |
 
@@ -159,11 +161,38 @@ em build C-only para `MLK_CONFIG_PARAMETER_SET=512`.
 | `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e retorna `key_match` sem imprimir segredo completo. |
 | `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Comando técnico de bancada para bit-flip em ciphertext ML-KEM; não é usado nos popups da apresentação. |
 | `PQC_BENCH` | `PQC_BENCH n` | Executa `n` rodadas keygen/encap/decap; `n` aceito de 1 a 100. |
+| `SESSION_BENCH` | `SESSION_BENCH ECDH_P256\|X25519\|MLKEM512 1\|100\|500\|1000` | Estabelece uma sessão a 240 MHz, reutiliza AES-GCM por N mensagens e separa endpoints, latência crítica, CPU agregada, tráfego e memória. |
 | `STRESS` | `STRESS PQC_LOOP n CONFIRM` | Executa ML-KEM em loop extremo, de 1 a 500 rodadas, para fechamento visual de limite. Exige `CONFIRM`. |
 
 `STRESS` não é a fonte estatística oficial do seminário. Ele serve para
 mostrar, ao vivo, uma carga agressiva e controlada no hardware depois dos
 resultados consolidados.
+
+### Benchmark comparável de sessão
+
+`SESSION_BENCH` não pertence ao dashboard visual. Ele força 240 MHz, desliga
+rádios e emite a resposta serial somente depois da região medida. Os três
+algoritmos usam a mesma KDF e o mesmo AES-128-GCM:
+
+```text
+SESSION_BENCH ECDH_P256 1
+SESSION_BENCH ECDH_P256 100
+SESSION_BENCH X25519 500
+SESSION_BENCH MLKEM512 1000
+```
+
+Campos centrais: `tx_keygen_us`, `rx_keygen_us`,
+`tx_shared_secret_us`, `rx_shared_secret_us`, `tx_kdf_us`, `rx_kdf_us`,
+`sender_setup_us`, `receiver_setup_us`, `aggregate_setup_us`,
+`critical_latency_us`, `setup_session_us`, `aes_gcm_encrypt_us`,
+`aes_gcm_decrypt_us`, `data_total_us`, `total_us`, `aggregate_total_us`,
+`handshake_bytes`, `wire_total_bytes`, `principal_crypto_buffers_bytes`, heap,
+stack high-water mark e `flash_binary_bytes`.
+
+`setup_session_us` é o caminho crítico modelado com as duas pontas em
+paralelo e rede zero; `aggregate_setup_us` é o custo total executado
+sequencialmente na única Wisdom. Para a coleta balanceada e a tabela final,
+use `tools/session_benchmark.py`, não comandos manuais isolados.
 
 Medição registrada em 2026-06-17:
 
@@ -202,6 +231,7 @@ são registro técnico histórico; a demo visual atual usa `FAULT NONE|CRC32`.
 | `PQC_DECAP` | `PQC_DECAP` | Decapsula ciphertext armazenado e compara segredo compartilhado. |
 | `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Comando avançado de bancada para corromper ciphertext ML-KEM. Mantido fora da demo visual; use `FAULT NONE|CRC32` para o popup didático. |
 | `PQC_BENCH` | `PQC_BENCH n` | Executa benchmark de bancada para 1 a 100 rodadas. |
+| `SESSION_BENCH` | `SESSION_BENCH ECDH_P256\|X25519\|MLKEM512 1\|100\|500\|1000` | Benchmark técnico de sessão fixa em 240 MHz; fica fora dos botões da apresentação. |
 | `STRESS` | `STRESS PQC_LOOP n CONFIRM` | Executa carga extrema de ML-KEM para demonstrar limite operacional; use `n=500` no fechamento visual. |
 | `MISSION` | `MISSION CLASSIC\|PQC\|PQC_CRC32 [payload_hex]` | Entrega mensagem curta e mede custo/bytes/segurança por cenário. |
 | `PERIPHERALS` | `PERIPHERALS` | Detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C. |

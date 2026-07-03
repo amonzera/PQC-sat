@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 FRAME_VERSION = "V1"
-MAX_FRAME_CHARS = 1024
+MAX_FRAME_CHARS = 4096
 
 
 class ProtocolError(ValueError):

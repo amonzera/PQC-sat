@@ -28,6 +28,10 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PQC_DECAP", "decapsula ciphertext armazenado e compara segredo"),
     CommandInfo("PQC_FAULT index mask [CONFIRM|NONE]", "aplica bit-flip em ciphertext ML-KEM e testa confirmação"),
     CommandInfo("PQC_BENCH n", "executa n rodadas keygen/encap/decap, 1..100"),
+    CommandInfo(
+        "SESSION_BENCH ECDH_P256|X25519|MLKEM512 1|100|500|1000",
+        "mede setup de sessão, AES-GCM amortizado, tráfego e memória a 240 MHz",
+    ),
     CommandInfo("STRESS PQC_LOOP n CONFIRM", "executa ML-KEM em loop extremo, 1..500, com confirmação explícita"),
     CommandInfo("MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]", "envia mensagem curta e mede custo/bytes/segurança por cenário"),
     CommandInfo("PERIPHERALS", "detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C"),
@@ -80,7 +84,7 @@ DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = (
 DEMO_FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PING", "confirma que a placa respondeu ao painel"),
     CommandInfo("STATUS", "mostra perfil, CPU, memória e rádio"),
-    CommandInfo("MISSION CLASSIC", "envia mensagem cifrada com AES-128-GCM e chave efêmera"),
+    CommandInfo("MISSION CLASSIC", "usa ECDH P-256 para chave e AES-128-GCM para cifrar"),
     CommandInfo("MISSION PQC", "usa ML-KEM-512 para chave e AES-128-GCM para cifrar"),
     CommandInfo("MISSION PQC_CRC32", "usa ML-KEM-512, AES-GCM e CRC32 protegido no payload"),
     CommandInfo("TELEMETRY", "atualiza telemetria real da Wisdom"),

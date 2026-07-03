@@ -1059,22 +1059,43 @@ class DashboardCommandTests(unittest.TestCase):
         self.assertEqual(parts["GCM"], 16)
         self.assertEqual(parts["HMAC"], 0)
 
-    def test_classic_aes_gcm_flow_uses_ephemeral_rng_step(self):
+    def test_classic_package_parts_include_ecdh_public_key(self):
+        panel = dashboard.DashboardPanel()
+        mission = {
+            "scenario": "CLASSIC",
+            "cipher": "AES-128-GCM",
+            "bytes_payload": "41",
+            "bytes_ecdh": "65",
+            "bytes_nonce": "12",
+            "bytes_gcm_tag": "16",
+            "bytes_crypto": "93",
+        }
+
+        parts = {label: value for label, value, _color in panel._mission_package_parts(mission)}
+
+        self.assertEqual(parts["ECDH"], 65)
+        self.assertEqual(parts["ML-KEM"], 0)
+
+    def test_classic_aes_gcm_flow_uses_ephemeral_ecdh(self):
         panel = dashboard.DashboardPanel()
         mission = {
             "scenario": "CLASSIC",
             "result": "DELIVERED",
-            "crypto": "AES-128-GCM",
+            "crypto": "ECDH-P256",
             "cipher": "AES-128-GCM",
             "checksum": "NONE",
-            "key_source": "RANDOM_SESSION",
+            "key_source": "ECDH-P256",
             "bytes_payload": "41",
             "bytes_nonce": "12",
             "bytes_gcm_tag": "16",
-            "bytes_crypto": "28",
+            "bytes_ecdh": "65",
+            "bytes_crypto": "93",
             "bytes_checksum": "0",
-            "bytes_total": "69",
-            "rng_us": "5",
+            "bytes_total": "134",
+            "keygen_us": "400",
+            "ecdh_tx_us": "160",
+            "ecdh_rx_us": "161",
+            "kdf_us": "30",
             "encrypt_us": "80",
             "decrypt_us": "81",
             "aead_match": "1",
@@ -1082,10 +1103,11 @@ class DashboardCommandTests(unittest.TestCase):
 
         steps = panel._mission_flow_steps(mission)
 
-        self.assertEqual([step["label"] for step in steps], ["PAYLOAD", "RNG", "AES-GCM", "VERIFICA", "RESULTADO"])
-        self.assertEqual(steps[2]["added_bytes"], 28)
-        self.assertEqual(steps[-1]["packet_bytes"], 69)
-        self.assertIn("chave AES-128 efêmera", steps[1]["explain"])
+        self.assertEqual([step["label"] for step in steps], ["PAYLOAD", "KEYGEN", "ECDH", "KDF", "AES-GCM", "VERIFICA", "RESULTADO"])
+        self.assertEqual(steps[2]["added_bytes"], 65)
+        self.assertEqual(steps[4]["added_bytes"], 28)
+        self.assertEqual(steps[-1]["packet_bytes"], 134)
+        self.assertIn("P-256", steps[1]["explain"])
 
     def test_send_message_without_live_satellite_does_not_replay_metrics(self):
         panel = dashboard.DashboardPanel()

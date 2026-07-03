@@ -1,6 +1,6 @@
 # Roadmap consolidado - PQC-SAT
 
-Versão revisada em 2026-06-25.
+Versão revisada em 2026-07-03.
 
 ## 1. Visão geral
 
@@ -34,9 +34,11 @@ nem ao roteiro principal. A demonstração visual de falha usa payload com
 | Seed isolada do experimento | Funcional |
 | Mutação real de bytes | Funcional no dashboard |
 | ML-KEM real | Funcional na Wisdom com `mlkem-native` v1.1.0, commit `d2cae2b` |
-| AES-128-GCM em MISSION | Implementado no firmware; `CLASSIC` usa chave efêmera, `PQC` deriva chave de ML-KEM |
+| Estabelecimento clássico | ECDH P-256 efêmero implementado em `CLASSIC`, com dois pares e dois cálculos do segredo por mensagem |
+| AES-128-GCM em MISSION | Implementado no firmware; `CLASSIC` deriva a chave de ECDH, `PQC` deriva de ML-KEM |
 | Mensagem CLASSIC/PQC/PQC+CRC | Implementada no firmware por `MISSION CLASSIC|PQC|PQC_CRC32` |
 | Interface serial PQC | `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH` funcionais |
+| Benchmark de sessão | `SESSION_BENCH ECDH_P256|X25519|MLKEM512 1|100|500|1000` implementado a 240 MHz, com setup, endpoints, amortização, tráfego e memória separados; validação em placa pendente |
 | Medição PQC na placa | `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`; `PQC_KAT` passou no hardware gravado |
 | Falha em ciphertext ML-KEM | `PQC_FAULT index mask [CONFIRM|NONE]` validado na placa e exportado no JSON |
 | CRC/checksum real | CRC32 funcional no dashboard e no firmware |
@@ -127,6 +129,13 @@ projeto sem reconstruir decisões antigas:
   da cifragem. O dashboard passou a mostrar `RNG`, `KDF`, `AES-GCM`,
   `aead_match`, nonce e tag GCM; a bateria `20260625T005330Z` ficou marcada
   como histórica pré-AES-GCM até nova coleta oficial.
+- 2026-07-03: criado benchmark de sessão separado do fluxo visual. O firmware
+  estabelece ECDH P-256, X25519 ou ML-KEM-512 uma vez, deriva AES-128 uma vez
+  e processa 1, 100, 500 ou 1000 mensagens AES-GCM. O comando força 240 MHz,
+  não imprime dentro das regiões medidas e separa emissor, receptor, custo
+  agregado de CPU e caminho crítico modelado. `tools/session_benchmark.py`
+  alterna a ordem dos algoritmos, rejeita condições inválidas e exporta JSON e
+  tabela. Build Release/O2 passou; execução na Wisdom ainda está pendente.
 - 2026-06-19: fluxo de apresentação de mensagens passou a exigir resposta
   serial real da Wisdom. `ENVIAR MSG` não gera métricas por replay local quando
   a placa está ausente; o modo `--simulated` fica restrito a ensaio visual e
@@ -271,13 +280,19 @@ projeto sem reconstruir decisões antigas:
   agora têm origem experimental explícita. Os 600 `MISSION` passaram na
   validação AES-GCM, com 600 nonces, ciphertexts e tags distintos. A tela
   `RESULTADOS`, o guia final e a metodologia passaram a usar essa fonte.
+- 2026-07-03: `MISSION CLASSIC` deixou de usar uma chave AES aleatória direta
+  e passou a executar ECDH P-256 efêmero nas duas pontas lógicas. O pacote
+  clássico contabiliza uma chave pública não comprimida de 65 B; os resultados
+  de 2026-07-02 permanecem históricos pré-ECDH. O smoke em placa passou com
+  segredo e AEAD coincidentes; falta regravar a revisão final de métricas e
+  executar a nova bateria oficial na Wisdom.
 
 O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar
 `RUN_BATTERY` A/B, executar `DEMO` com overlay calculado e exportar sessões em
 JSON. A coleta técnica antiga, a campanha prolongada com `MISSION` e a
-validação de projetor/legibilidade já foram concluídas; novas baterias longas
-devem ser rodadas manualmente apenas se a montagem física mudar.
+validação de projetor/legibilidade já foram concluídas. A nova bateria ECDH
+deve ser rodada manualmente após gravação e smoke test do firmware atual.
 
 ## 3. Gate 0 - protocolo experimental
 
@@ -724,6 +739,8 @@ Entregas:
 - runner `tools/aes_gcm_metrics_battery.py` implementado para nova bateria
   oficial da versão cifrada com AES-128-GCM, incluindo validações específicas
   de AEAD, nonce, tag e ciphertext;
+- runner `tools/session_benchmark.py` implementado para comparação de sessão
+  ECDH/ML-KEM fixa em 240 MHz e amortizada por 1/100/500/1000 mensagens;
 - campanha oficial pós-AES-GCM mais recente validada por
   `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`;
 - projetor validado por confirmação do usuário em 2026-06-18, após ajuste
@@ -748,9 +765,11 @@ falha conhecida nos cenários testados".
 | Risco | Mitigação |
 |---|---|
 | Regressão de build/flash do ML-KEM na placa | Manter `mlkem-native` vendorizado, KAT host e build PlatformIO como validação obrigatória. |
-| Resposta serial grande de `PQC_FAULT` rejeitada no host | Limite de resposta do parser aumentado para 1024 caracteres e coberto por testes do protocolo. |
+| Resposta serial detalhada rejeitada no host | Limite do parser aumentado para 4096 caracteres para `SESSION_BENCH` e coberto por testes; o limite curto de comandos no firmware foi preservado. |
 | Biblioteca implementa Kyber antigo, não FIPS 203 | Identificar variante e não chamá-la de ML-KEM. |
 | Cinco amostras geram conclusão fraca | Usar campanha determinística maior na coleta e subconjunto visual na demo. |
+| Somar duas pontas como se fosse latência de uma ponta | Publicar separadamente emissor, receptor, CPU agregada e caminho causal crítico. |
+| Ordem fixa aquece ou favorece sempre o mesmo algoritmo | Rotacionar a ordem em cada repetição no runner de sessão. |
 | Serial perde ou reordena respostas | `request_id`, timeout e parser estrito. |
 | Layout não cabe no projetor | Testar duas resoluções e reduzir conteúdo, não a fonte indiscriminadamente. |
 | Resultado simulado é confundido com medição | Campo `mode` em UI e JSON. |
@@ -782,6 +801,11 @@ falha conhecida nos cenários testados".
 - `PQC_FAULT` real em ciphertext ML-KEM com confirmação de chave;
 - `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`;
 - medição de tempo e memória no dispositivo.
+
+O benchmark de sessão de 2026-07-03 está entregue e compilado no software,
+mas só passa a ser evidência experimental depois de regravar e executar a
+coleta na Wisdom. Até lá, não preencher tabelas nem o dashboard com números
+estimados.
 
 O hardware, a campanha prolongada anterior, o projetor validado, `MISSION` e o
 modo `DEMO` sustentam a demonstração.

@@ -16,8 +16,13 @@ O repositório contém hoje:
 - medições de ML-KEM-512 até `PQC_BENCH 100` em `BASELINE` e
   `OBC-1U-LIMITED`;
 - entrega real de mensagem pelo firmware nos cenários `MISSION CLASSIC`,
-  `MISSION PQC` e `MISSION PQC_CRC32`, agora com `AES-128-GCM` para cifrar e
-  autenticar o payload, além de tempos, bytes, heap e resultado;
+  `MISSION PQC` e `MISSION PQC_CRC32`: `CLASSIC` estabelece a chave com ECDH
+  P-256, `PQC` usa ML-KEM-512 e todos usam AES-128-GCM no payload;
+- integração ECDH validada por build, testes e smoke na Wisdom; a regravação
+  da revisão final de métricas e a nova bateria comparativa permanecem pendentes;
+- benchmark técnico de sessão para ECDH P-256, X25519 e ML-KEM-512, fixo em
+  240 MHz, com uma KDF por sessão, 1/100/500/1000 mensagens AES-GCM, ordem
+  rotativa, JSON e tabela; build validado, execução na placa pendente;
 - injeção manual de bit-flip em ciphertext ML-KEM com confirmação
   HMAC-SHA256 da chave derivada;
 - modo `DEMO` A/B cronometrado, com pausa, retomada, parada, overlay calculado
@@ -59,7 +64,7 @@ A entrega final deve comparar duas dimensões complementares:
 
 Para custo de comunicação, a demonstração principal compara:
 
-1. `CLASSIC`: payload cifrado/autenticado por `AES-128-GCM` com chave efêmera;
+1. `CLASSIC`: ECDH P-256 efêmero estabelece a chave e `AES-128-GCM` protege o payload;
 2. `PQC`: acordo de segredo com `ML-KEM-512` e payload cifrado com `AES-GCM`;
 3. `PQC_CRC32`: o mesmo fluxo PQC com CRC32 protegido dentro do payload cifrado.
 
@@ -235,7 +240,7 @@ comandos avançados, inclusive comandos fora do escopo visual da demo:
 | Bloco/comando | Uso na demonstração |
 |---|---|
 | `ENVIAR MSG` / `SEND_MESSAGE` | Envia a mensagem de missão usando o preset selecionado. |
-| `CLÁSSICA` / `SET_PRESET_CLASSIC` | Preset clássico simétrico: AES-128-GCM com chave efêmera. |
+| `CLÁSSICA` / `SET_PRESET_CLASSIC` | Preset clássico: ECDH P-256 efêmero estabelece a chave e AES-GCM cifra. |
 | `PQC` / `SET_PRESET_PQC` | Preset pós-quântico: ML-KEM-512 estabelece a chave e AES-GCM cifra. |
 | `PQC+CRC` / `SET_PRESET_PQC_CRC32` | Preset pós-quântico com CRC32 protegido junto do payload. |
 | `FALHA` / `INJECT_FAULT` | Injeta falha determinística (bit-flip) respeitando o guardião ativo. |
@@ -258,8 +263,8 @@ individuais de tempo/tráfego de cada cenário (`CLÁSSICA`, `PQC`, `PQC+CRC`) s
 diretamente no log do console do painel lateral assim que a mensagem é enviada/recebida.
 Cada resposta `MISSION` abre um popup persistente. Primeiro, a própria janela do
 popup anima o fluxo real do firmware na ordem sequencial fiel da mensagem:
-`payload`, `CRC32` (quando aplicável), e então o lado emissor (`KEYGEN`, `ENCAP`,
-`KDF`, `AES-GCM`), seguido do lado receptor (`DECAP`, `VERIFICA`) e do
+`payload`, `CRC32` (quando aplicável), estabelecimento de chave (`ECDH` ou
+`KEYGEN`/`ENCAP`/`DECAP` ML-KEM), `KDF`, `AES-GCM`, `VERIFICA` e
 `RESULTADO`, mostrando microexplicações e o tamanho acumulado do pacote com os
 bytes reais da Wisdom. A animação é deliberadamente mais lenta e possui um botão
 discreto `PAUSAR`/`PLAY` para o apresentador parar em `KEYGEN`, `ENCAP`, `KDF`,
@@ -268,7 +273,7 @@ final da animação, a mesma janela passa a exibir as métricas detalhadas. Há 
 popup independente por cenário (`CLASSIC`, `PQC`, `PQC+CRC`): o apresentador
 pode arrastar os cartões pelo topo, compará-los lado a lado e fechar cada um
 apenas pelo `X`, observando em cada cartão tempo, bytes e composição do pacote
-(`payload`, ciphertext `ML-KEM`, nonce, tag `GCM` e `CRC32`).
+(`payload`, chave pública `ECDH` ou ciphertext `ML-KEM`, nonce, tag `GCM` e `CRC32`).
 Respostas `MISSION` e `PQC_*` entram no JSON como métricas estruturadas,
 incluindo tempos, bytes, KAT, `key_match`, `key_confirmed`, `tag_match`,
 tamanhos e CRCs curtos, sem exportar segredos completos.
@@ -293,11 +298,10 @@ Estado atual:
   métricas essenciais no topo, testes headless de resoluções, runner de aceitação em
   `tools/stage8_acceptance.py` e preparação oral em
   `GUIA_FINAL_APRESENTACAO.md`.
-  A aceitação de hardware passou e a coleta oficial pós-AES-GCM foi
-  consolidada em
+  A aceitação de hardware passou. A coleta pós-AES-GCM consolidada em
   `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`, com 1.038
   registros, 0 falhas, 600 MISSION runs, 6 benchmarks PQC e 400 testes de
-  falha.
+  falha, agora é histórica pré-ECDH; a nova bateria oficial está pendente.
 
 Validação real em placa após upload em 2026-06-18: `PQC_KAT` retornou
 `kat=pass` com `ss_crc32=0xD9DA8D6C`; `PQC_FAULT 0 0x01 CONFIRM` retornou
@@ -320,6 +324,7 @@ compartilhado completo ou material suficiente para reconstruir a sessão.
 | `docs/hardware_blackboard_wisdom.md` | Inventário e procedimento de bancada da placa RoboCore Wisdom. |
 | `docs/hardware_command_reference.md` | Referência única de comandos completos de hardware/bancada. |
 | `docs/METRICAS_CONSOLIDADAS.md` | Metodologia, estatísticas e critérios de consolidação das baterias. |
+| `tools/session_benchmark.py` | Coleta justa de sessão ECDH/ML-KEM a 240 MHz, com amortização e exportação JSON. |
 | `GUIA_FINAL_APRESENTACAO.md` | Artefato central de estudo: fundamentos, arquitetura, resultados, roteiro e defesa oral. |
 | `docs/projeto_final_pqc_esp32_cubesat.docx` | Proposta acadêmica formal. |
 | `docs/ROADMAP.md` | Plano consolidado, critérios e ordem recomendada. |

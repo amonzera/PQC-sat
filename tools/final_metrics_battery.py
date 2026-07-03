@@ -315,6 +315,8 @@ def summarize_missions(records: list[dict[str, object]]) -> dict[str, object]:
                 "keygen_us",
                 "encap_us",
                 "decap_us",
+                "ecdh_tx_us",
+                "ecdh_rx_us",
                 "rng_us",
                 "kdf_us",
                 "encrypt_us",

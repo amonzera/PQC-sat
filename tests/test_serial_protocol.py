@@ -9,6 +9,7 @@ from unittest import mock
 from tools import aes_gcm_metrics_battery
 from tools import final_metrics_battery
 from tools import serial_console
+from tools import session_benchmark
 from tools import stage8_acceptance
 from tools.serial_bridge import SerialBridgeError
 from tools.serial_protocol import (
@@ -82,6 +83,15 @@ class SerialProtocolTests(unittest.TestCase):
         with self.assertRaises(ProtocolError):
             parse_frame(oversized)
 
+    def test_accepts_detailed_session_benchmark_frame(self):
+        fields = [f"metric_{index}={index:010d}" for index in range(80)]
+        frame = "V1|1|RESULT|OK|" + "|".join(fields)
+
+        parsed = parse_frame(frame)
+
+        self.assertTrue(parsed.is_result)
+        self.assertLess(len(frame), MAX_FRAME_CHARS)
+
     def test_rejects_payload_without_key_value(self):
         with self.assertRaises(ProtocolError):
             decode_key_values(("seq=1", "bad_field"))
@@ -120,6 +130,133 @@ class SerialProtocolTests(unittest.TestCase):
         self.assertNotIn("PQC_INFO", demo_rendered)
         self.assertNotIn("PQC_FAULT", demo_rendered)
         self.assertNotIn("STRESS PQC_LOOP", demo_rendered)
+
+    def test_session_benchmark_is_full_catalog_only(self):
+        self.assertIn("SESSION_BENCH", FIRMWARE_COMMAND_NAMES)
+        self.assertNotIn("SESSION_BENCH", DEMO_FIRMWARE_COMMAND_NAMES)
+        full_rendered = "\n".join(command_help_lines(demo_only=False))
+        demo_rendered = "\n".join(command_help_lines())
+        self.assertIn("SESSION_BENCH ECDH_P256|X25519|MLKEM512", full_rendered)
+        self.assertNotIn("SESSION_BENCH", demo_rendered)
+
+    def test_session_benchmark_plan_is_balanced_and_never_uses_limited_profile(self):
+        args = mock.Mock(
+            algorithms=["ECDH_P256", "X25519", "MLKEM512"],
+            messages=[1, 100],
+            repeats=3,
+        )
+        plan = session_benchmark.planned_commands(args)
+        commands = [command for command, _phase in plan]
+
+        self.assertNotIn("PROFILE OBC-1U-LIMITED", commands)
+        for messages in args.messages:
+            for algorithm in args.algorithms:
+                self.assertEqual(commands.count(f"SESSION_BENCH {algorithm} {messages}"), 3)
+        first_algorithms = [
+            command.split()[1]
+            for command, phase in plan
+            if phase == "session_bench" and command.endswith(" 1")
+        ][::3]
+        self.assertEqual(first_algorithms, ["ECDH_P256", "X25519", "MLKEM512"])
+
+    def test_session_benchmark_summary_rejects_non_240mhz_record(self):
+        payload = {
+            "algorithm": "ECDH_P256",
+            "profile": "BASELINE",
+            "cpu_mhz": "80",
+            "radio": "OFF",
+            "build_opt": "O2",
+            "mbedtls_hw_mpi": "1",
+            "mbedtls_hw_aes": "1",
+            "mbedtls_hw_sha": "1",
+            "mbedtls_ecp_nist_optim": "1",
+            "messages": "100",
+            "key_match": "1",
+            "aead_match": "1",
+            "algorithm_init_us": "0",
+            "sender_setup_us": "10",
+            "receiver_setup_us": "11",
+            "setup_session_us": "20",
+            "critical_latency_us": "12",
+            "critical_latency_model": "parallel_endpoints_no_network",
+            "aes_gcm_encrypt_us": "100",
+            "aes_gcm_decrypt_us": "100",
+            "nonce_setup_us": "1",
+            "data_total_us": "200",
+            "total_us": "220",
+            "handshake_bytes": "130",
+            "data_message_bytes": "69",
+            "wire_total_bytes": "7030",
+            "heap_before": "200000",
+            "heap_after": "199000",
+            "min_heap_after": "190000",
+            "stack_hwm_after_bytes": "4096",
+            "flash_binary_bytes": "941789",
+        }
+        record = {
+            "ok": True,
+            "status": "OK",
+            "command": "SESSION_BENCH ECDH_P256 100",
+            "payload": payload,
+        }
+
+        summary = session_benchmark.summarize([record])
+
+        self.assertFalse(summary["ok"])
+        self.assertEqual(summary["invalid_session_runs"], 1)
+        self.assertIn("not_fixed_240mhz_baseline", summary["invalid"][0]["errors"])
+
+    def test_session_benchmark_summary_calculates_precise_amortization(self):
+        payload = {
+            "algorithm": "MLKEM512",
+            "profile": "BASELINE",
+            "cpu_mhz": "240",
+            "radio": "OFF",
+            "build_opt": "O2",
+            "mbedtls_hw_mpi": "1",
+            "mbedtls_hw_aes": "1",
+            "mbedtls_hw_sha": "1",
+            "mbedtls_ecp_nist_optim": "1",
+            "messages": "100",
+            "key_match": "1",
+            "aead_match": "1",
+            "algorithm_init_us": "0",
+            "sender_setup_us": "4000",
+            "receiver_setup_us": "8000",
+            "setup_session_us": "12000",
+            "aggregate_setup_us": "13000",
+            "critical_latency_us": "12000",
+            "critical_latency_model": "parallel_endpoints_no_network",
+            "aes_gcm_encrypt_us": "1001",
+            "aes_gcm_decrypt_us": "2002",
+            "nonce_setup_us": "2",
+            "data_total_us": "3103",
+            "total_us": "15103",
+            "aggregate_total_us": "16103",
+            "handshake_bytes": "1568",
+            "data_message_bytes": "69",
+            "wire_total_bytes": "8468",
+            "heap_before": "200000",
+            "heap_after": "199000",
+            "min_heap_after": "190000",
+            "stack_hwm_after_bytes": "4096",
+            "stack_hwm_drop_bytes": "0",
+            "flash_binary_bytes": "942105",
+        }
+        record = {
+            "ok": True,
+            "status": "OK",
+            "command": "SESSION_BENCH MLKEM512 100",
+            "payload": payload,
+        }
+
+        summary = session_benchmark.summarize([record])
+        metrics = summary["groups"]["MLKEM512"]["100"]["metrics"]
+
+        self.assertTrue(summary["ok"])
+        self.assertEqual(metrics["setup_session_us"]["median"], 12000.0)
+        self.assertEqual(metrics["amortized_us"]["median"], 151.03)
+        self.assertEqual(metrics["data_avg_us"]["median"], 31.03)
 
     def test_interactive_console_help_is_local_only(self):
         class FakeBridge:
@@ -334,7 +471,13 @@ class SerialProtocolTests(unittest.TestCase):
                         "ciphertext_crc32": f"0xC{index}",
                         "gcm_tag_crc32": f"0xA{index}",
                         "payload_crc32": "0xPAY",
-                        "key_source": "RANDOM_SESSION",
+                        "crypto": "ECDH-P256",
+                        "key_source": "ECDH-P256",
+                        "bytes_ecdh": "65",
+                        "keygen_us": "200",
+                        "ecdh_tx_us": "100",
+                        "ecdh_rx_us": "101",
+                        "key_match": "1",
                         "encrypt_us": "20",
                         "decrypt_us": "18",
                         "rng_us": "4",
@@ -346,12 +489,33 @@ class SerialProtocolTests(unittest.TestCase):
                     },
                 }
             )
+        for scenario_index, scenario in enumerate(("PQC", "PQC_CRC32"), 3):
+            for sample_index in range(2):
+                payload = dict(records[sample_index]["payload"])
+                payload.update({
+                    "scenario": scenario,
+                    "nonce_crc32": f"0x{scenario_index}{sample_index}",
+                    "crypto": "ML-KEM-512",
+                    "key_source": "ML-KEM-512",
+                    "bytes_mlkem": "768",
+                    "keygen_us": "300",
+                    "encap_us": "301",
+                    "decap_us": "302",
+                })
+                records.append({
+                    "ok": True,
+                    "command": f"MISSION {scenario} {aes_gcm_metrics_battery.DEFAULT_AES_PAYLOAD_HEX}",
+                    "profile_requested": "BASELINE",
+                    "payload": payload,
+                })
 
         summary = aes_gcm_metrics_battery.summarize_aes_gcm(records)
         checks = summary["checks"]
         classic = summary["profiles"]["BASELINE"]["scenarios"]["CLASSIC"]
 
-        self.assertTrue(checks["official_candidate"])
+        self.assertFalse(checks["official_candidate"])
+        self.assertTrue(checks["balanced_scenarios"])
+        self.assertFalse(checks["official_sample_size"])
         self.assertEqual(checks["missing_required_fields"], 0)
         self.assertEqual(checks["non_aes_gcm_records"], 0)
         self.assertEqual(checks["aead_failures"], 0)
@@ -365,6 +529,7 @@ class SerialProtocolTests(unittest.TestCase):
 
     def test_aes_gcm_metrics_battery_does_not_merge_pqc_and_pqc_crc32(self):
         def record(scenario):
+            nonce_by_scenario = {"CLASSIC": "0x01", "PQC": "0x02", "PQC_CRC32": "0x03"}
             return {
                 "ok": True,
                 "command": f"MISSION {scenario} {aes_gcm_metrics_battery.DEFAULT_AES_PAYLOAD_HEX}",
@@ -376,7 +541,7 @@ class SerialProtocolTests(unittest.TestCase):
                     "cipher": "AES-128-GCM",
                     "nonce_bytes": "12",
                     "gcm_tag_bytes": "16",
-                    "nonce_crc32": f"0x{scenario[-1:] or '0'}1",
+                    "nonce_crc32": nonce_by_scenario[scenario],
                     "ciphertext_crc32": f"0x{scenario[-1:] or '0'}2",
                     "gcm_tag_crc32": f"0x{scenario[-1:] or '0'}3",
                     "encrypt_us": "20",
@@ -384,15 +549,34 @@ class SerialProtocolTests(unittest.TestCase):
                     "aead_match": "1",
                     "decrypt_ok": "1",
                     "tag_match": "1",
+                    **({
+                        "crypto": "ECDH-P256",
+                        "key_source": "ECDH-P256",
+                        "bytes_ecdh": "65",
+                        "keygen_us": "200",
+                        "ecdh_tx_us": "100",
+                        "ecdh_rx_us": "101",
+                        "key_match": "1",
+                    } if scenario == "CLASSIC" else {
+                        "crypto": "ML-KEM-512",
+                        "key_source": "ML-KEM-512",
+                        "bytes_mlkem": "768",
+                        "keygen_us": "300",
+                        "encap_us": "301",
+                        "decap_us": "302",
+                        "key_match": "1",
+                    }),
                 },
             }
 
-        summary = aes_gcm_metrics_battery.summarize_aes_gcm([record("PQC"), record("PQC_CRC32")])
+        summary = aes_gcm_metrics_battery.summarize_aes_gcm([record("CLASSIC"), record("PQC"), record("PQC_CRC32")])
         scenarios = summary["profiles"]["BASELINE"]["scenarios"]
 
         self.assertEqual(scenarios["PQC"]["runs"], 1)
         self.assertEqual(scenarios["PQC_CRC32"]["runs"], 1)
-        self.assertTrue(summary["checks"]["official_candidate"])
+        self.assertFalse(summary["checks"]["official_candidate"])
+        self.assertTrue(summary["checks"]["balanced_scenarios"])
+        self.assertFalse(summary["checks"]["official_sample_size"])
 
 
 if __name__ == "__main__":

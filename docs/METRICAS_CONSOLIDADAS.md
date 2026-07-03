@@ -6,30 +6,30 @@ para consolidar os resultados do seminário.
 
 ## 1. Objetivo atual do seminário
 
-O projeto deve mostrar que a migração para criptografia pós-quântica aumenta o
-custo operacional em hardware embarcado e que esse custo cresce quando também
-exigimos mecanismos explícitos de integridade.
+O projeto deve mostrar como a migração para criptografia pós-quântica altera os
+custos de processamento, comunicação e memória em hardware embarcado. Não se
+presume que ML-KEM seja mais lento que toda implementação clássica: a conclusão
+deve vir das medições da mesma placa, build e frequência.
 
 A apresentação deve comparar três cenários de entrega de uma mensagem curta:
 
 | Cenário | O que representa | Comando |
 |---|---|---|
-| `CLASSIC` | Mensagem cifrada/autenticada por `AES-128-GCM` com chave efêmera | `MISSION CLASSIC` |
+| `CLASSIC` | `ECDH P-256` efêmero estabelece a chave; `AES-128-GCM` cifra o payload | `MISSION CLASSIC` |
 | `PQC` | `ML-KEM-512` estabelece a chave; `AES-128-GCM` cifra o payload | `MISSION PQC` |
 | `PQC_CRC32` | `ML-KEM-512` + `AES-GCM` + `CRC32` protegido no payload | `MISSION PQC_CRC32` |
 
 A tese visual é:
 
 ```text
-CLASSIC  -> menor custo, cifra clássica simétrica com chave efêmera
-PQC      -> maior custo, preparo para ameaça quântica
-PQC+CRC  -> maior robustez contra corrupção acidental, com custo adicional
+CLASSIC  -> ECDH P-256 clássico para chave + AES-GCM
+PQC      -> custo diferente de CPU, comunicação e memória; preparo para ameaça quântica
+PQC+CRC  -> robustez diagnóstica contra corrupção acidental, com custo adicional
 ```
 
-> Estado dos números: a fonte oficial atual é
-> `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`. As tabelas
-> pré-AES permanecem mais adiante apenas como histórico e estão identificadas
-> explicitamente.
+> Estado dos números: `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`
+> é histórico pré-ECDH. Uma nova bateria na placa é obrigatória antes de
+> promover números da comparação ECDH P-256 versus ML-KEM-512.
 
 ## 2. O que a placa realmente faz
 
@@ -55,13 +55,14 @@ as conclusões estatísticas oficiais da apresentação.
 Fluxo:
 
 1. a placa pega o payload padrão `PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK`;
-2. gera uma chave AES-128 efêmera e um nonce aleatório;
-3. cifra o payload com `AES-128-GCM` e gera a tag GCM;
-4. decifra/verifica a tag como se fosse o receptor;
-5. retorna tempo, bytes, heap e resultado.
+2. gera dois pares ECDH P-256 efêmeros, um para cada ponta lógica;
+3. transmite/contabiliza a chave pública não comprimida do emissor (65 B);
+4. calcula e compara o segredo compartilhado nas duas pontas;
+5. deriva a chave AES-128, gera nonce e executa AES-GCM;
+6. retorna tempos ECDH/AES, bytes, heap e resultado.
 
-Esse cenário não executa PQC. Ele é o baseline clássico simétrico de mensagem
-cifrada/autenticada, não uma pilha assimétrica completa.
+Esse cenário é a pilha clássica equivalente usada para comparar o
+estabelecimento de chave ECDH com ML-KEM.
 
 ### `MISSION PQC`
 
@@ -89,6 +90,63 @@ Fluxo:
 
 Esse cenário demonstra o acúmulo de custo: PQC mais guardião de integridade.
 
+## 2.1. Benchmark de sessão comparável a produção
+
+`MISSION` continua sendo o fluxo visual de uma mensagem. Para comparar
+estabelecimento clássico e pós-quântico sem gerar chaves a cada payload, use:
+
+```text
+SESSION_BENCH ECDH_P256|X25519|MLKEM512 1|100|500|1000
+```
+
+O comando força `BASELINE` a 240 MHz, desliga os rádios e só escreve na serial
+depois das regiões cronometradas. Cada amostra faz um setup real, deriva a
+chave AES uma vez e reutiliza a sessão para N mensagens com nonces únicos:
+
+```text
+ECDH: KeyGen receptor + KeyGen emissor + dois shared secrets + duas KDF
+ML-KEM: KeyGen receptor + Encaps emissor + Decaps receptor + duas KDF
+dados: N x (AES-GCM encrypt + AES-GCM decrypt)
+```
+
+P-256 usa chaves públicas não comprimidas de 65 B. No handshake completo são
+contabilizadas as duas chaves públicas, totalizando 130 B. X25519 usa duas
+chaves de 32 B, totalizando 64 B. ML-KEM-512 contabiliza a chave pública de
+800 B e o ciphertext de 768 B, totalizando 1.568 B. Certificados, transporte e
+autenticação de identidade permanecem fora do escopo nos três casos.
+
+As métricas não confundem CPU agregada com latência:
+
+| Campo | Interpretação |
+|---|---|
+| `sender_setup_us`, `receiver_setup_us` | Trabalho medido em cada papel lógico. |
+| `algorithm_init_us` | Inicialização do grupo ECDH; zero para o backend ML-KEM já ligado estaticamente. |
+| `aggregate_setup_us` | Todo o trabalho de setup executado sequencialmente na única placa. |
+| `critical_latency_us` / `setup_session_us` | Caminho causal modelado com endpoints paralelos e rede zero; não é a soma cega das pontas. |
+| `data_total_us` | Encrypt + decrypt de N mensagens, com validação real. |
+| `nonce_setup_us` | Geração do prefixo aleatório do nonce uma vez por sessão; o contador garante nonce único por mensagem. |
+| `total_us` | Caminho crítico de setup + entrega dos dados. |
+| `aggregate_total_us` | CPU agregada de setup + dados. |
+| `amortized_us` | `total_us / N`, calculado com precisão no runner host. |
+| `handshake_bytes` | Material de handshake efetivamente contabilizado acima. |
+| `principal_crypto_buffers_bytes` | Buffers principais explícitos; não inclui todas as alocações internas da biblioteca. |
+| `min_heap_after` | Watermark global de heap desde o boot; não é resetável por amostra. |
+
+O Mbed TLS fornecido pelo framework ESP32 está pré-compilado em otimização de
+tamanho (`-Os`) e tem `HARDWARE_MPI`, `HARDWARE_AES`, `HARDWARE_SHA`,
+`ECP_NIST_OPTIM`, fixed-point ECP, P-256 e Curve25519 ativos. O código do
+projeto e `mlkem-native` usam Release `-O2`. Não atribua `-O2` à biblioteca
+Mbed TLS pré-compilada.
+
+Conclusão metodológica esperada, sem impor o vencedor antes da coleta:
+
+> O custo pós-quântico não deve ser analisado apenas por tempo bruto de CPU.
+> Nesta plataforma, dependendo da biblioteca, ML-KEM pode ser mais rápido em
+> processamento que ECDH P-256. Porém, ML-KEM possui maior custo de
+> comunicação, artefatos criptográficos maiores e possível maior uso de
+> memória. Em produção, o handshake deve ser amortizado por várias mensagens
+> AES-GCM.
+
 ## 3. Métricas exportadas
 
 Cada resposta `MISSION` entra no JSON em:
@@ -104,11 +162,12 @@ Campos principais:
 | Campo | Como usar na apresentação |
 |---|---|
 | `elapsed_us` | Tempo total observado no cenário. |
-| `keygen_us` | Custo de geração de chave ML-KEM; zero no cenário clássico. |
+| `keygen_us` | Custo de preparar P-256, gerar dois pares ECDH e serializar a chave pública, ou gerar o par ML-KEM. |
 | `encap_us` | Custo de encapsulamento ML-KEM; zero no cenário clássico. |
 | `decap_us` | Custo de decapsulação ML-KEM; zero no cenário clássico. |
-| `rng_us` | Custo de gerar chave/nonce quando aplicável. |
-| `kdf_us` | Custo de derivar chave AES a partir do segredo ML-KEM. |
+| `ecdh_tx_us` / `ecdh_rx_us` | Cálculo do segredo ECDH em cada ponta; zero em PQC. |
+| `rng_us` | Custo do nonce aleatório fora das gerações de chave medidas. |
+| `kdf_us` | Custo de derivar chave AES a partir do segredo ECDH ou ML-KEM. |
 | `encrypt_us` / `tag_us` | Custo de cifrar e gerar tag AES-GCM (`tag_us` fica como alias histórico). |
 | `decrypt_us` / `verify_us` | Custo de decifrar/verificar AES-GCM (`verify_us` fica como alias histórico). |
 | `crc_us` | Custo do CRC32; zero quando checksum está desligado. |
@@ -116,7 +175,7 @@ Campos principais:
 | `heap` / `min_heap` | RAM livre e menor RAM livre observada na amostra. |
 | `cpu_mhz` | Frequência do perfil ativo. |
 | `profile` | `BASELINE` ou `OBC-1U-LIMITED`. |
-| `key_match` | Se os segredos ML-KEM bateram. |
+| `key_match` | Se os segredos das duas pontas bateram em ECDH ou ML-KEM. |
 | `aead_match` / `tag_match` | Se a verificação AES-GCM aceitou a mensagem. |
 | `crc_match` | Se o checksum bateu. |
 | `result` | `DELIVERED` ou `REJECTED`. |
@@ -153,20 +212,20 @@ LEDs/bargraph da Wisdom também são usados como reforço lúdico:
 Esses efeitos não são métricas científicas; são apoio visual para a turma
 perceber o crescimento de custo.
 
-## 4.5. Resultados reais consolidados
+## 4.5. Resultados históricos pré-ECDH
 
-Fonte exibida atualmente na aba `RESULTADOS` do dashboard:
+Fonte histórica preservada para rastreabilidade:
 
 ```text
 logs/20260702T044907Z_final_metrics_dev-ttyusb0.json
 ```
 
-Essa é a bateria oficial mais recente consolidada no dashboard. Embora tenha
+Essa foi a bateria oficial AES-GCM anterior ao ECDH. Embora tenha
 sido produzida pelo runner geral, a validação foi recalculada diretamente dos
 600 registros `MISSION`: todos retornaram `cipher=AES-128-GCM`,
 `nonce_bytes=12`, `gcm_tag_bytes=16`, `aead_match=1` e `decrypt_ok=1`.
 
-Resumo da bateria mais recente:
+Resumo da bateria histórica:
 
 - 1.038 registros;
 - 0 falhas de comando;
@@ -233,7 +292,7 @@ execuções.
 | `crc_us` (avg) | 0 | 0 | 53 |
 | `result` | DELIVERED | DELIVERED | DELIVERED |
 
-Razões observadas na bateria AES-GCM:
+Razões históricas observadas na bateria AES-GCM sem ECDH:
 
 | Comparação | BASELINE | OBC-1U-LIMITED |
 |---|---:|---:|
@@ -363,9 +422,9 @@ Leitura didática:
 - Na bateria histórica pré-AES, o trafego PQC da missão foi 11,5x maior que o
   clássico porque o pacote de entrega contabilizava payload + ciphertext
   ML-KEM (768 bytes) + tag HMAC (32 bytes). Na versão atual, a composição
-  passa a ser payload cifrado + ciphertext ML-KEM + nonce + tag GCM. A chave
-  publica ML-KEM tem 800 bytes, mas não está sendo somada nesse `bytes_total`
-  da mensagem consolidada.
+  passa a ser payload cifrado + chave pública ECDH do emissor ou ciphertext
+  ML-KEM + nonce + tag GCM. A chave pública do receptor não é somada em
+  `bytes_total`, igualmente nos dois modelos.
 - A heap permaneceu constante em todos os cenários: a criptografia PQC não
   causou fragmentacao perceptivel nos testes.
 
@@ -402,12 +461,12 @@ Tempo médio da verificação de falha:
 | BASELINE 240 MHz | 17 us | 13 us |
 | OBC-1U-LIMITED 80 MHz | 44 us | 39 us |
 
-### Conclusões para o seminário
+### Conclusões históricas pré-ECDH
 
 1. O objetivo principal foi atingido: a Wisdom/ESP32 executou ML-KEM-512 real,
    entregou mensagens nos três cenários e exportou métricas de tempo, bytes e
    heap.
-2. Na bateria oficial AES-GCM, `PQC` foi 23,2x mais lento que `CLASSIC` a
+2. Na bateria histórica pré-ECDH, `PQC` foi 23,2x mais lento que `CLASSIC` a
    240 MHz e 39,1x mais lento no perfil limitado de
    80 MHz.
 3. O custo de tráfego também é didático: `PQC` saiu de 69 bytes para 837
@@ -428,13 +487,13 @@ Para o seminário atual:
 - não rodar bateria longa durante a apresentação;
 - demonstrar manualmente `CLÁSSICA`, `PQC`, `PQC+CRC`, `ENVIAR MSG` e
   `FALHA`;
-- citar `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json` como fonte
-  dos dados consolidados.
+- citar `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json` apenas como
+  histórico pré-ECDH até a nova bateria ser consolidada.
 
 Para evolucao cientifica futura:
 
 - medir energia real com instrumento externo, porque `MHz * us` não é watts;
-- comparar com uma pilha clássica assimetrica mais completa, como ECDH + HMAC;
+- executar ECDH e ML-KEM entre duas placas com autenticação das chaves públicas;
 - repetir a coleta em outros perfis de clock e com payloads maiores;
 - testar bursts de bit-flips e corrupções fora da regiao coberta pelo CRC32.
 
@@ -470,23 +529,50 @@ Resultado esperado:
 - `aead_match=1` e `tag_match=1` como alias de compatibilidade;
 - `PQC` e `PQC_CRC32` devem ter `key_match=1`;
 - `PQC_CRC32` deve ter `crc_match=1`;
-- `elapsed_us` de `PQC` deve ser maior que `CLASSIC`;
-- `elapsed_us` de `PQC_CRC32` deve ser maior ou próximo de `PQC`, com
-  `crc_us` visível.
+- não existe requisito de que `PQC` seja mais lento que `CLASSIC`;
+- diferenças de tempo devem ser reportadas mesmo quando ML-KEM for mais rápido;
+- `PQC_CRC32` deve manter `crc_us` visível, sem exigir ordenação rígida entre
+  duas amostras sujeitas a ruído.
 
 ## 6. Bateria final robusta para novos resultados
 
-A bateria usada como fonte atual da apresentação foi consolidada em
-`logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`. Não rode outra
-bateria durante o seminário.
+Para a comparação justa de sessão ECDH/ML-KEM, a fonte primária é:
+
+```bash
+python3 tools/session_benchmark.py --port /dev/ttyUSB0 --timeout 20 --repeats 10 --pause 0.25
+```
+
+Ela gera 120 amostras balanceadas: três algoritmos, quatro contagens de
+mensagens e dez repetições. A ordem é rotacionada e toda amostra precisa ter
+`profile=BASELINE`, `cpu_mhz=240`, `build_opt=O2`, `key_match=1` e
+`aead_match=1`. O arquivo esperado é:
+
+```text
+logs/<timestamp>_session_benchmark_dev-ttyusb0.json
+summary.ok=true
+summary.session_runs=120
+summary.invalid_session_runs=0
+```
+
+Confira o plano sem abrir a porta com
+`python3 tools/session_benchmark.py --dry-run --repeats 10`. A tabela impressa
+usa medianas e inclui setup crítico, AES-GCM médio, N, amortização, handshake,
+watermark global de heap e flash. Os p95 e dados brutos ficam no JSON.
+
+A bateria abaixo permanece necessária para regressão do fluxo visual,
+AES-GCM, CRC32 e comparação entre perfis. Ela não substitui o benchmark de
+sessão para afirmar latência de produção.
+
+A bateria `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json` é histórica
+pré-ECDH. A nova fonte da apresentação será a primeira coleta oficial que
+passar nas validações ECDH/ML-KEM.
 
 Baterias longas não devem ser iniciadas pelo agente. Se a montagem física
 mudar e for necessário repetir a coleta, o operador roda no terminal e depois
 chama o agente para analisar o JSON.
 
-Para consolidar um resultado novo e mais sólido para a seção `RESULTADOS` com
-o fluxo atual, isto é, `MISSION` já cifrando payload com `AES-128-GCM`, use o
-runner dedicado pós-AES:
+Para consolidar a seção `RESULTADOS` com ECDH P-256 versus ML-KEM-512, use o
+runner dedicado:
 
 ```bash
 python3 tools/aes_gcm_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 100 --pause 0.25 --bench-repeats 3 --bench-rounds 100
@@ -504,7 +590,8 @@ Esse comando executa, em `BASELINE` 240 MHz e `OBC-1U-LIMITED` 80 MHz:
 - 3 execuções `PQC_BENCH 100` por perfil;
 - validações específicas em `summary.aes_gcm`, incluindo `cipher=AES-128-GCM`,
   `nonce_bytes=12`, `gcm_tag_bytes=16`, `aead_match=1`, `decrypt_ok=1`,
-  `tag_match=1` e contagem de duplicatas de `nonce_crc32`.
+  `tag_match=1`, `ecdh_invalid_records=0`, `pqc_invalid_records=0`, cenários
+  balanceados e contagem de duplicatas de `nonce_crc32`.
 
 Resultado esperado no terminal:
 
@@ -527,6 +614,14 @@ python3 tools/aes_gcm_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycl
 
 Depois que o JSON for gerado, chame o agente para consolidar o arquivo novo em
 tabelas. Os campos principais para atualização da apresentação são:
+
+```bash
+python3 tools/consolidate_metrics.py --file logs/<timestamp>_aes_gcm_metrics_dev-ttyusb0.json
+```
+
+O consolidador só promove a coleta se `official_candidate=true`,
+`ecdh_invalid_records=0`, `pqc_invalid_records=0` e os cenários estiverem
+balanceados; o dashboard lê `logs/metrics_consolidated.json`.
 
 - `summary.aes_gcm.checks.official_candidate`;
 - `summary.aes_gcm.profiles.<perfil>.scenarios.<cenário>.encrypt_us`;
@@ -591,7 +686,7 @@ tabelas. O campo principal para análise é `summary`, que já contém:
 - lista dos comandos com falha em `summary.failed_commands`.
 
 Use `tools/stage8_acceptance.py` apenas para aceite/regressão geral. Para
-métricas finais da apresentação pós-AES-GCM, prefira
+métricas finais da apresentação ECDH/ML-KEM, prefira
 `tools/aes_gcm_metrics_battery.py`.
 
 ## 6.1. Aceite longo da etapa 8
@@ -631,7 +726,7 @@ Não afirmar:
 
 Afirmar:
 
-- `CLASSIC` é um baseline clássico simétrico com AES-GCM e chave efêmera;
+- `CLASSIC` usa ECDH P-256 efêmero para estabelecer a chave e AES-GCM para o payload;
 - `PQC` mede ML-KEM-512 para estabelecer chave e AES-GCM para cifrar;
 - `PQC_CRC32` mede o acréscimo de checksum protegido sobre o fluxo PQC;
 - a Wisdom representa um OBC COTS educacional sob perfil limitado;

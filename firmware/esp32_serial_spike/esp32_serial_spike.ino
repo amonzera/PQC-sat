@@ -15,9 +15,13 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "mbedtls/md.h"
 #include "mbedtls/gcm.h"
+#include "mbedtls/ecdh.h"
+#include "mbedtls/ecp.h"
 
 #include <mlkem_native.h>
 
@@ -43,12 +47,16 @@ static constexpr const char *PQC_LICENSE = "Apache2-ISC-MIT";
 static constexpr const char *PQC_CONFIRMATION = "HMAC-SHA256";
 static constexpr size_t PQC_CONFIRM_TAG_BYTES = 32;
 static constexpr const char *AEAD_CIPHER = "AES-128-GCM";
+static constexpr const char *CLASSIC_TARGET = "ECDH-P256";
+static constexpr size_t ECDH_SHARED_SECRET_BYTES = 32;
+static constexpr size_t ECDH_PUBLIC_KEY_BYTES = 65;
+static constexpr size_t X25519_PUBLIC_KEY_BYTES = 32;
 static constexpr size_t AES128_KEY_BYTES = 16;
 static constexpr size_t AES_GCM_NONCE_BYTES = 12;
 static constexpr size_t AES_GCM_TAG_BYTES = 16;
 static constexpr size_t MISSION_CRC_BYTES = 4;
-static constexpr const char *CLASSIC_TARGET = AEAD_CIPHER;
 static constexpr const char *MISSION_DEFAULT_PAYLOAD = "PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK";
+static constexpr uint16_t SESSION_BENCH_COUNTS[] = {1, 100, 500, 1000};
 
 static_assert(CRYPTO_PUBLICKEYBYTES == 800, "unexpected ML-KEM-512 public key size");
 static_assert(CRYPTO_SECRETKEYBYTES == 1632, "unexpected ML-KEM-512 secret key size");
@@ -154,6 +162,44 @@ static uint8_t pqc_kat_sk[CRYPTO_SECRETKEYBYTES];
 static uint8_t pqc_kat_ct[CRYPTO_CIPHERTEXTBYTES];
 static uint8_t pqc_kat_ss_enc[CRYPTO_BYTES];
 static uint8_t pqc_kat_ss_dec[CRYPTO_BYTES];
+
+struct SessionBenchMetrics {
+  const char *algorithm = "";
+  uint32_t messages = 0;
+  uint32_t algorithm_init_us = 0;
+  uint32_t tx_keygen_us = 0;
+  uint32_t rx_keygen_us = 0;
+  uint32_t tx_shared_us = 0;
+  uint32_t rx_shared_us = 0;
+  uint32_t tx_kdf_us = 0;
+  uint32_t rx_kdf_us = 0;
+  uint32_t sender_setup_us = 0;
+  uint32_t receiver_setup_us = 0;
+  uint32_t setup_session_us = 0;
+  uint32_t aggregate_setup_us = 0;
+  uint32_t critical_latency_us = 0;
+  uint32_t encrypt_total_us = 0;
+  uint32_t decrypt_total_us = 0;
+  uint32_t nonce_setup_us = 0;
+  uint32_t data_total_us = 0;
+  uint32_t total_us = 0;
+  uint32_t aggregate_total_us = 0;
+  uint32_t public_key_bytes = 0;
+  uint32_t ciphertext_bytes = 0;
+  uint32_t handshake_bytes = 0;
+  uint32_t data_message_bytes = 0;
+  uint32_t data_total_bytes = 0;
+  uint32_t wire_total_bytes = 0;
+  uint32_t principal_crypto_buffers_bytes = 0;
+  uint32_t heap_before = 0;
+  uint32_t heap_after = 0;
+  uint32_t min_heap_before = 0;
+  uint32_t min_heap_after = 0;
+  uint32_t stack_hwm_before = 0;
+  uint32_t stack_hwm_after = 0;
+  bool key_match = false;
+  bool aead_match = false;
+};
 
 static constexpr uint8_t PQC_KAT_EXPECTED_SS[CRYPTO_BYTES] = {
     0xA0, 0x21, 0x91, 0x08, 0xC1, 0xBF, 0xF6, 0xDE,
@@ -1141,6 +1187,83 @@ static bool fill_random_bytes(uint8_t *out, size_t len) {
   return randombytes(out, len) == 0;
 }
 
+static int mbedtls_random(void *, unsigned char *out, size_t len) {
+  return randombytes(out, len);
+}
+
+static int classic_ecdh_exchange(
+    uint8_t *shared_tx,
+    uint8_t *shared_rx,
+    uint8_t *public_tx,
+    uint32_t *keygen_us,
+    uint32_t *derive_tx_us,
+    uint32_t *derive_rx_us) {
+  mbedtls_ecp_group group;
+  mbedtls_mpi private_tx;
+  mbedtls_mpi private_rx;
+  mbedtls_mpi secret_tx;
+  mbedtls_mpi secret_rx;
+  mbedtls_ecp_point point_tx;
+  mbedtls_ecp_point point_rx;
+  mbedtls_ecp_group_init(&group);
+  mbedtls_mpi_init(&private_tx);
+  mbedtls_mpi_init(&private_rx);
+  mbedtls_mpi_init(&secret_tx);
+  mbedtls_mpi_init(&secret_rx);
+  mbedtls_ecp_point_init(&point_tx);
+  mbedtls_ecp_point_init(&point_rx);
+
+  const uint32_t keygen_started = micros();
+  int rc = mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256R1);
+  if (rc == 0) {
+    rc = mbedtls_ecp_gen_keypair(&group, &private_rx, &point_rx, mbedtls_random, nullptr);
+    if (rc == 0) {
+      rc = mbedtls_ecp_gen_keypair(&group, &private_tx, &point_tx, mbedtls_random, nullptr);
+    }
+  }
+
+  size_t public_len = 0;
+  if (rc == 0) {
+    rc = mbedtls_ecp_point_write_binary(
+        &group,
+        &point_tx,
+        MBEDTLS_ECP_PF_UNCOMPRESSED,
+        &public_len,
+        public_tx,
+        ECDH_PUBLIC_KEY_BYTES);
+    if (rc == 0 && public_len != ECDH_PUBLIC_KEY_BYTES) {
+      rc = MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+    }
+  }
+  *keygen_us = micros() - keygen_started;
+
+  if (rc == 0) {
+    const uint32_t started = micros();
+    rc = mbedtls_ecdh_compute_shared(&group, &secret_tx, &point_rx, &private_tx, mbedtls_random, nullptr);
+    *derive_tx_us = micros() - started;
+  }
+  if (rc == 0) {
+    const uint32_t started = micros();
+    rc = mbedtls_ecdh_compute_shared(&group, &secret_rx, &point_tx, &private_rx, mbedtls_random, nullptr);
+    *derive_rx_us = micros() - started;
+  }
+  if (rc == 0) {
+    rc = mbedtls_mpi_write_binary(&secret_tx, shared_tx, ECDH_SHARED_SECRET_BYTES);
+  }
+  if (rc == 0) {
+    rc = mbedtls_mpi_write_binary(&secret_rx, shared_rx, ECDH_SHARED_SECRET_BYTES);
+  }
+
+  mbedtls_ecp_point_free(&point_rx);
+  mbedtls_ecp_point_free(&point_tx);
+  mbedtls_mpi_free(&secret_rx);
+  mbedtls_mpi_free(&secret_tx);
+  mbedtls_mpi_free(&private_rx);
+  mbedtls_mpi_free(&private_tx);
+  mbedtls_ecp_group_free(&group);
+  return rc;
+}
+
 static void write_u32_be(uint8_t *out, uint32_t value) {
   out[0] = static_cast<uint8_t>((value >> 24) & 0xFFU);
   out[1] = static_cast<uint8_t>((value >> 16) & 0xFFU);
@@ -1234,6 +1357,360 @@ static bool aes128_gcm_decrypt(
   }
   mbedtls_gcm_free(&ctx);
   return rc == 0;
+}
+
+static uint32_t max_u32(uint32_t left, uint32_t right) {
+  return left > right ? left : right;
+}
+
+static bool run_session_data(
+    const char *algorithm,
+    const uint8_t *key_tx,
+    const uint8_t *key_rx,
+    uint32_t messages,
+    SessionBenchMetrics *metrics) {
+  const uint8_t *payload = reinterpret_cast<const uint8_t *>(MISSION_DEFAULT_PAYLOAD);
+  const size_t payload_len = strlen(MISSION_DEFAULT_PAYLOAD);
+  uint8_t nonce[AES_GCM_NONCE_BYTES] = {0};
+  uint8_t ciphertext[MAX_EXPERIMENT_PAYLOAD] = {0};
+  uint8_t decrypted[MAX_EXPERIMENT_PAYLOAD] = {0};
+  uint8_t tag[AES_GCM_TAG_BYTES] = {0};
+  const uint32_t data_started = micros();
+  uint32_t started = micros();
+  if (!fill_random_bytes(nonce, AES_GCM_NONCE_BYTES - sizeof(uint32_t))) {
+    return false;
+  }
+  metrics->nonce_setup_us = micros() - started;
+
+  char aad[80];
+  snprintf(aad, sizeof(aad), "PQC-SAT|SESSION_BENCH|%s|v1", algorithm);
+  bool all_ok = true;
+  for (uint32_t index = 0; index < messages; ++index) {
+    write_u32_be(&nonce[AES_GCM_NONCE_BYTES - sizeof(uint32_t)], index + 1U);
+    started = micros();
+    const bool encrypted = aes128_gcm_encrypt(
+        key_tx,
+        nonce,
+        reinterpret_cast<const uint8_t *>(aad),
+        strlen(aad),
+        payload,
+        payload_len,
+        ciphertext,
+        tag);
+    metrics->encrypt_total_us += micros() - started;
+
+    started = micros();
+    const bool decrypted_ok = aes128_gcm_decrypt(
+        key_rx,
+        nonce,
+        reinterpret_cast<const uint8_t *>(aad),
+        strlen(aad),
+        ciphertext,
+        payload_len,
+        tag,
+        decrypted);
+    metrics->decrypt_total_us += micros() - started;
+    all_ok = all_ok && encrypted && decrypted_ok &&
+             bytes_equal_constant_time(payload, decrypted, payload_len);
+  }
+  metrics->data_total_us = micros() - data_started;
+  metrics->data_message_bytes = static_cast<uint32_t>(payload_len) + AES_GCM_NONCE_BYTES + AES_GCM_TAG_BYTES;
+  metrics->data_total_bytes = metrics->data_message_bytes * messages;
+  metrics->aead_match = all_ok;
+  secure_wipe(ciphertext, sizeof(ciphertext));
+  secure_wipe(decrypted, sizeof(decrypted));
+  secure_wipe(tag, sizeof(tag));
+  return all_ok;
+}
+
+static bool run_ecdh_session_bench(
+    mbedtls_ecp_group_id group_id,
+    const char *algorithm,
+    size_t public_key_bytes,
+    uint32_t messages,
+    SessionBenchMetrics *metrics) {
+  mbedtls_ecp_group group;
+  mbedtls_mpi private_tx;
+  mbedtls_mpi private_rx;
+  mbedtls_mpi secret_tx;
+  mbedtls_mpi secret_rx;
+  mbedtls_ecp_point point_tx;
+  mbedtls_ecp_point point_rx;
+  mbedtls_ecp_point peer_tx;
+  mbedtls_ecp_point peer_rx;
+  mbedtls_ecp_group_init(&group);
+  mbedtls_mpi_init(&private_tx);
+  mbedtls_mpi_init(&private_rx);
+  mbedtls_mpi_init(&secret_tx);
+  mbedtls_mpi_init(&secret_rx);
+  mbedtls_ecp_point_init(&point_tx);
+  mbedtls_ecp_point_init(&point_rx);
+  mbedtls_ecp_point_init(&peer_tx);
+  mbedtls_ecp_point_init(&peer_rx);
+
+  uint8_t public_tx[ECDH_PUBLIC_KEY_BYTES] = {0};
+  uint8_t public_rx[ECDH_PUBLIC_KEY_BYTES] = {0};
+  uint8_t shared_tx[ECDH_SHARED_SECRET_BYTES] = {0};
+  uint8_t shared_rx[ECDH_SHARED_SECRET_BYTES] = {0};
+  uint8_t key_tx[AES128_KEY_BYTES] = {0};
+  uint8_t key_rx[AES128_KEY_BYTES] = {0};
+  size_t public_tx_len = 0;
+  size_t public_rx_len = 0;
+
+  const uint32_t setup_started = micros();
+  uint32_t started = micros();
+  int rc = mbedtls_ecp_group_load(&group, group_id);
+  metrics->algorithm_init_us = micros() - started;
+  if (rc == 0) {
+    started = micros();
+    rc = mbedtls_ecp_gen_keypair(&group, &private_rx, &point_rx, mbedtls_random, nullptr);
+    if (rc == 0) {
+      rc = mbedtls_ecp_point_write_binary(
+          &group, &point_rx, MBEDTLS_ECP_PF_UNCOMPRESSED,
+          &public_rx_len, public_rx, sizeof(public_rx));
+    }
+    metrics->rx_keygen_us = micros() - started;
+  }
+  if (rc == 0) {
+    uint32_t started = micros();
+    rc = mbedtls_ecp_gen_keypair(&group, &private_tx, &point_tx, mbedtls_random, nullptr);
+    if (rc == 0) {
+      rc = mbedtls_ecp_point_write_binary(
+          &group, &point_tx, MBEDTLS_ECP_PF_UNCOMPRESSED,
+          &public_tx_len, public_tx, sizeof(public_tx));
+    }
+    metrics->tx_keygen_us = micros() - started;
+  }
+  if (rc == 0 && (public_tx_len != public_key_bytes || public_rx_len != public_key_bytes)) {
+    rc = MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+  }
+  if (rc == 0) {
+    uint32_t started = micros();
+    rc = mbedtls_ecp_point_read_binary(&group, &peer_tx, public_rx, public_rx_len);
+    if (rc == 0) {
+      rc = mbedtls_ecp_check_pubkey(&group, &peer_tx);
+    }
+    if (rc == 0) {
+      rc = mbedtls_ecdh_compute_shared(&group, &secret_tx, &peer_tx, &private_tx, mbedtls_random, nullptr);
+    }
+    if (rc == 0) {
+      rc = mbedtls_mpi_write_binary(&secret_tx, shared_tx, sizeof(shared_tx));
+    }
+    metrics->tx_shared_us = micros() - started;
+  }
+  if (rc == 0) {
+    uint32_t started = micros();
+    rc = mbedtls_ecp_point_read_binary(&group, &peer_rx, public_tx, public_tx_len);
+    if (rc == 0) {
+      rc = mbedtls_ecp_check_pubkey(&group, &peer_rx);
+    }
+    if (rc == 0) {
+      rc = mbedtls_ecdh_compute_shared(&group, &secret_rx, &peer_rx, &private_rx, mbedtls_random, nullptr);
+    }
+    if (rc == 0) {
+      rc = mbedtls_mpi_write_binary(&secret_rx, shared_rx, sizeof(shared_rx));
+    }
+    metrics->rx_shared_us = micros() - started;
+  }
+
+  metrics->key_match = rc == 0 && bytes_equal_constant_time(shared_tx, shared_rx, sizeof(shared_tx));
+  if (metrics->key_match) {
+    uint32_t started = micros();
+    const bool ok = derive_mission_aes128_key(shared_tx, sizeof(shared_tx), algorithm, key_tx);
+    metrics->tx_kdf_us = micros() - started;
+    if (!ok) {
+      rc = MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+    }
+  }
+  if (rc == 0 && metrics->key_match) {
+    uint32_t started = micros();
+    const bool ok = derive_mission_aes128_key(shared_rx, sizeof(shared_rx), algorithm, key_rx);
+    metrics->rx_kdf_us = micros() - started;
+    if (!ok) {
+      rc = MBEDTLS_ERR_ECP_BAD_INPUT_DATA;
+    }
+  }
+  metrics->aggregate_setup_us = micros() - setup_started;
+  metrics->sender_setup_us = metrics->tx_keygen_us + metrics->tx_shared_us + metrics->tx_kdf_us;
+  metrics->receiver_setup_us = metrics->rx_keygen_us + metrics->rx_shared_us + metrics->rx_kdf_us;
+  metrics->critical_latency_us =
+      metrics->algorithm_init_us + max_u32(metrics->tx_keygen_us, metrics->rx_keygen_us) +
+      max_u32(metrics->tx_shared_us, metrics->rx_shared_us) +
+      max_u32(metrics->tx_kdf_us, metrics->rx_kdf_us);
+  metrics->setup_session_us = metrics->critical_latency_us;
+  metrics->public_key_bytes = static_cast<uint32_t>(public_key_bytes);
+  metrics->handshake_bytes = static_cast<uint32_t>(2U * public_key_bytes);
+  metrics->principal_crypto_buffers_bytes = static_cast<uint32_t>(
+      4U * ECDH_SHARED_SECRET_BYTES + sizeof(public_tx) + sizeof(public_rx) +
+      2U * AES128_KEY_BYTES);
+
+  bool ok = rc == 0 && metrics->key_match &&
+            run_session_data(algorithm, key_tx, key_rx, messages, metrics);
+  secure_wipe(shared_tx, sizeof(shared_tx));
+  secure_wipe(shared_rx, sizeof(shared_rx));
+  secure_wipe(key_tx, sizeof(key_tx));
+  secure_wipe(key_rx, sizeof(key_rx));
+  mbedtls_ecp_point_free(&peer_rx);
+  mbedtls_ecp_point_free(&peer_tx);
+  mbedtls_ecp_point_free(&point_rx);
+  mbedtls_ecp_point_free(&point_tx);
+  mbedtls_mpi_free(&secret_rx);
+  mbedtls_mpi_free(&secret_tx);
+  mbedtls_mpi_free(&private_rx);
+  mbedtls_mpi_free(&private_tx);
+  mbedtls_ecp_group_free(&group);
+  return ok;
+}
+
+static bool run_mlkem_session_bench(uint32_t messages, SessionBenchMetrics *metrics) {
+  uint8_t key_tx[AES128_KEY_BYTES] = {0};
+  uint8_t key_rx[AES128_KEY_BYTES] = {0};
+  const uint32_t setup_started = micros();
+
+  uint32_t started = micros();
+  int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
+  metrics->rx_keygen_us = micros() - started;
+  if (rc == 0) {
+    started = micros();
+    rc = crypto_kem_enc(pqc_ct, pqc_ss_enc, pqc_pk);
+    metrics->tx_shared_us = micros() - started;
+  }
+  if (rc == 0) {
+    started = micros();
+    rc = crypto_kem_dec(pqc_ss_dec, pqc_ct, pqc_sk);
+    metrics->rx_shared_us = micros() - started;
+  }
+  metrics->key_match = rc == 0 && pqc_shared_secrets_match(pqc_ss_enc, pqc_ss_dec);
+  if (metrics->key_match) {
+    started = micros();
+    const bool ok = derive_mission_aes128_key(pqc_ss_enc, CRYPTO_BYTES, "MLKEM512", key_tx);
+    metrics->tx_kdf_us = micros() - started;
+    if (!ok) {
+      rc = -1;
+    }
+  }
+  if (rc == 0 && metrics->key_match) {
+    started = micros();
+    const bool ok = derive_mission_aes128_key(pqc_ss_dec, CRYPTO_BYTES, "MLKEM512", key_rx);
+    metrics->rx_kdf_us = micros() - started;
+    if (!ok) {
+      rc = -1;
+    }
+  }
+  metrics->aggregate_setup_us = micros() - setup_started;
+  metrics->sender_setup_us = metrics->tx_shared_us + metrics->tx_kdf_us;
+  metrics->receiver_setup_us = metrics->rx_keygen_us + metrics->rx_shared_us + metrics->rx_kdf_us;
+  metrics->critical_latency_us = metrics->rx_keygen_us + metrics->tx_shared_us +
+      max_u32(metrics->tx_kdf_us, metrics->rx_shared_us + metrics->rx_kdf_us);
+  metrics->setup_session_us = metrics->critical_latency_us;
+  metrics->public_key_bytes = CRYPTO_PUBLICKEYBYTES;
+  metrics->ciphertext_bytes = CRYPTO_CIPHERTEXTBYTES;
+  metrics->handshake_bytes = CRYPTO_PUBLICKEYBYTES + CRYPTO_CIPHERTEXTBYTES;
+  metrics->principal_crypto_buffers_bytes = CRYPTO_PUBLICKEYBYTES + CRYPTO_SECRETKEYBYTES +
+      CRYPTO_CIPHERTEXTBYTES + 2U * CRYPTO_BYTES + 2U * AES128_KEY_BYTES;
+
+  const bool ok = rc == 0 && metrics->key_match &&
+      run_session_data("MLKEM512", key_tx, key_rx, messages, metrics);
+  secure_wipe(key_tx, sizeof(key_tx));
+  secure_wipe(key_rx, sizeof(key_rx));
+  return ok;
+}
+
+static void print_session_bench_result(const char *request_id, SessionBenchMetrics *metrics, bool ok) {
+  metrics->heap_after = ESP.getFreeHeap();
+  metrics->min_heap_after = ESP.getMinFreeHeap();
+  metrics->stack_hwm_after = static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
+  metrics->total_us = metrics->setup_session_us + metrics->data_total_us;
+  metrics->aggregate_total_us = metrics->aggregate_setup_us + metrics->data_total_us;
+  metrics->wire_total_bytes = metrics->handshake_bytes + metrics->data_total_bytes;
+  const uint32_t messages = metrics->messages > 0 ? metrics->messages : 1U;
+  const uint32_t payload_bytes = static_cast<uint32_t>(strlen(MISSION_DEFAULT_PAYLOAD));
+  const uint32_t overhead_total_bytes = metrics->wire_total_bytes - payload_bytes * messages;
+
+  begin_result(request_id, ok ? "OK" : "ERROR");
+  print_kv("op", "session_bench");
+  print_kv("algorithm", metrics->algorithm);
+  print_kv("profile", active_profile);
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  print_kv("radio", "OFF");
+  print_kv("build_opt", "O2");
+#if defined(CONFIG_MBEDTLS_HARDWARE_MPI)
+  print_kv_bool("mbedtls_hw_mpi", true);
+#else
+  print_kv_bool("mbedtls_hw_mpi", false);
+#endif
+#if defined(CONFIG_MBEDTLS_HARDWARE_AES)
+  print_kv_bool("mbedtls_hw_aes", true);
+#else
+  print_kv_bool("mbedtls_hw_aes", false);
+#endif
+#if defined(CONFIG_MBEDTLS_HARDWARE_SHA)
+  print_kv_bool("mbedtls_hw_sha", true);
+#else
+  print_kv_bool("mbedtls_hw_sha", false);
+#endif
+#if defined(MBEDTLS_ECP_NIST_OPTIM)
+  print_kv_bool("mbedtls_ecp_nist_optim", true);
+#else
+  print_kv_bool("mbedtls_ecp_nist_optim", false);
+#endif
+  print_kv_u32("messages", metrics->messages);
+  print_kv_bool("key_match", metrics->key_match);
+  print_kv_bool("aead_match", metrics->aead_match);
+  print_kv_u32("algorithm_init_us", metrics->algorithm_init_us);
+  print_kv_u32("tx_keygen_us", metrics->tx_keygen_us);
+  print_kv_u32("rx_keygen_us", metrics->rx_keygen_us);
+  print_kv_u32("keygen_us", metrics->tx_keygen_us + metrics->rx_keygen_us);
+  print_kv_u32("tx_shared_secret_us", metrics->tx_shared_us);
+  print_kv_u32("rx_shared_secret_us", metrics->rx_shared_us);
+  print_kv_u32("shared_secret_us", metrics->tx_shared_us + metrics->rx_shared_us);
+  print_kv_u32("tx_kdf_us", metrics->tx_kdf_us);
+  print_kv_u32("rx_kdf_us", metrics->rx_kdf_us);
+  print_kv_u32("kdf_us", metrics->tx_kdf_us + metrics->rx_kdf_us);
+  print_kv_u32("sender_setup_us", metrics->sender_setup_us);
+  print_kv_u32("receiver_setup_us", metrics->receiver_setup_us);
+  print_kv_u32("setup_session_us", metrics->setup_session_us);
+  print_kv_u32("aggregate_setup_us", metrics->aggregate_setup_us);
+  print_kv_u32("critical_latency_us", metrics->critical_latency_us);
+  print_kv("critical_latency_model", "parallel_endpoints_no_network");
+  print_kv_u32("aes_gcm_encrypt_us", metrics->encrypt_total_us);
+  print_kv_u32("aes_gcm_decrypt_us", metrics->decrypt_total_us);
+  print_kv_u32("nonce_setup_us", metrics->nonce_setup_us);
+  print_kv_u32("aes_gcm_encrypt_avg_us", metrics->encrypt_total_us / messages);
+  print_kv_u32("aes_gcm_decrypt_avg_us", metrics->decrypt_total_us / messages);
+  print_kv_u32("data_total_us", metrics->data_total_us);
+  print_kv_u32("data_avg_us", metrics->data_total_us / messages);
+  print_kv_u32("total_us", metrics->total_us);
+  print_kv_u32("aggregate_total_us", metrics->aggregate_total_us);
+  print_kv_u32("amortized_us", metrics->total_us / messages);
+  print_kv_u32("public_key_bytes", metrics->public_key_bytes);
+  print_kv_u32("ciphertext_bytes", metrics->ciphertext_bytes);
+  print_kv_u32("handshake_bytes", metrics->handshake_bytes);
+  print_kv_u32("data_message_bytes", metrics->data_message_bytes);
+  print_kv_u32("data_total_bytes", metrics->data_total_bytes);
+  print_kv_u32("wire_total_bytes", metrics->wire_total_bytes);
+  print_kv_u32("amortized_bytes_x1000", (metrics->wire_total_bytes * 1000U) / messages);
+  print_kv_u32("overhead_total_bytes", overhead_total_bytes);
+  print_kv_u32("principal_crypto_buffers_bytes", metrics->principal_crypto_buffers_bytes);
+  print_kv_u32("heap_before", metrics->heap_before);
+  print_kv_u32("heap_after", metrics->heap_after);
+  print_kv_u32(
+      "heap_net_delta_bytes",
+      metrics->heap_before > metrics->heap_after ? metrics->heap_before - metrics->heap_after : 0U);
+  print_kv_u32(
+      "global_heap_watermark_delta_bytes",
+      metrics->heap_before > metrics->min_heap_after ? metrics->heap_before - metrics->min_heap_after : 0U);
+  print_kv_u32("min_heap_before", metrics->min_heap_before);
+  print_kv_u32("min_heap_after", metrics->min_heap_after);
+  print_kv_u32("stack_hwm_before_bytes", metrics->stack_hwm_before);
+  print_kv_u32("stack_hwm_after_bytes", metrics->stack_hwm_after);
+  print_kv_u32(
+      "stack_hwm_drop_bytes",
+      metrics->stack_hwm_before > metrics->stack_hwm_after
+          ? metrics->stack_hwm_before - metrics->stack_hwm_after
+          : 0U);
+  print_kv_u32("flash_binary_bytes", ESP.getSketchSize());
+  end_result();
 }
 
 static bool mission_payload_from_fields(size_t field_count, char *fields[], uint8_t *payload, size_t max_len, size_t *payload_len) {
@@ -1700,6 +2177,8 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   uint32_t keygen_us = 0;
   uint32_t encap_us = 0;
   uint32_t decap_us = 0;
+  uint32_t ecdh_tx_us = 0;
+  uint32_t ecdh_rx_us = 0;
   uint32_t rng_us = 0;
   uint32_t kdf_us = 0;
   uint32_t encrypt_us = 0;
@@ -1710,10 +2189,11 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   uint32_t crc_tx = 0;
   uint32_t crc_rx = 0;
   const uint32_t bytes_mlkem = use_pqc ? CRYPTO_CIPHERTEXTBYTES : 0U;
+  const uint32_t bytes_ecdh = use_pqc ? 0U : ECDH_PUBLIC_KEY_BYTES;
   const uint32_t bytes_nonce = AES_GCM_NONCE_BYTES;
   const uint32_t bytes_gcm_tag = AES_GCM_TAG_BYTES;
   const uint32_t checksum_bytes = use_crc ? MISSION_CRC_BYTES : 0U;
-  const uint32_t bytes_crypto = bytes_mlkem + bytes_nonce + bytes_gcm_tag;
+  const uint32_t bytes_crypto = bytes_mlkem + bytes_ecdh + bytes_nonce + bytes_gcm_tag;
   const size_t ciphertext_len = payload_len + checksum_bytes;
   const uint32_t payload_crc = crc32_bytes(payload, payload_len);
   uint8_t protected_payload[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
@@ -1723,12 +2203,18 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   uint8_t aes_key_dec[AES128_KEY_BYTES];
   uint8_t nonce[AES_GCM_NONCE_BYTES];
   uint8_t gcm_tag[AES_GCM_TAG_BYTES];
+  uint8_t ecdh_shared_tx[ECDH_SHARED_SECRET_BYTES];
+  uint8_t ecdh_shared_rx[ECDH_SHARED_SECRET_BYTES];
+  uint8_t ecdh_public_tx[ECDH_PUBLIC_KEY_BYTES];
   memset(ciphertext, 0, sizeof(ciphertext));
   memset(decrypted, 0, sizeof(decrypted));
   memset(aes_key_enc, 0, sizeof(aes_key_enc));
   memset(aes_key_dec, 0, sizeof(aes_key_dec));
   memset(nonce, 0, sizeof(nonce));
   memset(gcm_tag, 0, sizeof(gcm_tag));
+  memset(ecdh_shared_tx, 0, sizeof(ecdh_shared_tx));
+  memset(ecdh_shared_rx, 0, sizeof(ecdh_shared_rx));
+  memset(ecdh_public_tx, 0, sizeof(ecdh_public_tx));
   memcpy(protected_payload, payload, payload_len);
 
   const uint32_t started = micros();
@@ -1780,13 +2266,32 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
       return;
     }
   } else {
-    uint32_t op_started = micros();
-    if (!fill_random_bytes(aes_key_enc, sizeof(aes_key_enc))) {
-      print_error(request_id, "RNG_FAILED", "classic_session_key");
+    const int rc = classic_ecdh_exchange(
+        ecdh_shared_tx,
+        ecdh_shared_rx,
+        ecdh_public_tx,
+        &keygen_us,
+        &ecdh_tx_us,
+        &ecdh_rx_us);
+    if (rc != 0) {
+      secure_wipe(ecdh_shared_tx, sizeof(ecdh_shared_tx));
+      secure_wipe(ecdh_shared_rx, sizeof(ecdh_shared_rx));
+      print_error(request_id, "ECDH_FAILED", "p256_exchange");
       return;
     }
-    memcpy(aes_key_dec, aes_key_enc, sizeof(aes_key_dec));
-    rng_us += micros() - op_started;
+    key_match = bytes_equal_constant_time(ecdh_shared_tx, ecdh_shared_rx, ECDH_SHARED_SECRET_BYTES);
+    const uint32_t op_started = micros();
+    const bool key_a = derive_mission_aes128_key(ecdh_shared_tx, ECDH_SHARED_SECRET_BYTES, scenario, aes_key_enc);
+    const bool key_b = derive_mission_aes128_key(ecdh_shared_rx, ECDH_SHARED_SECRET_BYTES, scenario, aes_key_dec);
+    kdf_us = micros() - op_started;
+    secure_wipe(ecdh_shared_tx, sizeof(ecdh_shared_tx));
+    secure_wipe(ecdh_shared_rx, sizeof(ecdh_shared_rx));
+    if (!key_match || !key_a || !key_b) {
+      secure_wipe(aes_key_enc, sizeof(aes_key_enc));
+      secure_wipe(aes_key_dec, sizeof(aes_key_dec));
+      print_error(request_id, "ECDH_KDF_FAILED", "shared_secret_mismatch");
+      return;
+    }
   }
 
   uint32_t op_started = micros();
@@ -1859,7 +2364,7 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   print_kv("cipher", AEAD_CIPHER);
   print_kv("checksum", use_crc ? "CRC32" : "NONE");
   print_kv("confirmation", AEAD_CIPHER);
-  print_kv("key_source", use_pqc ? PQC_TARGET : "RANDOM_SESSION");
+  print_kv("key_source", use_pqc ? PQC_TARGET : CLASSIC_TARGET);
   print_kv("key_policy", "ephemeral_per_message");
   print_kv_bool("key_match", key_match);
   print_kv_bool("tag_ready", tag_ready);
@@ -1876,6 +2381,7 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   print_kv_u32("bytes_payload", payload_len);
   print_kv_u32("bytes_ciphertext", ciphertext_len);
   print_kv_u32("bytes_mlkem", bytes_mlkem);
+  print_kv_u32("bytes_ecdh", bytes_ecdh);
   print_kv_u32("bytes_nonce", bytes_nonce);
   print_kv_u32("bytes_gcm_tag", bytes_gcm_tag);
   print_kv_u32("bytes_crypto", bytes_crypto);
@@ -1890,6 +2396,8 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   print_kv_u32("keygen_us", keygen_us);
   print_kv_u32("encap_us", encap_us);
   print_kv_u32("decap_us", decap_us);
+  print_kv_u32("ecdh_tx_us", ecdh_tx_us);
+  print_kv_u32("ecdh_rx_us", ecdh_rx_us);
   print_kv_u32("rng_us", rng_us);
   print_kv_u32("kdf_us", kdf_us);
   print_kv_u32("encrypt_us", encrypt_us);
@@ -1903,6 +2411,70 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   print_kv("profile", active_profile);
   print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
   end_result();
+}
+
+static bool session_bench_count_allowed(uint32_t messages) {
+  for (size_t index = 0; index < sizeof(SESSION_BENCH_COUNTS) / sizeof(SESSION_BENCH_COUNTS[0]); ++index) {
+    if (messages == SESSION_BENCH_COUNTS[index]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void handle_session_bench(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 5) {
+    print_error(request_id, "BAD_ARGS", "expected_algorithm_messages");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  int parsed_messages = 0;
+  if (!parse_int_range(fields[4], 1, 1000, &parsed_messages) ||
+      !session_bench_count_allowed(static_cast<uint32_t>(parsed_messages))) {
+    print_error(request_id, "BAD_MESSAGES", "expected_1_100_500_1000");
+    return;
+  }
+  if (!setCpuFrequencyMhz(240) || ESP.getCpuFreqMHz() != 240) {
+    print_error(request_id, "CPU_PROFILE_FAILED", "expected_240mhz");
+    return;
+  }
+  active_profile = "BASELINE";
+  disable_radios();
+  delay(20);
+
+  SessionBenchMetrics metrics;
+  metrics.messages = static_cast<uint32_t>(parsed_messages);
+  metrics.heap_before = ESP.getFreeHeap();
+  metrics.min_heap_before = ESP.getMinFreeHeap();
+  metrics.stack_hwm_before = static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
+
+  bool ok = false;
+  if (strcmp(fields[3], "ECDH_P256") == 0) {
+    metrics.algorithm = "ECDH_P256";
+    ok = run_ecdh_session_bench(
+        MBEDTLS_ECP_DP_SECP256R1,
+        metrics.algorithm,
+        ECDH_PUBLIC_KEY_BYTES,
+        metrics.messages,
+        &metrics);
+  } else if (strcmp(fields[3], "X25519") == 0) {
+    metrics.algorithm = "X25519";
+    ok = run_ecdh_session_bench(
+        MBEDTLS_ECP_DP_CURVE25519,
+        metrics.algorithm,
+        X25519_PUBLIC_KEY_BYTES,
+        metrics.messages,
+        &metrics);
+  } else if (strcmp(fields[3], "MLKEM512") == 0) {
+    metrics.algorithm = "MLKEM512";
+    ok = run_mlkem_session_bench(metrics.messages, &metrics);
+  } else {
+    print_error(request_id, "BAD_ALGORITHM", "expected_ECDH_P256_X25519_MLKEM512");
+    return;
+  }
+
+  print_session_bench_result(request_id, &metrics, ok);
 }
 
 static void send_peripherals(const char *request_id) {
@@ -2426,7 +2998,7 @@ static void send_help_detail(const char *request_id, const char *command) {
     print_kv("usage", "TELEMETRY");
     print_kv("does", "uptime heap pot som botao rele");
   } else if (strcmp(command, "FAULT") == 0) {
-    print_kv("usage", "FAULT NONE|CRC32 payload_hex index mask");
+    print_kv("usage", "FAULT NONE/CRC32 payload_hex index mask");
     print_kv("does", "aplica bit-flip e compara CRC32");
   } else if (strcmp(command, "PQC_INFO") == 0) {
     print_kv("usage", "PQC_INFO");
@@ -2444,17 +3016,20 @@ static void send_help_detail(const char *request_id, const char *command) {
     print_kv("usage", "PQC_DECAP");
     print_kv("does", "decapsula ct armazenado e compara");
   } else if (strcmp(command, "PQC_FAULT") == 0) {
-    print_kv("usage", "PQC_FAULT index mask CONFIRM|NONE");
+    print_kv("usage", "PQC_FAULT index mask CONFIRM/NONE");
     print_kv("does", "bit-flip em ciphertext e confirmacao");
   } else if (strcmp(command, "PQC_BENCH") == 0) {
     print_kv("usage", "PQC_BENCH n");
     print_kv("does", "benchmark keygen encap decap");
+  } else if (strcmp(command, "SESSION_BENCH") == 0) {
+    print_kv("usage", "SESSION_BENCH ECDH_P256/X25519/MLKEM512 1/100/500/1000");
+    print_kv("does", "sessao AES-GCM justa a 240 MHz");
   } else if (strcmp(command, "STRESS") == 0) {
     print_kv("usage", "STRESS PQC_LOOP n CONFIRM");
     print_kv("does", "executa ML-KEM em loop extremo");
   } else if (strcmp(command, "MISSION") == 0) {
-    print_kv("usage", "MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]");
-    print_kv("does", "cifra com AES-GCM e mede custo por cenario");
+    print_kv("usage", "MISSION CLASSIC/PQC/PQC_CRC32 [payload_hex]");
+    print_kv("does", "compara ECDH-P256 e ML-KEM com AES-GCM");
   } else if (strcmp(command, "PERIPHERALS") == 0) {
     print_kv("usage", "PERIPHERALS");
     print_kv("does", "detecta OLED APDS HTU MMA");
@@ -2520,10 +3095,10 @@ static void send_help(const char *request_id, size_t field_count, char *fields[]
   begin_result(request_id, "OK");
   print_kv("usage", "HELP [COMMAND]");
   print_kv("cmd1", "HELLO,PING,STATUS,TELEMETRY,FAULT,PERIPHERALS");
-  print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_FAULT,PQC_BENCH,STRESS");
-  print_kv("cmd3", "MISSION,I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ,ANALOG,DIGITAL");
-  print_kv("cmd4", "RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS");
-  print_kv("cmd5", "HELP");
+  print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_FAULT,PQC_BENCH");
+  print_kv("cmd3", "SESSION_BENCH,STRESS,MISSION,I2C_SCAN,FEATURES,BOARDMAP");
+  print_kv("cmd4", "SENSOR_READ,ANALOG,DIGITAL,RGB,BARGRAPH,LED,RELAY");
+  print_kv("cmd5", "SERVO,OLED,PROFILE,RESET_STATS,HELP");
   end_result();
 }
 
@@ -2570,6 +3145,8 @@ static void process_frame(char *line) {
     handle_pqc_fault(request_id, field_count, fields);
   } else if (strcmp(command, "PQC_BENCH") == 0) {
     handle_pqc_bench(request_id, field_count, fields);
+  } else if (strcmp(command, "SESSION_BENCH") == 0) {
+    handle_session_bench(request_id, field_count, fields);
   } else if (strcmp(command, "STRESS") == 0) {
     handle_stress(request_id, field_count, fields);
   } else if (strcmp(command, "MISSION") == 0) {

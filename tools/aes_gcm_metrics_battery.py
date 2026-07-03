@@ -2,8 +2,8 @@
 """AES-GCM hardware metrics battery for the PQC-SAT seminar.
 
 Run this from a terminal with the Wisdom connected. The goal is to generate
-the official post-AES-GCM JSON: CLASSIC uses an ephemeral AES-128-GCM key, and
-PQC/PQC_CRC32 use ML-KEM-512 to derive the AES-128-GCM key.
+the official ECDH-vs-ML-KEM JSON: CLASSIC uses ephemeral ECDH P-256, and
+PQC/PQC_CRC32 use ML-KEM-512. All scenarios derive an AES-128-GCM key.
 """
 
 from __future__ import annotations
@@ -37,10 +37,14 @@ from tools.serial_bridge import SerialBridge, SerialBridgeError  # noqa: E402
 from tools.serial_console import choose_port  # noqa: E402
 
 
-SCHEMA_VERSION = "pqc-sat-aes-gcm-metrics-v1"
+SCHEMA_VERSION = "pqc-sat-aes-gcm-metrics-v2"
 DEFAULT_AES_PAYLOAD = b"PQC-SAT|AESGCM|TEMP=24.5|STATUS=OK"
 DEFAULT_AES_PAYLOAD_HEX = DEFAULT_AES_PAYLOAD.hex().upper()
 MAX_PAYLOAD_BYTES = 96
+OFFICIAL_CYCLES_PER_PROFILE = 100
+OFFICIAL_MISSIONS_PER_PROFILE = OFFICIAL_CYCLES_PER_PROFILE * len(MISSION_SCENARIOS)
+OFFICIAL_MISSIONS_PER_SCENARIO = OFFICIAL_CYCLES_PER_PROFILE * len(DEFAULT_PROFILES)
+OFFICIAL_MISSION_RECORDS = OFFICIAL_MISSIONS_PER_PROFILE * len(DEFAULT_PROFILES)
 AES_REQUIRED_FIELDS = (
     "cipher",
     "nonce_bytes",
@@ -54,11 +58,34 @@ AES_REQUIRED_FIELDS = (
     "decrypt_ok",
     "tag_match",
 )
+ECDH_REQUIRED_FIELDS = (
+    "bytes_ecdh",
+    "keygen_us",
+    "ecdh_tx_us",
+    "ecdh_rx_us",
+    "key_match",
+    "key_source",
+)
+PQC_REQUIRED_FIELDS = (
+    "bytes_mlkem",
+    "keygen_us",
+    "encap_us",
+    "decap_us",
+    "key_match",
+    "key_source",
+)
+
+
+def _positive_int(payload: dict[str, str], field: str) -> bool:
+    try:
+        return int(str(payload.get(field, "0")), 0) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the official post-AES-GCM PQC-SAT hardware metrics battery"
+        description="Run the official ECDH P-256 vs ML-KEM-512 hardware metrics battery"
     )
     parser.add_argument("--port", help="serial port, for example /dev/ttyUSB0")
     parser.add_argument("--baud", type=int, default=115200, help="serial baudrate")
@@ -211,10 +238,19 @@ def summarize_aes_gcm(records: list[dict[str, object]]) -> dict[str, object]:
         "profiles": {},
         "checks": {},
     }
-    duplicate_nonce_total = 0
+    nonce_values = [
+        str(payload_of(record).get("nonce_crc32"))
+        for record in mission_records
+        if payload_of(record).get("nonce_crc32") not in {None, ""}
+    ]
+    duplicate_nonce_total = len(nonce_values) - len(set(nonce_values))
     missing_required_total = 0
     non_aes_total = 0
     aead_fail_total = 0
+    ecdh_invalid_total = 0
+    pqc_invalid_total = 0
+    scenario_counts = Counter(mission_scenario_of(record) for record in mission_records)
+    profile_counts = Counter(profile_of(record) for record in mission_records)
 
     for profile in sorted({profile_of(record) for record in mission_records}):
         profile_records = [record for record in mission_records if profile_of(record) == profile]
@@ -228,10 +264,35 @@ def summarize_aes_gcm(records: list[dict[str, object]]) -> dict[str, object]:
                 1 for payload in payloads for field in AES_REQUIRED_FIELDS if field not in payload
             )
             nonce_summary = _unique_summary(payloads, "nonce_crc32")
-            duplicate_nonce_total += int(nonce_summary["duplicates"])
             missing_required_total += missing_required
             non_aes_total += sum(1 for payload in payloads if payload.get("cipher") != "AES-128-GCM")
             aead_fail_total += sum(1 for payload in payloads if str(payload.get("aead_match")) not in {"1", "true", "True"})
+            ecdh_invalid = 0
+            if scenario == "CLASSIC":
+                ecdh_invalid = sum(
+                    1
+                    for payload in payloads
+                    if any(field not in payload for field in ECDH_REQUIRED_FIELDS)
+                    or payload.get("crypto") != "ECDH-P256"
+                    or payload.get("key_source") != "ECDH-P256"
+                    or str(payload.get("bytes_ecdh")) != "65"
+                    or str(payload.get("key_match")) not in {"1", "true", "True"}
+                    or not all(_positive_int(payload, field) for field in ("keygen_us", "ecdh_tx_us", "ecdh_rx_us"))
+                )
+                ecdh_invalid_total += ecdh_invalid
+            pqc_invalid = 0
+            if scenario in {"PQC", "PQC_CRC32"}:
+                pqc_invalid = sum(
+                    1
+                    for payload in payloads
+                    if any(field not in payload for field in PQC_REQUIRED_FIELDS)
+                    or payload.get("crypto") != "ML-KEM-512"
+                    or payload.get("key_source") != "ML-KEM-512"
+                    or str(payload.get("bytes_mlkem")) != "768"
+                    or str(payload.get("key_match")) not in {"1", "true", "True"}
+                    or not all(_positive_int(payload, field) for field in ("keygen_us", "encap_us", "decap_us"))
+                )
+                pqc_invalid_total += pqc_invalid
             scenarios[scenario] = {
                 "runs": len(scenario_records),
                 "ok": sum(1 for record in scenario_records if record.get("ok")),
@@ -243,6 +304,8 @@ def summarize_aes_gcm(records: list[dict[str, object]]) -> dict[str, object]:
                 "aead_match_rate_pct": _truthy_rate(payloads, "aead_match"),
                 "decrypt_ok_rate_pct": _truthy_rate(payloads, "decrypt_ok"),
                 "tag_match_rate_pct": _truthy_rate(payloads, "tag_match"),
+                "ecdh_invalid_records": ecdh_invalid,
+                "pqc_invalid_records": pqc_invalid,
                 "nonce_crc32": nonce_summary,
                 "ciphertext_crc32": _unique_summary(payloads, "ciphertext_crc32"),
                 "gcm_tag_crc32": _unique_summary(payloads, "gcm_tag_crc32"),
@@ -252,6 +315,8 @@ def summarize_aes_gcm(records: list[dict[str, object]]) -> dict[str, object]:
                 "decrypt_us": stats(payload.get("decrypt_us") for payload in payloads),
                 "rng_us": stats(payload.get("rng_us") for payload in payloads),
                 "kdf_us": stats(payload.get("kdf_us") for payload in payloads),
+                "ecdh_tx_us": stats(payload.get("ecdh_tx_us") for payload in payloads),
+                "ecdh_rx_us": stats(payload.get("ecdh_rx_us") for payload in payloads),
                 "bytes_ciphertext": stats(payload.get("bytes_ciphertext") for payload in payloads),
                 "bytes_total": stats(payload.get("bytes_total") for payload in payloads),
             }
@@ -260,17 +325,43 @@ def summarize_aes_gcm(records: list[dict[str, object]]) -> dict[str, object]:
             "scenarios": scenarios,
         }
 
+    scenario_counts_clean = {scenario: int(scenario_counts.get(scenario, 0)) for scenario in MISSION_SCENARIOS}
+    balanced_scenarios = len(set(scenario_counts_clean.values())) == 1 and all(scenario_counts_clean.values())
+    profile_counts_clean = {profile: int(profile_counts.get(profile, 0)) for profile in DEFAULT_PROFILES}
+    official_sample_size = (
+        len(mission_records) == OFFICIAL_MISSION_RECORDS
+        and all(count == OFFICIAL_MISSIONS_PER_SCENARIO for count in scenario_counts_clean.values())
+        and all(count == OFFICIAL_MISSIONS_PER_PROFILE for count in profile_counts_clean.values())
+    )
+    mission_failures = sum(1 for record in mission_records if not record.get("ok"))
+    delivery_failures = sum(1 for record in mission_records if payload_of(record).get("result") != "DELIVERED")
     summary["checks"] = {
         "mission_records": len(mission_records),
+        "classic_records": sum(1 for record in mission_records if mission_scenario_of(record) == "CLASSIC"),
+        "scenario_counts": scenario_counts_clean,
+        "balanced_scenarios": balanced_scenarios,
+        "profile_counts": profile_counts_clean,
+        "official_sample_size": official_sample_size,
+        "mission_failures": mission_failures,
+        "delivery_failures": delivery_failures,
         "missing_required_fields": missing_required_total,
         "non_aes_gcm_records": non_aes_total,
         "aead_failures": aead_fail_total,
+        "ecdh_invalid_records": ecdh_invalid_total,
+        "pqc_invalid_records": pqc_invalid_total,
         "nonce_crc32_duplicates": duplicate_nonce_total,
         "official_candidate": (
-            bool(mission_records)
+            any(mission_scenario_of(record) == "CLASSIC" for record in mission_records)
             and missing_required_total == 0
             and non_aes_total == 0
             and aead_fail_total == 0
+            and ecdh_invalid_total == 0
+            and pqc_invalid_total == 0
+            and balanced_scenarios
+            and duplicate_nonce_total == 0
+            and official_sample_size
+            and mission_failures == 0
+            and delivery_failures == 0
         ),
     }
     return summary
@@ -359,6 +450,12 @@ def main() -> int:
             "missing_required_fields": checks["missing_required_fields"],
             "non_aes_gcm_records": checks["non_aes_gcm_records"],
             "aead_failures": checks["aead_failures"],
+            "ecdh_invalid_records": checks["ecdh_invalid_records"],
+            "pqc_invalid_records": checks["pqc_invalid_records"],
+            "balanced_scenarios": checks["balanced_scenarios"],
+            "official_sample_size": checks["official_sample_size"],
+            "mission_failures": checks["mission_failures"],
+            "delivery_failures": checks["delivery_failures"],
             "nonce_crc32_duplicates": checks["nonce_crc32_duplicates"],
         },
         sort_keys=True,

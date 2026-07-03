@@ -5,7 +5,8 @@ Ele implementa o bridge serial `V1`, inventário da placa e comandos de bancada
 para exercitar os perifericos integrados. Ele também executa um experimento
 pequeno de payload com bit-flip e CRC32, ML-KEM-512 real com `mlkem-native` e
 o comando `MISSION` para comparar entrega de mensagem em `CLASSIC`, `PQC` e
-`PQC_CRC32`.
+`PQC_CRC32`. `CLASSIC` usa ECDH P-256 efêmero; todos os cenários usam
+AES-128-GCM para proteger a mensagem.
 
 O objetivo desta etapa e dominar a comunicação ESP32/notebook e preservar o
 potencial da Wisdom para a demonstração: sensores, atuadores, OLED, entradas
@@ -54,6 +55,14 @@ As respostas usam:
 ```text
 V1|request_id|RESULT|status|key=value
 ```
+
+ECDH e ML-KEM usam `esp_random()` como fonte do adaptador `randombytes`. Isso é
+adequado ao experimento, mas o projeto não certifica a entropia com o rádio
+desligado nem implementa autenticação de identidade entre as pontas lógicas.
+
+O build é Release: sketch e biblioteca vendorizada usam `-O2`. O Mbed TLS vem
+pré-compilado pelo framework ESP32 em `-Os`, com aceleração de MPI, AES e SHA,
+otimização NIST, P-256 e Curve25519 habilitados.
 
 ## Comandos
 
@@ -170,6 +179,9 @@ Para a sequência completa de bancada, use
 - O comando `MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]` entrega uma mensagem
   curta e retorna tempos, bytes, heap, resultado, confirmação, checksum e
   subtempos de ML-KEM quando aplicável.
+- `SESSION_BENCH ECDH_P256|X25519|MLKEM512 1|100|500|1000` mede uma sessão
+  estabelecida uma vez e reutilizada por N mensagens AES-GCM, sempre a
+  240 MHz. É comando técnico, sem botão no dashboard.
 - A injecao de falhas existe em dois caminhos: payload serial com
   `FAULT NONE|CRC32 ...` e ciphertext ML-KEM com
   `PQC_FAULT index mask [CONFIRM|NONE]`.
@@ -200,6 +212,10 @@ PQC_ENCAP
 PQC_DECAP
 PQC_FAULT 0 0x01 CONFIRM
 PQC_BENCH n
+SESSION_BENCH ECDH_P256 1
+SESSION_BENCH ECDH_P256 100
+SESSION_BENCH X25519 500
+SESSION_BENCH MLKEM512 1000
 MISSION CLASSIC
 MISSION PQC
 MISSION PQC_CRC32
@@ -220,7 +236,7 @@ FAULT CRC32 ... 0 0x01        result=DETECTED_GUARD crc_before=0xDFFEC3A1 crc_af
 Validação funcional do novo fluxo de apresentação:
 
 ```text
-MISSION CLASSIC      result=DELIVERED crypto=AES-128-GCM cipher=AES-128-GCM checksum=NONE aead_match=1 elapsed_us=<medido>
+MISSION CLASSIC      result=DELIVERED crypto=ECDH-P256 cipher=AES-128-GCM bytes_ecdh=65 aead_match=1 elapsed_us=<medido>
 MISSION PQC          result=DELIVERED crypto=ML-KEM-512 cipher=AES-128-GCM checksum=NONE key_match=1 aead_match=1 elapsed_us=<medido>
 MISSION PQC_CRC32    result=DELIVERED crypto=ML-KEM-512 cipher=AES-128-GCM checksum=CRC32 key_match=1 aead_match=1 crc_match=1 elapsed_us=<medido>
 ```

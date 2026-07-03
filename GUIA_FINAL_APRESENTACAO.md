@@ -36,7 +36,7 @@ A mesma mensagem é processada em três cenários:
 
 | Cenário | Estabelecimento de chave | Proteção da mensagem | Guardião adicional |
 |---|---|---|---|
-| `CLASSIC` | chave AES efêmera gerada localmente | AES-128-GCM | nenhum |
+| `CLASSIC` | ECDH P-256 efêmero | AES-128-GCM | nenhum |
 | `PQC` | ML-KEM-512 | AES-128-GCM | nenhum |
 | `PQC_CRC32` | ML-KEM-512 | AES-128-GCM | CRC32 no plaintext protegido |
 
@@ -46,10 +46,11 @@ O projeto responde a duas perguntas:
    hardware limitado?
 2. Como tornar visível uma corrupção acidental de um bit no payload?
 
-Na bateria oficial AES-GCM, em `BASELINE` a 240 MHz, `PQC` foi 23,2 vezes mais
-lento e 12,1 vezes maior em bytes que `CLASSIC`. Em 80 MHz, a razão temporal
-subiu para 39,1 vezes. Nos testes de payload, 200/200 falhas sem CRC32 foram
-silenciosas e 200/200 falhas com CRC32 foram detectadas.
+Os valores antigos de 23,2x em tempo e 12,1x em bytes são históricos
+pré-ECDH e não servem como conclusão atual. A comparação de produção deve usar
+o benchmark de sessão a 240 MHz, separando latência crítica, CPU agregada e
+handshake amortizado. Nos testes de payload já validados, 200/200 falhas sem
+CRC32 foram silenciosas e 200/200 falhas com CRC32 foram detectadas.
 
 Resposta curta recomendada:
 
@@ -134,7 +135,8 @@ medida. Tempo de CPU é indicador de custo computacional, não watts ou joules.
 
 ### 4.2 Hipóteses
 
-- **H1:** `PQC` terá maior tempo total que `CLASSIC`.
+- **H1:** o custo de CPU dependerá da biblioteca; ML-KEM pode ser mais rápido
+  que ECDH P-256 nesta plataforma e isso não invalida o experimento.
 - **H2:** `PQC` terá pacote maior por incluir ciphertext ML-KEM.
 - **H3:** limitar a CPU a 80 MHz aumentará o custo temporal, sem alterar os
   tamanhos do protocolo.
@@ -157,7 +159,7 @@ medida. Tempo de CPU é indicador de custo computacional, não watts ou joules.
 - resistência física à radiação;
 - consumo elétrico real;
 - segurança universal de todo CubeSat;
-- comparação completa entre ECDH e ML-KEM;
+- comparação de protocolos autenticados completos entre ECDH e ML-KEM;
 - proteção contra *side-channel*;
 - protocolo de missão completo com gestão permanente de identidades e chaves;
 - prova matemática da segurança de ML-KEM.
@@ -354,8 +356,8 @@ o protocolo precisa confirmar ou usar a chave em uma operação autenticada.
 
 ### 6.7 Derivação de chave
 
-O segredo ML-KEM tem 32 bytes. O firmware deriva dele uma chave AES-128 de 16
-bytes usando HMAC-SHA256 e o contexto
+Os segredos ECDH P-256 e ML-KEM têm 32 bytes no experimento. O firmware deriva
+de cada um uma chave AES-128 de 16 bytes usando HMAC-SHA256 e o contexto
 `PQC-SAT|MISSION|<cenário>|AES-128-GCM|v1`. O objetivo do contexto é separar
 esse uso de outros possíveis usos do mesmo segredo. A implementação conserva
 os primeiros 16 bytes do digest como chave AES-128.
@@ -458,19 +460,21 @@ SHA/HMAC -> derivação, confirmação ou autenticação específica
 
 ```text
 payload
-  -> RNG gera chave AES efêmera e nonce
+  -> duas pontas geram pares ECDH P-256 efêmeros
+  -> emissor usa a chave pública do receptor e envia sua chave pública de 65 B
+  -> as duas pontas calculam o mesmo segredo
+  -> KDF deriva a chave AES; RNG gera o nonce
   -> AES-128-GCM cifra e gera tag
   -> receptor verifica tag e decifra
   -> DELIVERED se AEAD confere
 ```
 
-Esse é um baseline simétrico barato. Não é ECDH, RSA nem uma pilha clássica
-assimétrica completa.
+Esse é o baseline clássico assimétrico equivalente ao estabelecimento ML-KEM.
 
 Para o payload de 41 B da bateria oficial:
 
 ```text
-41 B payload + 12 B nonce + 16 B tag = 69 B
+41 B payload + 65 B chave pública ECDH + 12 B nonce + 16 B tag = 134 B
 ```
 
 ### 8.2 `MISSION PQC`
@@ -575,7 +579,7 @@ ou uso da chave em um protocolo autenticado.
 A demonstração manual ensina. A bateria automatizada consolida resultados.
 Nunca use cliques ao vivo como substituto para a coleta estatística oficial.
 
-Fonte AES-GCM oficial atual:
+Fonte histórica pré-ECDH:
 
 ```text
 logs/20260702T044907Z_final_metrics_dev-ttyusb0.json
@@ -591,7 +595,10 @@ Resumo:
 400 testes FAULT
 ```
 
-## 11. Resultados oficiais e interpretação
+## 11. Resultados históricos pré-ECDH e interpretação
+
+Os números abaixo documentam a coleta de 2026-07-02. Eles não devem ser usados
+como comparação final ECDH/ML-KEM; a nova bateria substituirá estas tabelas.
 
 ### 11.1 `MISSION` em 240 MHz
 
@@ -621,7 +628,7 @@ Resumo:
 | CRC | 0 | 0 | 53 us |
 | resultado | DELIVERED | DELIVERED | DELIVERED |
 
-### 11.3 Razões principais
+### 11.3 Razões históricas pré-ECDH
 
 | Comparação | 240 MHz | 80 MHz |
 |---|---:|---:|
@@ -770,9 +777,11 @@ consolidados do projeto; não inicia nova coleta.
 
 ### 14.1 O baseline é limitado
 
-`CLASSIC` usa AES-GCM com chave efêmera local. Ele não inclui ECDH, certificado
-ou troca assimétrica. Portanto, a comparação mede o custo de adicionar ML-KEM
-ao baseline simétrico, não uma disputa completa ECDH versus ML-KEM.
+`CLASSIC` usa ECDH P-256 efêmero e `PQC` usa ML-KEM-512. Ambos derivam uma
+chave AES-128 e executam o mesmo AES-GCM. Certificados, rede real e autenticação
+de identidades permanecem fora do escopo; portanto, o protótipo não impede
+ataque man-in-the-middle. O material aleatório vem de `esp_random()` com rádio
+desligado, sem ensaio ou certificação independente de entropia.
 
 ### 14.2 CRC32 e AES-GCM não são concorrentes
 
@@ -807,8 +816,8 @@ entre dispositivos independentes.
 | “A placa é um CubeSat.” | “A placa representa um OBC educacional.” |
 | “Medimos energia.” | “Medimos tempo; energia é trabalho futuro.” |
 | “ML-KEM detectou a falha.” | “O harness observou divergência ou o protocolo confirmou e rejeitou.” |
-| “PQC é inviável.” | “PQC foi funcional, com custo maior.” |
-| “CLASSIC é ECDH.” | “CLASSIC é baseline simétrico AES-GCM.” |
+| “PQC é inviável.” | “PQC foi funcional; CPU, tráfego e memória devem ser comparados separadamente.” |
+| “CLASSIC é só AES.” | “CLASSIC usa ECDH P-256; AES-GCM protege a mensagem.” |
 | “80 MHz simula qualquer CubeSat.” | “80 MHz é um perfil experimental.” |
 | “0 falhas prova segurança.” | “0 falhas de execução indica estabilidade da campanha.” |
 
@@ -928,7 +937,7 @@ latência de rede.
 Abra `RESULTADOS` e conduza três conclusões:
 
 1. **segurança:** ML-KEM-512 real e AES-GCM validado;
-2. **custo:** 23,2x em tempo e 12,1x em bytes a 240 MHz;
+2. **custo:** compare os novos valores ECDH/ML-KEM da bateria oficial;
 3. **integridade:** 200/200 silenciosas sem CRC e 200/200 detectadas com CRC.
 
 Depois diga os limites antes que a banca os cobre.
@@ -962,8 +971,8 @@ hardware acessível, mantendo explícita a ausência de qualificação espacial.
 **Por que não usar apenas AES?**  AES pressupõe que as pontas já compartilham
 uma chave. ML-KEM trata o estabelecimento dessa chave sob ameaça quântica.
 
-**Por que não usar ECDH?**  O escopo priorizou ML-KEM real. ECDH + AES-GCM é o
-próximo baseline para uma comparação assimétrica mais justa.
+**Por que usar ECDH?**  Ele fornece o baseline clássico de estabelecimento de
+chave: ECDH P-256 e ML-KEM-512 alimentam o mesmo KDF/AES-GCM na mesma placa.
 
 **Por que ML-KEM-512?**  É o conjunto mais leve da família e adequado à
 primeira integração embarcada. `512` não é tamanho da chave nem segurança em
@@ -1007,14 +1016,15 @@ são extensão futura necessária para comparar códigos de detecção.
 
 ### 18.4 Resultados
 
-**Qual é o número mais importante?**  Em 240 MHz, PQC foi 23,2x mais lento e
-12,1x maior que CLASSIC na bateria AES-GCM oficial.
+**Qual é o número mais importante?**  Use a razão ECDH/ML-KEM da nova bateria;
+os valores 23,2x e 12,1x são históricos porque o baseline antigo não tinha ECDH.
 
 **Por que PQC+CRC às vezes parece mais rápido que PQC?**  Variação natural. O
 subtempo de CRC é positivo; não há aceleração causada pelo checksum.
 
-**Por que os bytes crescem tanto?**  Principalmente pelo ciphertext ML-KEM de
-768 B.
+**Por que os bytes crescem tanto?**  Em `MISSION`, principalmente pelo
+ciphertext ML-KEM de 768 B. No handshake completo de sessão entram também a
+chave pública de 800 B, totalizando 1.568 B.
 
 **A RAM foi o gargalo?**  Não na coleta. A heap permaneceu estável; tempo e
 tráfego dominaram.
@@ -1051,9 +1061,11 @@ ser documentados em cada repetição.
 
 ### 18.6 Perguntas de banca mais críticas
 
-**A comparação CLASSIC/PQC é justa?**  É justa para medir o acréscimo de
-ML-KEM sobre um baseline simétrico definido. Não é comparação completa entre
-protocolos assimétricos equivalentes.
+**A comparação CLASSIC/PQC é justa?**  No benchmark de sessão, ambos rodam na
+mesma placa, em Release e 240 MHz, alimentam o mesmo KDF/AES-GCM e reutilizam a
+sessão pelo mesmo N. O handshake completo contabiliza 130 B em P-256, 64 B em
+X25519 e 1.568 B em ML-KEM-512; certificados, rede e autenticação de identidade
+não são medidos.
 
 **CRC dentro de AES-GCM é redundante?**  Como defesa criptográfica, sim. Como
 instrumento de diagnóstico e narrativa de corrupção acidental, ele mede uma
@@ -1084,15 +1096,15 @@ aumentaria muito o risco criptográfico e desviaria o experimento para outro
 problema. A biblioteca vendorizada fixa a revisão e permite KAT e build
 reproduzíveis, embora não elimine a necessidade de auditoria.
 
-**O firmware gera um par ML-KEM por mensagem?**  Sim. `MISSION PQC` e
-`MISSION PQC_CRC32` incluem `KeyGen` em cada execução para tornar todo o custo
-visível. Um protocolo real poderia reutilizar ou provisionar material público
-segundo uma política de ciclo de vida, mudando o custo amortizado e exigindo
-proteção da chave privada.
+**O firmware gera um par ML-KEM por mensagem?**  `MISSION PQC` inclui KeyGen
+em cada demonstração isolada. `SESSION_BENCH` faz o modelo de produção:
+KeyGen/Encaps/Decaps/KDF uma vez e depois 1, 100, 500 ou 1000 mensagens com a
+mesma sessão AES-GCM e nonces únicos.
 
-**O baseline CLASSIC distribui a chave?**  Não. A chave efêmera é gerada e
-copiada entre os dois papéis lógicos dentro da placa. Por isso ele é referência
-simétrica de baixo custo, não protocolo clássico completo.
+**O baseline CLASSIC distribui a chave?**  Ele não copia uma chave pronta.
+P-256 e X25519 geram pares reais, serializam e validam as chaves públicas,
+calculam o segredo em cada ponta e aplicam a KDF. Como os dois papéis rodam na
+mesma placa, latência de rede e autenticação de identidade ficam fora do escopo.
 
 **Qual protocolo liga dashboard e placa?**  Linhas seriais versionadas, como
 `V1|request_id|COMMAND|...`, seguidas de respostas correlacionadas com campos
@@ -1138,9 +1150,9 @@ AES-GCM, CRC e operações ML-KEM.
 firmware, não latência USB, renderização do dashboard, rádio ou propagação.
 
 **O que exatamente entra em `bytes_total`?**  Ciphertext da mensagem, nonce e
-tag; nos cenários PQC, também o ciphertext ML-KEM; em `PQC_CRC32`, mais 4 B
-dentro do plaintext cifrado. Não entram chave pública, cabeçalho serial USB,
-protocolo de rádio, FEC ou framing de missão.
+tag; em `CLASSIC`, a chave pública ECDH do emissor (65 B); em PQC, o ciphertext
+ML-KEM (768 B); em `PQC_CRC32`, mais 4 B no plaintext cifrado. Não entram a
+chave pública do receptor, cabeçalho USB, rádio, FEC ou framing de missão.
 
 **O que significam `key_match=1`, `aead_match=1` e `crc_match=1`?**
 Respectivamente: os segredos comparados coincidiram; AES-GCM autenticou e
@@ -1191,9 +1203,9 @@ protótipo não mede rádio, perda de quadros, MTU, fragmentação, FEC, atraso 
 energia. Esses fatores podem tornar os 768 B do ciphertext KEM ainda mais
 relevantes.
 
-**Qual seria o próximo experimento mais forte?**  ECDH P-256 + AES-GCM como
-baseline assimétrico, duas placas, vários payloads, ordem aleatorizada, medição
-elétrica, falhas em rajada, anti-replay e repetição em múltiplas unidades.
+**Qual seria o próximo experimento mais forte?**  Duas placas, autenticação das
+chaves públicas, vários payloads, ordem aleatorizada, medição elétrica, falhas
+em rajada, anti-replay e repetição em múltiplas unidades.
 
 **Qual é a conclusão se a heap ficou estável?**  RAM não foi o gargalo
 observado. Isso fortalece a conclusão específica de que tempo e comunicação
@@ -1203,12 +1215,12 @@ dominaram; não elimina outras restrições de sistemas embarcados.
 
 - “ML-KEM estabelece; AES-GCM cifra e autentica.”
 - “CRC32 detecta erro acidental, não autentica atacante.”
-- “CLASSIC é baseline simétrico, não ECDH.”
+- “CLASSIC usa ECDH P-256; PQC usa ML-KEM-512; ambos alimentam AES-GCM.”
 - “80 MHz é perfil experimental, não especificação de CubeSat.”
 - “Medimos tempo e heap; não medimos energia elétrica.”
 - “O bit-flip é lógico e determinístico, não radiação física.”
 - “Os números são reais desta placa, mas não universais.”
-- “A chave pública não está em `bytes_total`; o ciphertext ML-KEM está.”
+- “Entra a chave pública ECDH do emissor ou o ciphertext ML-KEM; não entra a chave pública do receptor.”
 - “Zero falhas de comando não significa prova de segurança.”
 - “Sem hardware validado, a interface não deve fabricar a missão.”
 
@@ -1291,8 +1303,8 @@ O aluno deve conseguir responder sem consultar:
 
 1. diferença entre ML-KEM e AES-GCM;
 2. diferença entre CRC32 e autenticação;
-3. por que CLASSIC não é ECDH;
-4. por que a chave pública não está nos 837 B;
+3. como ECDH P-256 e ML-KEM estabelecem a chave;
+4. por que entram 65 B ECDH ou 768 B ML-KEM em `bytes_total`;
 5. por que PQC+CRC pode variar no tempo;
 6. o que 80 MHz representa;
 7. por que energia não foi medida;
@@ -1302,8 +1314,31 @@ O aluno deve conseguir responder sem consultar:
 
 ## 21. Nova bateria de resultados
 
-Não execute bateria longa durante o seminário. Para uma nova coleta oficial
-com AES-GCM e os dois perfis:
+Não execute bateria longa durante o seminário. Para a comparação justa de
+sessão ECDH/ML-KEM, depois de regravar o firmware, use:
+
+```bash
+python3 tools/session_benchmark.py \
+  --port /dev/ttyUSB0 \
+  --timeout 20 \
+  --repeats 10 \
+  --pause 0.25
+```
+
+Esperado: `summary.ok=true`, `summary.session_runs=120`,
+`summary.invalid_session_runs=0` e
+`logs/<timestamp>_session_benchmark_dev-ttyusb0.json`. O runner só aceita
+240 MHz/BASELINE, rotaciona a ordem dos algoritmos e imprime a tabela:
+
+```text
+Modo | Setup us | AES-GCM medio us | N | Amortizado us/msg | Handshake B | Heap watermark B | Flash B
+```
+
+Sem abrir a serial, confira com
+`python3 tools/session_benchmark.py --dry-run --repeats 10`.
+
+Para regressão completa de AES-GCM, falhas e os dois perfis, use a bateria
+abaixo. Ela não deve ser usada como única fonte para latência de sessão:
 
 ```bash
 python3 tools/aes_gcm_metrics_battery.py \
@@ -1321,6 +1356,9 @@ Esperado:
 summary.aes_gcm.checks.official_candidate=true
 summary.aes_gcm.checks.aead_failures=0
 summary.aes_gcm.checks.non_aes_gcm_records=0
+summary.aes_gcm.checks.ecdh_invalid_records=0
+summary.aes_gcm.checks.pqc_invalid_records=0
+summary.aes_gcm.checks.balanced_scenarios=true
 summary.mission_runs=600
 summary.pqc_bench_runs=6
 summary.fault_runs=400
@@ -1330,6 +1368,12 @@ logs/<timestamp>_aes_gcm_metrics_dev-ttyusb0.json
 O runner alterna automaticamente entre `BASELINE` e `OBC-1U-LIMITED` e
 retorna a placa para `BASELINE` no cleanup.
 
+Depois da coleta, consolide o JSON validado para a tela `RESULTADOS`:
+
+```bash
+python3 tools/consolidate_metrics.py --file logs/<timestamp>_aes_gcm_metrics_dev-ttyusb0.json
+```
+
 Antes da coleta longa, valide o plano sem abrir a serial:
 
 ```bash
@@ -1338,7 +1382,7 @@ python3 tools/aes_gcm_metrics_battery.py \
 ```
 
 `tools/final_metrics_battery.py` continua disponível como bateria geral, mas
-não verifica todos os campos específicos que qualificam a coleta pós-AES-GCM
+não verifica todos os campos específicos que qualificam a coleta ECDH/ML-KEM
 como fonte oficial. Para repetir essa bateria de regressão com os dois perfis,
 use:
 
@@ -1376,7 +1420,7 @@ Transporte da bancada: USB serial, sem rádio
 ### Cenários
 
 ```text
-CLASSIC    = chave AES efêmera + AES-GCM
+CLASSIC    = ECDH P-256 efêmero -> chave AES -> AES-GCM
 PQC        = ML-KEM -> chave AES -> AES-GCM
 PQC+CRC32  = ML-KEM -> AES-GCM(payload || CRC32)
 ```
@@ -1391,15 +1435,15 @@ ss ML-KEM: 32 B
 nonce GCM: 12 B
 tag GCM: 16 B
 CRC32: 4 B
-MISSION oficial: 69 / 837 / 841 B
+chave pública ECDH P-256: 65 B
+MISSION ECDH: nova bateria pendente
 ```
 
 ### Resultados
 
 ```text
-240 MHz: 611 us / 14.152 us / 14.097 us
-80 MHz:  1.028 us / 40.197 us / 40.077 us
-PQC/CLASSIC: 23,2x em tempo e 12,1x em bytes a 240 MHz
+Resultados de 2026-07-02: históricos pré-ECDH
+Comparação ECDH/ML-KEM: preencher após a nova bateria oficial
 Falhas: 200/200 SILENT sem CRC; 200/200 detectadas com CRC
 ```
 
@@ -1410,13 +1454,13 @@ não é CubeSat real
 não há radiação real
 não há rádio
 energia não foi medida
-CLASSIC não inclui ECDH
+ECDH e ML-KEM são executados na mesma Wisdom e alimentam o mesmo AES-GCM
 80 MHz não é especificação universal
 ```
 
 ### Fechamento
 
-> ML-KEM funcionou na Wisdom, mas aumentou tempo e tráfego. AES-GCM protege a
+> ECDH P-256 e ML-KEM-512 estabelecem a chave na Wisdom; AES-GCM protege a
 > mensagem; CRC32 torna a corrupção acidental visível. O resultado é uma
 > demonstração reproduzível de que segurança pós-quântica em hardware limitado
 > é possível, porém precisa entrar no orçamento do sistema.

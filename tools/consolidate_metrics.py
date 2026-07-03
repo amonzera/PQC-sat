@@ -23,21 +23,12 @@ from tools.final_metrics_battery import (  # noqa: E402
     parse_number as _parse_number,
     payload_of,
 )
+from tools.aes_gcm_metrics_battery import (  # noqa: E402
+    AES_REQUIRED_FIELDS,
+    summarize_aes_gcm,
+)
 
 MISSION_SCENARIOS = ("CLASSIC", "PQC", "PQC_CRC32")
-AES_REQUIRED_FIELDS = (
-    "cipher",
-    "nonce_bytes",
-    "gcm_tag_bytes",
-    "nonce_crc32",
-    "ciphertext_crc32",
-    "gcm_tag_crc32",
-    "encrypt_us",
-    "decrypt_us",
-    "aead_match",
-    "decrypt_ok",
-    "tag_match",
-)
 
 
 def parse_args():
@@ -81,31 +72,7 @@ def first_non_empty(payloads, *fields, default=""):
 
 
 def aes_checks(data, mission_records):
-    missing_required = sum(
-        1
-        for record in mission_records
-        for field in AES_REQUIRED_FIELDS
-        if field not in payload_of(record)
-    )
-    non_aes = sum(1 for record in mission_records if payload_of(record).get("cipher") != "AES-128-GCM")
-    aead_failures = sum(
-        1 for record in mission_records
-        if str(payload_of(record).get("aead_match")) not in {"1", "true", "True"}
-    )
-    nonce_values = [
-        str(payload_of(record).get("nonce_crc32"))
-        for record in mission_records
-        if payload_of(record).get("nonce_crc32") not in {None, ""}
-    ]
-    nonce_duplicates = len(nonce_values) - len(set(nonce_values))
-    checks = {
-        "mission_records": len(mission_records),
-        "missing_required_fields": missing_required,
-        "non_aes_gcm_records": non_aes,
-        "aead_failures": aead_failures,
-        "nonce_crc32_duplicates": nonce_duplicates,
-        "official_candidate": bool(mission_records) and missing_required == 0 and non_aes == 0 and aead_failures == 0,
-    }
+    checks = dict(summarize_aes_gcm(mission_records)["checks"])
     original_checks = data.get("summary", {}).get("aes_gcm", {}).get("checks")
     if isinstance(original_checks, dict) and original_checks != checks:
         checks["recomputed_from_records"] = True
@@ -114,10 +81,12 @@ def aes_checks(data, mission_records):
 
 def metrics_status(data, checks) -> str:
     if checks.get("official_candidate"):
-        return "versão cifrada oficial com AES-128-GCM"
-    if data.get("schema_version") == "pqc-sat-aes-gcm-metrics-v1":
-        return "bateria AES-GCM rejeitada: campos obrigatórios inválidos"
-    return "bateria geral incompatível com a consolidação AES-GCM"
+        return "comparação oficial ECDH P-256 vs ML-KEM-512"
+    if checks.get("ecdh_invalid_records"):
+        return "histórico pré-ECDH; nova bateria pendente"
+    if data.get("schema_version") in {"pqc-sat-aes-gcm-metrics-v1", "pqc-sat-aes-gcm-metrics-v2"}:
+        return "coleta não oficial: amostra, execução ou campos obrigatórios inválidos"
+    return "bateria incompatível com a consolidação ECDH vs ML-KEM"
 
 
 def crypto_label(scenario, payloads):
@@ -125,7 +94,7 @@ def crypto_label(scenario, payloads):
     crypto = first_non_empty(payloads, "crypto")
     confirmation = first_non_empty(payloads, "confirmation")
     if cipher == "AES-128-GCM":
-        return "AES-128-GCM" if scenario == "CLASSIC" else "ML-KEM-512 + AES-GCM"
+        return "ECDH P-256 + AES-GCM" if scenario == "CLASSIC" else "ML-KEM-512 + AES-GCM"
     if scenario == "CLASSIC" and crypto:
         return f"{crypto} (legado)"
     if scenario == "PQC_CRC32" and crypto:
@@ -173,9 +142,12 @@ def mission_profile_stats(profile_records):
             "bytes_payload": bytes_payload,
             "bytes_crypto": bytes_crypto,
             "bytes_checksum": bytes_checksum,
+            "bytes_ecdh": int(round(safe_mean(payload.get("bytes_ecdh") for payload in payloads))),
             "keygen_us": int(round(safe_mean(payload.get("keygen_us") for payload in payloads))),
             "encap_us": int(round(safe_mean(payload.get("encap_us") for payload in payloads))),
             "decap_us": int(round(safe_mean(payload.get("decap_us") for payload in payloads))),
+            "ecdh_tx_us": int(round(safe_mean(payload.get("ecdh_tx_us") for payload in payloads))),
+            "ecdh_rx_us": int(round(safe_mean(payload.get("ecdh_rx_us") for payload in payloads))),
             "tag_us": int(round(safe_mean(payload.get("tag_us") or payload.get("encrypt_us") for payload in payloads))),
             "verify_us": int(round(safe_mean(payload.get("verify_us") or payload.get("decrypt_us") for payload in payloads))),
             "crc_us": int(round(safe_mean(payload.get("crc_us") for payload in payloads))),
@@ -227,6 +199,10 @@ def main():
     mission_runs = len(mission_records)
     checks = aes_checks(data, mission_records)
     status = metrics_status(data, checks)
+    if not checks.get("official_candidate"):
+        print(f"Error: refusing to overwrite consolidated metrics: {status}", file=sys.stderr)
+        print("checks=" + json.dumps(checks, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+        return 1
 
     bench_records = [r for r in records if r.get("command", "").startswith("PQC_BENCH ")]
     pqc_bench_runs = len(bench_records)
@@ -328,23 +304,40 @@ def main():
     # Build the consolidated metrics document. The dashboard reads this JSON at
     # boot (logs/metrics_consolidated.json) and overlays it on its baked-in
     # defaults; if the file is absent the dashboard keeps the committed values.
-    title = "DESEMPENHO DA MISSÃO (AES-GCM)" if checks.get("official_candidate") else "DESEMPENHO MEDIDO (firmware legado)"
+    if checks.get("official_candidate"):
+        title = "ECDH P-256 vs ML-KEM-512 (AES-GCM)"
+    elif checks.get("ecdh_invalid_records"):
+        title = "RESULTADOS HISTÓRICOS PRÉ-ECDH"
+    else:
+        title = "COLETA NÃO OFICIAL — NÃO CONSOLIDAR"
     formatted_heap = f"{heap_baseline:,}".replace(",", ".")
     if checks.get("official_candidate"):
         note_lines = [
-            "Resultados oficiais com cifragem AES-GCM ativa nas missões.",
+            "Comparação oficial: ECDH P-256 versus ML-KEM-512; ambos usam AES-GCM.",
             f"PQC foi {pqc_vs_classic_elapsed:.1f}x mais lento e {pqc_vs_classic_bytes:.1f}x maior em bytes que CLASSIC.",
             f"PQC+CRC32 adicionou {crc32_extra_bytes:.0f} bytes ao pacote, com verificação ativa de integridade.",
             f"Heap médio estável em {formatted_heap} B no baseline de 240 MHz.",
             f"A 80 MHz (limited), PQC subiu para {limited_pqc_ms:.1f} ms ({limited_pqc_vs_classic_elapsed:.1f}x o clássico).",
         ]
     else:
+        if checks.get("ecdh_invalid_records"):
+            rejection_reason = "O cenário CLASSIC não contém todos os campos ECDH obrigatórios."
+        elif checks.get("pqc_invalid_records"):
+            rejection_reason = "Um ou mais cenários PQC não contêm uma execução ML-KEM válida."
+        elif not checks.get("official_sample_size"):
+            rejection_reason = "A coleta não contém 600 MISSION balanceadas nos dois perfis oficiais."
+        elif checks.get("mission_failures") or checks.get("delivery_failures"):
+            rejection_reason = "A coleta contém falhas de comando ou mensagens não entregues."
+        elif checks.get("nonce_crc32_duplicates"):
+            rejection_reason = "A coleta contém nonces repetidos e não pode ser promovida."
+        else:
+            rejection_reason = "A coleta falhou em uma ou mais validações obrigatórias."
         note_lines = [
-            "Bateria executou sem falhas, mas não valida a versão AES-GCM.",
-            "MISSION retornou HMAC-SHA256 legado; faltaram cipher, nonce e tag GCM.",
+            "Bateria não valida a comparação ECDH P-256 versus ML-KEM-512.",
+            rejection_reason,
             f"Números abaixo valem como regressão: PQC foi {pqc_vs_classic_elapsed:.1f}x mais lento e {pqc_vs_classic_bytes:.1f}x maior.",
             f"CRC32 acrescentou {crc32_extra_bytes:.0f} bytes e manteve a detecção didática de bit-flip.",
-            "Próximo passo: regravar firmware AES-GCM e repetir este runner.",
+            "Próximo passo: gravar o firmware ECDH e repetir a bateria oficial.",
         ]
 
     document = {

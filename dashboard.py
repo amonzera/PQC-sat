@@ -92,7 +92,7 @@ MISSION_PRESET_COMMANDS = {
 MISSION_OVERLAY_SCENARIOS = ("CLASSIC", "PQC", "PQC_CRC32")
 CONSOLIDATED_ACCEPTANCE_LOG = "logs/20260702T044907Z_final_metrics_dev-ttyusb0.json"
 CONSOLIDATED_ACCEPTANCE_LABEL = "20260702T044907Z"
-CONSOLIDATED_METRICS_STATUS = "versão cifrada oficial com AES-128-GCM"
+CONSOLIDATED_METRICS_STATUS = "histórico pré-ECDH; nova bateria pendente"
 CONSOLIDATED_SUMMARY = {
     "crc_acceptance": "200/200",
     "demo_crc_detected": "200/200",
@@ -103,7 +103,7 @@ CONSOLIDATED_SUMMARY = {
     "pqc_bench_runs": 6,
     "records": 1038
 }
-CONSOLIDATED_AES_GCM_CHECKS = {'aead_failures': 0, 'missing_required_fields': 0, 'mission_records': 600, 'non_aes_gcm_records': 0, 'nonce_crc32_duplicates': 0, 'official_candidate': True}
+CONSOLIDATED_AES_GCM_CHECKS = {'aead_failures': 0, 'balanced_scenarios': True, 'ecdh_invalid_records': 200, 'missing_required_fields': 0, 'mission_records': 600, 'non_aes_gcm_records': 0, 'nonce_crc32_duplicates': 0, 'official_candidate': False, 'pqc_invalid_records': 0}
 CONSOLIDATED_MISSION_BASELINE = {
     "CLASSIC": {
         "label": "CLASSIC",
@@ -194,13 +194,13 @@ CONSOLIDATED_PQC_BENCH = (
     ("BASELINE 240 MHz", "3.302", "3.866", "4.990"),
     ("LIMITED 80 MHz", "10.067", "11.789", "15.217"),
 )
-CONSOLIDATED_MISSION_TITLE = "DESEMPENHO DA MISSÃO (AES-GCM)"
+CONSOLIDATED_MISSION_TITLE = "RESULTADOS HISTÓRICOS PRÉ-ECDH"
 CONSOLIDATED_NOTES = (
-    "Resultados oficiais com cifragem AES-GCM ativa nas missões.",
+    "Resultados históricos: CLASSIC ainda não incluía ECDH P-256.",
     "PQC foi 23.2x mais lento e 12.1x maior em bytes que CLASSIC.",
     "PQC+CRC32 adicionou 4 bytes ao pacote, com verificação ativa de integridade.",
     "Heap médio estável em 201.412 B no baseline de 240 MHz.",
-    "A 80 MHz (limited), PQC subiu para 40.2 ms (39.1x o clássico).",
+    "Repita a bateria oficial após gravar o firmware ECDH.",
 )
 CONSOLIDATED_METRICS_FILE = DEFAULT_LOG_DIR / "metrics_consolidated.json"
 
@@ -220,6 +220,9 @@ def _load_consolidated_metrics():
         return
     if not isinstance(data, dict):
         return
+    checks = data.get("aes_gcm_checks")
+    if not isinstance(checks, dict) or not checks.get("official_candidate") or checks.get("ecdh_invalid_records") != 0:
+        return
     g = globals()
 
     def overlay_str(name, key):
@@ -234,9 +237,7 @@ def _load_consolidated_metrics():
     summary = data.get("summary")
     if isinstance(summary, dict):
         g["CONSOLIDATED_SUMMARY"] = {**CONSOLIDATED_SUMMARY, **summary}
-    checks = data.get("aes_gcm_checks")
-    if isinstance(checks, dict):
-        g["CONSOLIDATED_AES_GCM_CHECKS"] = {**CONSOLIDATED_AES_GCM_CHECKS, **checks}
+    g["CONSOLIDATED_AES_GCM_CHECKS"] = {**CONSOLIDATED_AES_GCM_CHECKS, **checks}
     baseline = data.get("mission_baseline")
     if isinstance(baseline, dict) and all(s in baseline for s in MISSION_OVERLAY_SCENARIOS):
         g["CONSOLIDATED_MISSION_BASELINE"] = {
@@ -2208,7 +2209,8 @@ class DashboardPanel:
             if scenario == "CLASSIC":
                 crc_bytes = 0
                 mlkem_bytes = 0
-                crypto_bytes = nonce_bytes + tag_bytes
+                ecdh_bytes = 65
+                crypto_bytes = ecdh_bytes + nonce_bytes + tag_bytes
                 total_bytes = payload_bytes + crypto_bytes
 
                 sim_payload = {
@@ -2222,8 +2224,10 @@ class DashboardPanel:
                     "bytes_nonce": nonce_bytes,
                     "bytes_gcm_tag": tag_bytes,
                     "bytes_mlkem": mlkem_bytes,
+                    "bytes_ecdh": ecdh_bytes,
                     "cipher": "AES-128-GCM",
-                    "crypto": "AES-128-GCM",
+                    "crypto": "ECDH-P256",
+                    "key_source": "ECDH-P256",
                     "checksum": "NONE",
                     "heap": 48200,
                     "min_heap": 48100,
@@ -2232,14 +2236,16 @@ class DashboardPanel:
                     "aead_match": "true",
                     "tag_match": "true",
                     "crc_match": "NA",
-                    "rng_us": 400,
+                    "rng_us": 20,
                     "encrypt_us": 850,
                     "decrypt_us": 920,
                     "crc_us": 0,
-                    "keygen_us": 0,
+                    "keygen_us": 400,
                     "encap_us": 0,
                     "decap_us": 0,
-                    "kdf_us": 0,
+                    "ecdh_tx_us": 160,
+                    "ecdh_rx_us": 160,
+                    "kdf_us": 30,
                 }
             elif scenario == "PQC":
                 crc_bytes = 0
@@ -3437,11 +3443,12 @@ class DashboardPanel:
         parts = {label: value for label, value, _color in self._mission_package_parts(mission)}
         payload = parts.get("payload", 0)
         mlkem = parts.get("ML-KEM", 0)
+        ecdh = parts.get("ECDH", 0)
         nonce = parts.get("nonce", 0)
         gcm = parts.get("GCM", 0)
         hmac = parts.get("HMAC", 0)
         checksum = parts.get("CRC", 0)
-        total = self._mission_int(mission, "bytes_total", payload + mlkem + nonce + gcm + hmac + checksum)
+        total = self._mission_int(mission, "bytes_total", payload + mlkem + ecdh + nonce + gcm + hmac + checksum)
 
         if total <= 0:
             return []
@@ -3517,26 +3524,48 @@ class DashboardPanel:
                 )
             )
         else:
-            steps.append(
-                {
-                    "label": "RNG",
-                    "detail": "chave efêmera",
-                    "explain": "No baseline clássico, a placa gera uma chave AES-128 efêmera e um nonce aleatório para esta mensagem.",
-                    "kind": "rng",
-                    "packet_bytes": payload + checksum,
-                    "added_bytes": 0,
-                    "time_us": self._mission_int(mission, "rng_us"),
-                    "color": C_ACCENT_CYAN,
-                }
+            steps.extend(
+                (
+                    {
+                        "label": "KEYGEN",
+                        "detail": "pares P-256 efêmeros",
+                        "explain": "Emissor e receptor geram pares ECDH P-256 efêmeros para esta mensagem.",
+                        "kind": "ecdh_keygen",
+                        "packet_bytes": payload + checksum,
+                        "added_bytes": 0,
+                        "time_us": self._mission_int(mission, "keygen_us"),
+                        "color": C_ACCENT_CYAN,
+                    },
+                    {
+                        "label": "ECDH",
+                        "detail": "segredo compartilhado",
+                        "explain": "A chave pública efêmera P-256 de 65 B viaja no pacote. As duas pontas calculam o mesmo segredo sem transmiti-lo.",
+                        "kind": "ecdh",
+                        "packet_bytes": payload + checksum + ecdh,
+                        "added_bytes": ecdh,
+                        "time_us": self._mission_int(mission, "ecdh_tx_us") + self._mission_int(mission, "ecdh_rx_us"),
+                        "color": C_ACCENT_CYAN,
+                    },
+                    {
+                        "label": "KDF",
+                        "detail": "deriva chave AES",
+                        "explain": "O segredo ECDH vira a chave AES-128 de sessão nas duas pontas, usando a mesma derivação do fluxo PQC.",
+                        "kind": "kdf",
+                        "packet_bytes": payload + checksum + ecdh,
+                        "added_bytes": 0,
+                        "time_us": self._mission_int(mission, "kdf_us"),
+                        "color": C_ACCENT_CYAN,
+                    },
+                )
             )
 
         steps.append(
             {
                 "label": "AES-GCM",
                 "detail": "cifra e tag (tx)",
-                "explain": "O emissor cifra o payload com AES-128-GCM e gera a tag de autenticação. O pacote (ciphertext ML-KEM + nonce + ciphertext + tag) é então transmitido. O nonce não pode repetir com a mesma chave.",
+                "explain": "O emissor cifra o payload com AES-128-GCM e gera a tag. O pacote leva o artefato de estabelecimento de chave, nonce, ciphertext e tag.",
                 "kind": "aead",
-                "packet_bytes": payload + checksum + mlkem + nonce + gcm + hmac,
+                "packet_bytes": payload + checksum + mlkem + ecdh + nonce + gcm + hmac,
                 "added_bytes": nonce + gcm + hmac,
                 "time_us": self._mission_int(mission, "encrypt_us", self._mission_int(mission, "tag_us")),
                 "color": C_ACCENT_ORANGE,
@@ -3552,7 +3581,7 @@ class DashboardPanel:
                     "detail": "recupera segredo (rx)",
                     "explain": "Já no receptor: ele decapsula o ciphertext ML-KEM recebido com a chave privada e chega ao mesmo segredo compartilhado, sem expô-lo, derivando de novo a chave AES.",
                     "kind": "decap",
-                    "packet_bytes": payload + checksum + mlkem + nonce + gcm + hmac,
+                    "packet_bytes": payload + checksum + mlkem + ecdh + nonce + gcm + hmac,
                     "added_bytes": 0,
                     "time_us": self._mission_int(mission, "decap_us"),
                     "color": C_ACCENT_PURPLE,
@@ -3569,7 +3598,7 @@ class DashboardPanel:
             "detail": verify_detail,
             "explain": "No receptor, AES-GCM só libera o plaintext se a tag for válida. Com CRC32, a demo ainda checa corrupção acidental do payload.",
                 "kind": "verify",
-                "packet_bytes": payload + checksum + mlkem + nonce + gcm + hmac,
+                "packet_bytes": payload + checksum + mlkem + ecdh + nonce + gcm + hmac,
                 "added_bytes": 0,
                 "time_us": verify_time,
                 "color": C_ACCENT_GREEN if checksum > 0 else C_TEXT_PRIMARY,
@@ -3680,6 +3709,8 @@ class DashboardPanel:
             "keygen_us",
             "encap_us",
             "decap_us",
+            "ecdh_tx_us",
+            "ecdh_rx_us",
             "confirm_us",
             "pk_crc32",
             "ct_crc32",
@@ -3708,6 +3739,7 @@ class DashboardPanel:
             "bytes_payload",
             "bytes_ciphertext",
             "bytes_mlkem",
+            "bytes_ecdh",
             "bytes_nonce",
             "bytes_gcm_tag",
             "bytes_crypto",
@@ -3897,6 +3929,7 @@ class DashboardPanel:
             "bytes_payload",
             "bytes_ciphertext",
             "bytes_mlkem",
+            "bytes_ecdh",
             "bytes_nonce",
             "bytes_gcm_tag",
             "bytes_crypto",
@@ -3913,6 +3946,8 @@ class DashboardPanel:
             "keygen_us",
             "encap_us",
             "decap_us",
+            "ecdh_tx_us",
+            "ecdh_rx_us",
             "rng_us",
             "kdf_us",
             "encrypt_us",
@@ -4762,9 +4797,15 @@ class DashboardPanel:
         insight_w = (body_w - gap * 2) // 3
         pqc_time_ratio = self._ratio_value(CONSOLIDATED_MISSION_BASELINE["PQC"]["elapsed_us"], classic["elapsed_us"])
         pqc_bytes_ratio = self._ratio_value(CONSOLIDATED_MISSION_BASELINE["PQC"]["bytes_total"], classic["bytes_total"])
+        metrics_official = bool(CONSOLIDATED_AES_GCM_CHECKS.get("official_candidate"))
+        cost_lines = (
+            (f"+{pqc_time_ratio:.1f}x tempo", f"+{pqc_bytes_ratio:.1f}x bytes", "impacto operacional medido")
+            if metrics_official
+            else ("NOVA BATERIA", "ECDH vs ML-KEM", "resultados pendentes")
+        )
         insight_specs = (
             ("SEGURANCA", ("ML-KEM-512", "protecao pos-quantica", "contra ameaca quantica"), C_ACCENT_CYAN),
-            ("CUSTO", (f"+{pqc_time_ratio:.1f}x tempo", f"+{pqc_bytes_ratio:.1f}x bytes", "impacto operacional medido"), C_ACCENT_ORANGE),
+            ("CUSTO", cost_lines, C_ACCENT_ORANGE),
             ("INTEGRIDADE", (f"{detected}/{total}", "falhas detectadas", "com CRC32 ativo"), soft_green),
         )
         for index, (title, lines, color) in enumerate(insight_specs):
@@ -4780,7 +4821,7 @@ class DashboardPanel:
         footer_y = insights_top + insight_h + 10
         if bottom_limit - footer_y >= 18:
             aes_ok = bool(CONSOLIDATED_AES_GCM_CHECKS.get("official_candidate"))
-            footer = "AES-GCM validado | detalhes em D" if aes_ok else "AES-GCM pendente | detalhes em D"
+            footer = "ECDH vs ML-KEM validado | detalhes em D" if aes_ok else "NOVA BATERIA ECDH PENDENTE | detalhes em D"
             footer_surf = self._render_clipped(FONT_LABEL, footer, C_TEXT_DIM, body_w)
             surface.blit(footer_surf, (body_x + (body_w - footer_surf.get_width()) // 2, footer_y))
         self.results_overlay_content_bottom = footer_y + 18
@@ -4926,7 +4967,7 @@ class DashboardPanel:
             C_ACCENT_PURPLE,
             "A tabela separa o total: AES mostra cifragem/decifragem; CRC é o custo positivo do guardião.",
         )
-        phase_headers = ("CENÁRIO", "KEYGEN", "ENCAP", "DECAP", "AES TX/RX", "CRC")
+        phase_headers = ("CENÁRIO", "KEYGEN", "KEX TX", "KEX RX", "AES TX/RX", "CRC")
         phase_col_ws = (int(pw * 0.18), int(pw * 0.15), int(pw * 0.15), int(pw * 0.15), int(pw * 0.23), pw - int(pw * 0.18) - int(pw * 0.15) * 3 - int(pw * 0.23))
         cx = px
         for index, head in enumerate(phase_headers):
@@ -4939,8 +4980,8 @@ class DashboardPanel:
             cells = (
                 label,
                 _format_elapsed(result["keygen_us"]) if result["keygen_us"] else "—",
-                _format_elapsed(result["encap_us"]) if result["encap_us"] else "—",
-                _format_elapsed(result["decap_us"]) if result["decap_us"] else "—",
+                _format_elapsed(result.get("ecdh_tx_us") or result["encap_us"]) if (result.get("ecdh_tx_us") or result["encap_us"]) else "—",
+                _format_elapsed(result.get("ecdh_rx_us") or result["decap_us"]) if (result.get("ecdh_rx_us") or result["decap_us"]) else "—",
                 f"{_format_elapsed(result['tag_us'])} / {_format_elapsed(result['verify_us'])}",
                 _format_elapsed(result["crc_us"]) if result["crc_us"] else "—",
             )
@@ -4962,10 +5003,11 @@ class DashboardPanel:
                 packet_rect,
                 "COMPOSIÇÃO DO PACOTE",
                 C_ACCENT_BLUE,
-                "Barras empilhadas: payload, ciphertext ML-KEM, nonce + tag GCM e CRC32.",
+                "Barras empilhadas: payload, chave pública ECDH ou ciphertext ML-KEM, nonce + tag e CRC32.",
             )
             legend = (
                 ("PAYLOAD", C_ACCENT_BLUE),
+                ("ECDH PK", C_ACCENT_CYAN),
                 ("ML-KEM CT", C_ACCENT_PURPLE),
                 ("NONCE + TAG", C_ACCENT_CYAN),
                 ("CRC32", C_ACCENT_GREEN),
@@ -4974,7 +5016,7 @@ class DashboardPanel:
             for label, color in legend:
                 pygame.draw.rect(surface, color, (legend_x, qy, 10, 10), border_radius=2)
                 surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, 104), (legend_x + 14, qy - 2))
-                legend_x += min(132, max(104, qw // 4))
+                legend_x += min(118, max(88, qw // 5))
             qy += 28
             maximum_packet = max(CONSOLIDATED_MISSION_BASELINE[name]["bytes_total"] for name in MISSION_OVERLAY_SCENARIOS)
             packet_labels = {"CLASSIC": "CLASSIC", "PQC": "PQC", "PQC_CRC32": "PQC+CRC"}
@@ -4987,7 +5029,8 @@ class DashboardPanel:
                 surface.blit(self._render_clipped(FONT_BODY, packet_labels[scenario], self._scenario_color(scenario), label_w - 8), (qx, qy - 2))
                 segments = (
                     (result["bytes_payload"], C_ACCENT_BLUE),
-                    (max(0, result["bytes_crypto"] - 28), C_ACCENT_PURPLE),
+                    (result.get("bytes_ecdh", 0), C_ACCENT_CYAN),
+                    (max(0, result["bytes_crypto"] - 28 - result.get("bytes_ecdh", 0)), C_ACCENT_PURPLE),
                     (28, C_ACCENT_CYAN),
                     (result["bytes_checksum"], C_ACCENT_GREEN),
                 )
@@ -5014,15 +5057,15 @@ class DashboardPanel:
             validation_rect,
             "2. A COLETA É VÁLIDA?",
             aes_color,
-            f"{'SIM — AES-GCM OFICIAL' if aes_ok else 'NÃO — REVISAR FIRMWARE'} | {CONSOLIDATED_SUMMARY['records']} regs; {CONSOLIDATED_SUMMARY['failed']} falhas de execução",
+            f"{'SIM — ECDH vs ML-KEM OFICIAL' if aes_ok else 'NÃO — NOVA BATERIA NECESSÁRIA'} | {CONSOLIDATED_SUMMARY['records']} regs; {CONSOLIDATED_SUMMARY['failed']} falhas de execução",
         )
         validation_items = (
             ("MISSÕES AES", f"{CONSOLIDATED_AES_GCM_CHECKS.get('mission_records', 0)}/600"),
-            ("NÃO-AES", str(CONSOLIDATED_AES_GCM_CHECKS.get("non_aes_gcm_records", 0))),
-            ("CAMPOS AUSENTES", str(CONSOLIDATED_AES_GCM_CHECKS.get("missing_required_fields", 0))),
+            ("CENÁRIOS BAL.", "SIM" if CONSOLIDATED_AES_GCM_CHECKS.get("balanced_scenarios") else "NÃO"),
+            ("ECDH INVÁLIDO", str(CONSOLIDATED_AES_GCM_CHECKS.get("ecdh_invalid_records", 0))),
+            ("PQC INVÁLIDO", str(CONSOLIDATED_AES_GCM_CHECKS.get("pqc_invalid_records", 0))),
             ("FALHAS AEAD", str(CONSOLIDATED_AES_GCM_CHECKS.get("aead_failures", 0))),
             ("NONCES REPETIDOS", str(CONSOLIDATED_AES_GCM_CHECKS.get("nonce_crc32_duplicates", 0))),
-            ("PQC_KAT", "PASS"),
         )
         item_w = vw // 3
         for index, (label, value) in enumerate(validation_items):
@@ -5031,7 +5074,7 @@ class DashboardPanel:
             ix = vx + col * item_w
             iy = vy + row * 35
             surface.blit(self._render_clipped(FONT_LABEL, label, C_TEXT_DIM, item_w - 8), (ix, iy))
-            surface.blit(self._render_clipped(FONT_BODY, value, aes_color if value in {"0", "PASS", "600/600"} else C_TEXT_PRIMARY, item_w - 8), (ix, iy + 15))
+            surface.blit(self._render_clipped(FONT_BODY, value, aes_color if value in {"0", "SIM", "600/600"} else C_TEXT_PRIMARY, item_w - 8), (ix, iy + 15))
 
         # 3. Benchmark isolado de ML-KEM.
         bench_y = validation_rect.bottom + small_gap
@@ -5158,6 +5201,7 @@ class DashboardPanel:
         pqc_80 = CONSOLIDATED_MISSION_LIMITED["PQC"]
         crc_80 = CONSOLIDATED_MISSION_LIMITED["PQC_CRC32"]
         classic_240 = CONSOLIDATED_MISSION_BASELINE["CLASSIC"]
+        metrics_official = bool(CONSOLIDATED_AES_GCM_CHECKS.get("official_candidate"))
         pqc_clock_ratio = self._ratio_value(pqc_80["elapsed_us"], pqc_240["elapsed_us"])
         crc_delta_240 = crc_240["elapsed_us"] - pqc_240["elapsed_us"]
         crc_delta_80 = crc_80["elapsed_us"] - pqc_80["elapsed_us"]
@@ -5165,8 +5209,12 @@ class DashboardPanel:
         theory_cards = (
             (
                 "1. O QUE O TEMPO TOTAL SOMA?",
-                "240 MHz: 611 us / 14,152 ms / 14,097 ms",
-                "elapsed_us soma RNG/KEM/KDF/AES/CRC. KeyGen cria par; Encaps gera ct+segredo; Decaps recupera/valida e foi a mais cara. AES TX/RX cifra e verifica.",
+                f"240 MHz: {_format_elapsed(classic_240['elapsed_us'])} / {_format_elapsed(pqc_240['elapsed_us'])} / {_format_elapsed(crc_240['elapsed_us'])}",
+                (
+                    "elapsed_us soma ECDH ou ML-KEM, KDF, AES-GCM e CRC. KEX TX/RX mostra o segredo calculado em cada ponta."
+                    if metrics_official
+                    else "Estes tempos são históricos pré-ECDH; a decomposição clássica será preenchida pela nova bateria."
+                ),
                 C_ACCENT_CYAN,
             ),
             (
@@ -5176,9 +5224,13 @@ class DashboardPanel:
                 C_ACCENT_ORANGE,
             ),
             (
-                "3. DE ONDE VÊM 69 / 837 / 841 BYTES?",
-                "CLASSIC = 41 + 12 + 16 | PQC = CLASSIC + 768 | PQC+CRC = PQC + 4",
-                "41 B de payload + nonce GCM de 12 B + tag de 16 B = 69 B. PQC soma o ciphertext ML-KEM de 768 B; CRC soma 4 B. Esses tamanhos são determinísticos.",
+                "3. DE ONDE VÊM OS BYTES?",
+                f"CLASSIC = {classic_240['bytes_total']} B | PQC = {pqc_240['bytes_total']} B | PQC+CRC = {crc_240['bytes_total']} B",
+                (
+                    "CLASSIC transmite uma chave pública ECDH P-256 de 65 B; PQC transmite o ciphertext ML-KEM de 768 B. Ambos somam payload, nonce e tag GCM; CRC soma 4 B."
+                    if metrics_official
+                    else "Valores históricos pré-ECDH. Grave o firmware atual e execute a nova bateria antes de comparar os pacotes."
+                ),
                 C_ACCENT_BLUE,
             ),
             (
@@ -5872,7 +5924,7 @@ class DashboardPanel:
         ordered_labels = (
             ("payload", "CRC", "ML-KEM", "nonce", "GCM", "HMAC")
             if scenario in {"PQC", "PQC_CRC32"}
-            else ("payload", "CRC", "nonce", "GCM", "HMAC")
+            else ("payload", "CRC", "ECDH", "nonce", "GCM", "HMAC")
         )
         parts = tuple(parts_by_label[label] for label in ordered_labels if label in parts_by_label)
         bar_x = rect.x + 18
@@ -6070,10 +6122,12 @@ class DashboardPanel:
         nonce = 0
         gcm = 0
         mlkem = 0
+        ecdh = 0
         if has_aead_fields:
             nonce = self._mission_int(mission, "bytes_nonce", self._mission_int(mission, "nonce_bytes"))
             gcm = self._mission_int(mission, "bytes_gcm_tag", self._mission_int(mission, "gcm_tag_bytes"))
             mlkem = self._mission_int(mission, "bytes_mlkem")
+            ecdh = self._mission_int(mission, "bytes_ecdh")
             if mlkem <= 0 and scenario in {"PQC", "PQC_CRC32"}:
                 mlkem = max(0, crypto - nonce - gcm)
         else:
@@ -6084,6 +6138,7 @@ class DashboardPanel:
                 mlkem = 0
         return (
             ("payload", payload, C_ACCENT_BLUE),
+            ("ECDH", ecdh, C_ACCENT_CYAN),
             ("ML-KEM", mlkem, C_ACCENT_PURPLE),
             ("nonce", nonce, C_TEXT_DIM),
             ("GCM", gcm, C_ACCENT_ORANGE),
@@ -6164,7 +6219,7 @@ class DashboardPanel:
     # ===================================================================
     MISSION_KIND_ICON = {
         "payload": "packet", "crc": "shield", "keygen": "key", "mlkem": "lock",
-        "kdf": "hash", "rng": "rng", "aead": "lock", "decap": "unlock",
+        "ecdh_keygen": "key", "ecdh": "key", "kdf": "hash", "rng": "rng", "aead": "lock", "decap": "unlock",
         "verify": "shield", "send": "sat",
     }
 
@@ -6247,6 +6302,7 @@ class DashboardPanel:
         """
         p = self._mission_int(mission, "bytes_payload")
         m = self._mission_int(mission, "bytes_mlkem")
+        e = self._mission_int(mission, "bytes_ecdh")
         c = self._mission_int(mission, "bytes_checksum")
         nonce = self._mission_int(mission, "bytes_nonce", self._mission_int(mission, "nonce_bytes"))
         gcm = self._mission_int(mission, "bytes_gcm_tag", self._mission_int(mission, "gcm_tag_bytes"))
@@ -6271,6 +6327,18 @@ class DashboardPanel:
                 "outputs": [("Chave publica", "800 B", "key", 0), ("Chave privada", "1632 B", "lock", 0)],
                 "note": "Par ML-KEM-512 (reticulados MLWE). Custo de CPU/RAM; o pacote nao cresce.",
             },
+            "ecdh_keygen": {
+                "inputs": [("Entropia", "TRNG", "rng")],
+                "op": ("key", "KEYGEN P-256", "gera dois pares efemeros"),
+                "outputs": [("Chaves publicas", "65 B cada", "key", 0), ("Chaves privadas", "locais", "lock", 0)],
+                "note": "Um par por ponta e por mensagem; as chaves privadas nunca saem da placa.",
+            },
+            "ecdh": {
+                "inputs": [("Chave publica", f"{e} B", "key"), ("Chave privada", "local", "lock")],
+                "op": ("key", "ECDH P-256", "calcula o segredo"),
+                "outputs": [("Segredo K", "32 B", "key", 0)],
+                "note": "As duas pontas chegam ao mesmo segredo; apenas uma chave publica de 65 B entra no pacote.",
+            },
             "mlkem": {
                 "inputs": [("Chave publica", "800 B", "key")],
                 "op": ("lock", "ENCAPSULA", "sela um segredo"),
@@ -6279,9 +6347,9 @@ class DashboardPanel:
             },
             "kdf": {
                 "inputs": [("Segredo K", "32 B", "key")],
-                "op": ("hash", "SHA-256", "deriva a chave"),
+                "op": ("hash", "HMAC-SHA256", "deriva a chave"),
                 "outputs": [("Chave AES", "16 B", "key", 0)],
-                "note": "Condensa 32 B -> 16 B. Quem cifra a mensagem e o AES-GCM.",
+                "note": "Condensa o segredo de 32 B em uma chave AES de 16 B; vale para ECDH e ML-KEM.",
                 "sample": {"mode": "shrink", "label": "segredo 32 B  ->  chave 16 B", "n_in": 8, "n_out": 4},
             },
             "rng": {
@@ -6557,7 +6625,7 @@ class DashboardPanel:
         scrub_rect = pygame.Rect(track_x, scrub_cy - 12, max(1, track_w), 38)
         self.mission_flow_scrub_rects[scenario] = scrub_rect
         sigla = {"PAYLOAD": "PAY", "CRC32": "CRC", "KEYGEN": "KEY", "ENCAP": "ENC",
-                 "KDF": "KDF", "RNG": "RNG", "AES-GCM": "AES", "DECAP": "DEC",
+                 "ECDH": "ECD", "KDF": "KDF", "RNG": "RNG", "AES-GCM": "AES", "DECAP": "DEC",
                  "VERIFICA": "VER", "RESULTADO": "OK"}
         slot = track_w // max(1, len(steps))
         for index in range(len(steps)):
@@ -6603,10 +6671,14 @@ class DashboardPanel:
         pygame.draw.line(surface, C_PANEL_BORDER, (rect.x + 14, sep_y), (rect.right - 14, sep_y), 1)
 
         phase_y = sep_y + 10
+        exchange_phases = (
+            (("ecdh tx", "ecdh_tx_us"), ("ecdh rx", "ecdh_rx_us"))
+            if scenario == "CLASSIC"
+            else (("encap", "encap_us"), ("decap", "decap_us"))
+        )
         phases = (
             ("keygen", "keygen_us"),
-            ("encap", "encap_us"),
-            ("decap", "decap_us"),
+            *exchange_phases,
             ("rng", "rng_us"),
             ("kdf", "kdf_us"),
             ("enc", "encrypt_us"),
@@ -7310,8 +7382,8 @@ class Onboarding:
 
         paragraphs = [
             "Um computador quântico grande poderia aplicar Shor contra esquemas de chave pública como RSA e ECDH. Esse risco motiva a migração para algoritmos pós-quânticos.",
-            "No experimento, CLASSIC não representa RSA ou ECDH: é um baseline simétrico com AES-128-GCM, chave efêmera e nonce aleatório.",
-            "Nos cenários PQC, ML-KEM-512 estabelece a chave de sessão. AES-GCM continua responsável por cifrar e autenticar a mensagem."
+            "No experimento, CLASSIC usa ECDH P-256 efêmero para estabelecer a chave de sessão.",
+            "Nos cenários PQC, ML-KEM-512 estabelece a chave. Em todos os casos, AES-GCM cifra e autentica a mensagem."
         ]
 
         box_w = int(self.w * 0.34)
@@ -7335,7 +7407,7 @@ class Onboarding:
         pygame.draw.rect(surface, (25, 20, 10), (bx + int(box_w * 0.08), by + int(box_h * 0.22), c_w, c_h), border_radius=4)
         c_title = FONT_SMALL.render("CLASSIC (baseline):", True, C_TEXT_PRIMARY)
         surface.blit(c_title, (bx + int(box_w * 0.11), by + int(box_h * 0.26)))
-        c_val = FONT_HEADER.render("AES-128-GCM", True, C_ACCENT_GREEN)
+        c_val = FONT_HEADER.render("ECDH P-256 + AES-GCM", True, C_ACCENT_GREEN)
         surface.blit(c_val, (bx + int(box_w * 0.11), by + int(box_h * 0.35)))
 
         # Quantico
@@ -7354,8 +7426,8 @@ class Onboarding:
 
         paragraphs = [
             "A Wisdom coleta o payload e executa os papéis lógicos de emissor e receptor. O dashboard apenas comanda, visualiza e registra métricas.",
-            "ML-KEM-512 executa KEYGEN, ENCAP e DECAP para estabelecer o segredo; AES-GCM cifra e autentica o payload.",
-            "No pacote PQC viajam o ciphertext ML-KEM de 768 B, o nonce, o ciphertext da mensagem e a tag GCM. O segredo nunca é transmitido.",
+            "CLASSIC usa ECDH P-256; PQC usa ML-KEM-512. Ambos estabelecem um segredo e derivam a mesma chave AES-GCM.",
+            "No pacote viaja uma chave pública ECDH de 65 B ou o ciphertext ML-KEM de 768 B, além do nonce, ciphertext da mensagem e tag GCM.",
         ]
 
         text_max_w = self.w - int(self.w * 0.08)
@@ -7422,9 +7494,9 @@ class Onboarding:
                 "title": "CLASSIC",
                 "color": C_ACCENT_BLUE,
                 "body": [
-                    "AES-128-GCM cifra e autentica.",
-                    "Chave efêmera e nonce aleatório.",
-                    "Referência de menor custo, sem KEM.",
+                    "ECDH P-256 estabelece o segredo.",
+                    "AES-GCM cifra e autentica.",
+                    "Dois pares efêmeros por mensagem.",
                 ],
             },
             {
@@ -7503,7 +7575,7 @@ class Onboarding:
         surface.blit(DashboardPanel._render_clipped(FONT_HEADER, "ROTEIRO DA DEMO", C_ACCENT_GREEN, lw), (lx, ly))
         ly += 38
         steps = [
-            ("CLÁSSICA", "envia a mensagem com AES-128-GCM."),
+            ("CLÁSSICA", "usa ECDH P-256 e AES-GCM."),
             ("PQC", "usa ML-KEM-512 para chave e AES-GCM para cifra."),
             ("PQC+CRC", "usa ML-KEM-512, AES-GCM e CRC32 protegido."),
             ("ENVIAR MSG", "abre popup pausável do fluxo interno."),
@@ -7528,7 +7600,7 @@ class Onboarding:
             "CRC32 deve tornar o bit-flip coberto observável.",
             "O perfil limitado não representa todo CubeSat.",
             "Tempo de CPU é proxy; não medimos energia elétrica.",
-            "Próximo passo: energia e baseline clássico completo.",
+            "Próximo passo: nova bateria ECDH/ML-KEM e medição elétrica.",
         ]
         for item in comparisons:
             ry = self.draw_wrapped_onboarding(surface, f"- {item}", rx, ry, rw, C_TEXT_PRIMARY, max_lines=2)
@@ -7540,7 +7612,7 @@ class Onboarding:
         pygame.draw.rect(surface, C_PANEL_BORDER, footer_rect, width=1, border_radius=6)
         footer = (
             "Na demo, a placa conectada produz as métricas de cada mensagem. "
-            "RESULTADOS mostra a bateria oficial; a execução ao vivo não a substitui."
+            "RESULTADOS mostra a bateria oficial quando validada; a execução ao vivo não a substitui."
         )
         self.draw_wrapped_onboarding(surface, footer, footer_rect.x + 18, footer_rect.y + 18, footer_rect.width - 36, C_TEXT_PRIMARY, max_lines=3)
 
