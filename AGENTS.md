@@ -101,10 +101,19 @@ implementar.
 - metodologia de métricas consolidada em `docs/METRICAS_CONSOLIDADAS.md`;
 - projetor/legibilidade confirmados pelo usuário em 2026-06-18 após ajuste de
   botões e métricas do dashboard.
+- modo estande SBPC em release candidate de software na branch
+  `sbpc-stand-demo`, com máquina de estados guiada, fixture oficial offline,
+  logs JSONL, scripts operacionais, screenshots, vídeo de contingência, 50
+  ciclos simulados e um smoke completo na Wisdom em 2026-07-20;
+- o smoke real do modo estande confirmou CLASSIC/PQC a 240 MHz, PQC a 80 MHz,
+  leitura do potenciômetro e a mesma falha em NONE/CRC32.
 
 ### Não implementado
 Nenhuma etapa técnica de implementação permanece aberta para o MVP do
-seminário. Extensões futuras devem ficar fora da superfície principal da demo.
+seminário. Para a extensão de estande SBPC ainda faltam o aceite físico longo,
+o `BUTTON_PING` observado na interface, o ensaio no monitor definitivo e o
+teste de compreensão com cinco pessoas; não declarar a extensão pronta antes
+de fechar esses gates em `docs/stand/FINAL_VALIDATION.md`.
 
 ## 4. Stack
 
@@ -275,7 +284,8 @@ compilação.
 
 ## 8. Próxima ordem de trabalho
 
-1. Atualizar relatório/slides finais com os resultados JSON medidos.
-2. Ensaiar a apresentação sem reintroduzir comandos ruidosos nos botões.
+1. Repetir a observação assistida do botão físico no modo estande.
+2. Executar pelo operador o gate longo descrito em `docs/stand/RUNBOOK.md`.
+3. Testar compreensão com cinco visitantes e fechar a validação final.
 
-Última revisão: 2026-07-02.
+Última revisão: 2026-07-20.

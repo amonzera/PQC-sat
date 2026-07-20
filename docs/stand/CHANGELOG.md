@@ -1,0 +1,25 @@
+# Changelog do modo estande SBPC
+
+## 2026-07-20 — release candidate de software
+
+- preservada a versão do seminário na branch original e criado o trabalho em
+  `sbpc-stand-demo`;
+- auditados AES-128-GCM, baseline simétrico, localização da falha, perfil de
+  80 MHz, botão, potenciômetro e campanha oficial;
+- adicionado `dashboard.py --stand` e o shell visual `stand_demo.py`;
+- implementada máquina de estados sem bloqueio, timeout, rejeição de eventos
+  fora de ordem, debounce, erro seguro e reset automático;
+- integrados `BUTTON_PING`, `ANALOG POT`, `PROFILE`, `MISSION` e `FAULT` pelo
+  cliente serial existente;
+- garantidos payload idêntico nas missões e índice/máscara idênticos nos dois
+  ensaios de falha;
+- adicionada fixture offline vinculada por SHA-256 à campanha oficial;
+- adicionado log JSONL datado com revisão, comandos, respostas e proveniência;
+- criados inicializador, diagnóstico, soak offline, capturas de estados,
+  gerador de vídeo e validador dos logs de aceite físico;
+- adicionados testes de parser, estados, timeout, reconexão lógica, mapeamento
+  do potenciômetro, XOR, fixture, logs, reset e resoluções;
+- criados runbook, especificação, precisão científica e relatório de validação.
+
+Pendente para a release do evento: executar e anexar aceite físico, ensaio com
+cinco pessoas e evidência de montagem no estande.

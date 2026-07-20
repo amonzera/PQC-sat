@@ -33,7 +33,10 @@ O repositório contém hoje:
 - guia final centralizado para estudar o projeto, conduzir a demonstração,
   interpretar os resultados e responder às perguntas da banca;
 - uma proposta acadêmica em DOCX;
-- um roadmap consolidado como histórico final das etapas implementadas.
+- um roadmap consolidado como histórico final das etapas implementadas;
+- modo estande SBPC `--stand`, com fluxo guiado por botão/potenciômetro,
+  comparação 240/80 MHz, mesma falha NONE/CRC32, logging JSONL e fallback
+  offline explicitamente rotulado.
 
 O dashboard não executa ML-KEM localmente; ele aciona a placa via `MISSION`,
 `PQC_STATUS`/`PQC_INFO` e exporta as respostas `MISSION` e `PQC_*` como
@@ -92,9 +95,9 @@ CubeSat.
 
 ## Execução
 
-Ambiente do dashboard validado:
+Ambiente do dashboard validado nesta branch:
 
-- Python 3.14.5;
+- Python 3.14.6;
 - pygame-ce 2.5.7.
 
 ```bash
@@ -131,6 +134,41 @@ python3 dashboard.py --simulated --no-splash
 ```
 
 Use `Ctrl+Q` para encerrar.
+
+### Modo estande SBPC
+
+Com a Wisdom conectada, a forma recomendada de abrir a experiência guiada é:
+
+```bash
+./scripts/run_stand.sh --port /dev/ttyUSB0 --restart-on-crash
+```
+
+O mesmo entrypoint pode ser chamado diretamente:
+
+```bash
+python3 dashboard.py --stand --port /dev/ttyUSB0
+```
+
+O modo estande exige handshake antes de iniciar, usa o mesmo payload em
+`CLASSIC`/`PQC`/240/80, lê `ANALOG POT`, repete byte e máscara nos dois
+comandos `FAULT` e restaura 240 MHz antes do ensaio de integridade. `Esc`
+alterna tela cheia/janela, `F12` mostra diagnóstico e `Ctrl+Q` encerra.
+
+Para contingência consciente e totalmente offline:
+
+```bash
+./scripts/run_stand.sh --simulated
+```
+
+Nesse modo específico, as missões exibem somente a fixture vinculada por
+SHA-256 à campanha oficial de 2026-07-02, sempre com o selo permanente
+`MODO VISUAL SIMULADO`. O modelo de bit flip é determinístico. Nada é
+apresentado como leitura atual da placa, e não há migração automática para o
+fallback.
+
+Antes do evento, siga [o runbook do estande](docs/stand/RUNBOOK.md). A
+especificação, a auditoria, a precisão científica e o estado dos gates ficam
+em `docs/stand/`.
 
 ## Integração ESP32 inicial
 

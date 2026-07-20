@@ -735,6 +735,45 @@ Entregas:
 Não use a expressão "nenhum crash possível". O critério correto é "nenhuma
 falha conhecida nos cenários testados".
 
+### Etapa 09 - modo estande SBPC
+
+Estado: **release candidate de software; aceite operacional longo pendente**.
+
+Implementado:
+
+- entrada `dashboard.py --stand` e inicializador `scripts/run_stand.sh`;
+- máquina explícita `ATTRACT → INTRO → RUN_240 → RUN_80 → SELECT_BIT →
+  FAULT_NONE → FAULT_CRC → SUMMARY`, com `ERROR` seguro;
+- handshake obrigatório, fila serial não bloqueante, timeout e reconexão do
+  cliente existente;
+- botão `BUTTON_PING` aceito somente nos estados permitidos e potenciômetro
+  A39 mapeado para índice/máscara single-bit;
+- mesmo payload em CLASSIC/PQC/240/80 e mesma falha em NONE/CRC32, ambos
+  verificados antes de avançar;
+- separação entre `HardwareMeasurement` e `AnimationModel`;
+- fallback offline por fixture oficial com proveniência e rótulo permanente;
+- logs JSONL por sessão, reset automático e restauração de 240 MHz;
+- layout em canvas 1366×768 escalável para 1920×1080, sem áudio obrigatório;
+- diagnóstico, soak offline, screenshots, vídeo de contingência e validador
+  de logs de aceite;
+- documentação operacional completa em `docs/stand/`.
+
+Validado em 2026-07-20:
+
+- 50 ciclos acelerados de fixture, 100 ações lógicas de botão e 100 mudanças
+  de potenciômetro sem falha;
+- um ciclo curto real na Wisdom com CLASSIC/PQC a 240 MHz, PQC a 80 MHz,
+  leitura A39 e par FAULT coerente;
+- o evento físico `BUTTON_PING` não foi observado na janela de teste e precisa
+  de repetição assistida.
+
+Gate restante:
+
+- 30 ciclos físicos, três horas de resistência, dez recuperações USB,
+  observação do botão físico, teste no monitor definitivo e avaliação 4/5 com
+  cinco visitantes. Não marcar a etapa como concluída antes do relatório
+  `hardware_acceptance_summary.json` retornar `PASS`.
+
 ## 8. Cronograma sugerido
 
 ### Próximos cortes

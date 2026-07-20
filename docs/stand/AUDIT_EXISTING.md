@@ -149,3 +149,12 @@ devem mostrar a resposta recebida na sessão atual.
 
 O gate documental está satisfeito. A implementação visual pode começar. A
 validação física final permanece aberta até a Wisdom estar conectada.
+
+## Adendo de validação em hardware
+
+Depois do congelamento desta auditoria, a Wisdom apareceu em `/dev/ttyUSB0` e
+foi submetida a um diagnóstico completo e a um ciclo curto do novo modo. Os
+resultados estão em `docs/stand/evidence/hardware_smoke.json` e
+`docs/stand/FINAL_VALIDATION.md`. O aceite longo e o botão físico continuam
+tratados separadamente; este adendo não reescreve o estado observado no início
+da auditoria.
