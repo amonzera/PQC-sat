@@ -1,0 +1,40 @@
+{
+  "schema_version": "pqc-sat-stand-hardware-acceptance-v1",
+  "created_at": "2026-07-20T23:19:22.005239+00:00",
+  "result": "PASS",
+  "inputs": [
+    "docs/stand/evidence/hardware_20_cycle_smoke.jsonl"
+  ],
+  "gates": {
+    "only_hardware_sessions": true,
+    "handshake_present": true,
+    "cycles": true,
+    "button_actions": true,
+    "pot_changes": true,
+    "disconnect_recoveries": true,
+    "continuous_runtime": true,
+    "no_errors": true,
+    "cycle_invariants": true
+  },
+  "counts": {
+    "hardware_sessions": 1,
+    "handshakes": 1,
+    "cycles": 20,
+    "button_actions": 0,
+    "pot_samples": 20,
+    "pot_changes": 6,
+    "pot_unique_positions": 2,
+    "disconnects": 0,
+    "disconnect_recoveries": 0,
+    "errors": 0,
+    "max_continuous_seconds": 26.425
+  },
+  "thresholds": {
+    "cycles": 20,
+    "button_actions": 0,
+    "pot_changes": 0,
+    "disconnect_recoveries": 0,
+    "continuous_seconds": 0.0
+  },
+  "cycle_errors": []
+}

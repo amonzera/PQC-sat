@@ -17,6 +17,10 @@ Estado geral: **release candidate; aceite longo e ensaio com público pendentes*
 - ciclo real com tempos de produção:
   `docs/stand/evidence/hardware_production_timing.json` e
   `docs/stand/evidence/hardware_production_timing_cycle.jsonl`;
+- repetibilidade real de 20 ciclos acelerados:
+  `docs/stand/evidence/hardware_20_cycle_smoke.json` e
+  `docs/stand/evidence/hardware_20_cycle_smoke.jsonl`, validados em
+  `docs/stand/evidence/hardware_20_cycle_validation.json`;
 - matriz completa do handover: `docs/stand/REQUIREMENTS_TRACEABILITY.md`;
 - resultado reproduzível da validação de software:
   `docs/stand/evidence/software_validation.json`;
@@ -43,7 +47,7 @@ Na base anterior havia 96 testes. O modo estande adicionou cobertura para:
 - rótulo permanente de simulação;
 - renderização de todos os estados e escala 1366×768/1920×1080.
 
-Resultado mais recente: 122 testes Python, import headless, `py_compile`,
+Resultado mais recente: 123 testes Python, import headless, `py_compile`,
 `git diff --check` e build PlatformIO passam. O firmware compilado ocupa
 70,3% da flash e 17,3% da RAM estática.
 
@@ -93,6 +97,24 @@ evidência de que o botão tenha sido pressionado durante essas janelas. O botã
 físico permanece pendente de repetição assistida, embora o firmware com
 debounce e emissão do evento esteja compilado.
 
+## Repetibilidade curta em hardware
+
+Uma sessão adicional executou 20 ciclos administrativos acelerados na Wisdom
+em 26,43 s. O validador independente confirmou:
+
+- 20/20 ciclos completos e zero erros ou eventos rejeitados;
+- 60 missões reais com um único payload hexadecimal;
+- 20 pares `NONE`/`CRC32` com byte, máscara, antes e depois idênticos;
+- 20 resultados `SILENT` e 20 resultados `DETECTED_GUARD`;
+- 837 bytes em PQC tanto a 240 quanto a 80 MHz em todos os ciclos.
+
+O potenciômetro não foi girado pelo operador nessa sessão. Depois do
+endurecimento do validador, as 20 amostras representam somente seis transições
+entre duas posições adjacentes, provavelmente por variação do ADC; elas não
+satisfazem o gate de 100 mudanças físicas. Os acionamentos e tempos visuais
+também foram administrativos, portanto esses 20 ciclos não substituem a
+resistência presencial.
+
 ## Pendências que impedem o aceite completo
 
 - observar `BUTTON_PING` físico e usá-lo para iniciar/avançar a interface;
@@ -111,12 +133,12 @@ não iniciou automaticamente a campanha longa, conforme a regra do projeto.
 
 | Item | Estado | Evidência | Limitação restante |
 |---|---|---|---|
-| Hardware real | PASS | `docs/stand/evidence/hardware_production_timing.json` | botão físico ainda não observado |
+| Hardware real | PASS | ciclo de produção + 20 ciclos reais acelerados | botão físico ainda não observado |
 | Baseline/PQC | PASS | ciclo real de 51,55 s: CLASSIC/PQC com mesmo payload | apenas um ciclo com timing de produção |
 | 240/80 MHz | PASS | ciclo real confirmou 240 e 80 MHz, ambos com 837 B em PQC | resistência longa pendente |
 | Bit flip | PASS | ciclo real: byte 28, `0x34 → 0x74`, máscara `0x40` | acionamento do botão foi administrativo |
 | CRC32 | PASS | mesma falha: `SILENT` e `DETECTED_GUARD` | campanha longa do estande pendente |
 | Precisão científica | PASS | `SCIENTIFIC_ACCURACY.md`, auditoria e parsers tipados | revisão oral contínua no evento |
-| 30 ciclos | FAIL | soak offline 50/50 não substitui hardware | executar gate físico do runbook |
+| 30 ciclos | FAIL | 20/20 reais administrativos + 50/50 offline | executar 30+ ciclos físicos e 3 h pelo runbook |
 | Offline | PASS | fixture local, execução sem rede e smoke do inicializador | testar no notebook definitivo |
 | Fallback | PASS | screenshots, fixture e vídeo MP4 de 36 s | testar reprodução no monitor definitivo |

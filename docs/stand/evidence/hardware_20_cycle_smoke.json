@@ -1,0 +1,1303 @@
+{
+  "schema_version": "pqc-sat-stand-hardware-smoke-v1",
+  "created_at": "2026-07-20T23:15:38.009575+00:00",
+  "result": "PASS",
+  "timing_mode": "accelerated",
+  "port": "/dev/ttyUSB0",
+  "cycles_requested": 20,
+  "states_seen": [
+    "ATTRACT",
+    "INTRO",
+    "RUN_240",
+    "RUN_80",
+    "SELECT_BIT",
+    "FAULT_NONE",
+    "FAULT_CRC",
+    "SUMMARY"
+  ],
+  "handshake": {
+    "node": "PQC-SAT-WISDOM",
+    "board": "BlackBoard-Wisdom",
+    "proto": "V1",
+    "transport": "uart",
+    "crypto": "ML-KEM-512",
+    "pqc": "ready",
+    "pqc_target": "ML-KEM-512",
+    "fault": "payload_crc32",
+    "mission": "CLASSIC,PQC,PQC_CRC32"
+  },
+  "connection_status": "SATELLITE /dev/ttyUSB0",
+  "completed_cycles": 20,
+  "cycle_duration_seconds": 1.2130026739978348,
+  "measurements": {
+    "CLASSIC_240": {
+      "command": "MISSION CLASSIC 5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B",
+      "scenario": "CLASSIC",
+      "profile": "BASELINE",
+      "profile_mhz": 240,
+      "elapsed_us": 762,
+      "bytes_total": 69,
+      "result": "DELIVERED",
+      "source": "hardware-live",
+      "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B",
+      "raw_response": {
+        "scenario": "CLASSIC",
+        "op": "mission_message",
+        "message": "HELLO_UFF",
+        "result": "DELIVERED",
+        "crypto": "AES-128-GCM",
+        "cipher": "AES-128-GCM",
+        "checksum": "NONE",
+        "confirmation": "AES-128-GCM",
+        "key_source": "RANDOM_SESSION",
+        "key_policy": "ephemeral_per_message",
+        "key_match": "1",
+        "tag_ready": "1",
+        "tag_match": "1",
+        "aead_match": "1",
+        "decrypt_ok": "1",
+        "crc_match": "1",
+        "payload_len": "41",
+        "payload_crc32": "0x86F559B3",
+        "bytes_payload": "41",
+        "bytes_ciphertext": "41",
+        "bytes_mlkem": "0",
+        "bytes_nonce": "12",
+        "bytes_gcm_tag": "16",
+        "bytes_crypto": "28",
+        "bytes_checksum": "0",
+        "bytes_total": "69",
+        "nonce_bytes": "12",
+        "gcm_tag_bytes": "16",
+        "ciphertext_bytes": "41",
+        "nonce_crc32": "0xAFE499D3",
+        "ciphertext_crc32": "0x00C99E13",
+        "gcm_tag_crc32": "0x7CCB6733",
+        "keygen_us": "0",
+        "encap_us": "0",
+        "decap_us": "0",
+        "rng_us": "21",
+        "kdf_us": "0",
+        "encrypt_us": "495",
+        "decrypt_us": "131",
+        "tag_us": "495",
+        "verify_us": "131",
+        "crc_us": "0",
+        "elapsed_us": "762",
+        "heap": "201412",
+        "min_heap": "197624",
+        "profile": "BASELINE",
+        "cpu_mhz": "240"
+      }
+    },
+    "PQC_240": {
+      "command": "MISSION PQC 5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B",
+      "scenario": "PQC",
+      "profile": "BASELINE",
+      "profile_mhz": 240,
+      "elapsed_us": 14430,
+      "bytes_total": 837,
+      "result": "DELIVERED",
+      "source": "hardware-live",
+      "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B",
+      "raw_response": {
+        "scenario": "PQC",
+        "op": "mission_message",
+        "message": "HELLO_UFF",
+        "result": "DELIVERED",
+        "crypto": "ML-KEM-512",
+        "cipher": "AES-128-GCM",
+        "checksum": "NONE",
+        "confirmation": "AES-128-GCM",
+        "key_source": "ML-KEM-512",
+        "key_policy": "ephemeral_per_message",
+        "key_match": "1",
+        "tag_ready": "1",
+        "tag_match": "1",
+        "aead_match": "1",
+        "decrypt_ok": "1",
+        "crc_match": "1",
+        "payload_len": "41",
+        "payload_crc32": "0x86F559B3",
+        "bytes_payload": "41",
+        "bytes_ciphertext": "41",
+        "bytes_mlkem": "768",
+        "bytes_nonce": "12",
+        "bytes_gcm_tag": "16",
+        "bytes_crypto": "796",
+        "bytes_checksum": "0",
+        "bytes_total": "837",
+        "nonce_bytes": "12",
+        "gcm_tag_bytes": "16",
+        "ciphertext_bytes": "41",
+        "nonce_crc32": "0x3987E14F",
+        "ciphertext_crc32": "0x3C735C62",
+        "gcm_tag_crc32": "0x03CCA83D",
+        "keygen_us": "3914",
+        "encap_us": "3979",
+        "decap_us": "5022",
+        "rng_us": "19",
+        "kdf_us": "888",
+        "encrypt_us": "417",
+        "decrypt_us": "123",
+        "tag_us": "417",
+        "verify_us": "123",
+        "crc_us": "0",
+        "elapsed_us": "14430",
+        "heap": "201412",
+        "min_heap": "197624",
+        "profile": "BASELINE",
+        "cpu_mhz": "240"
+      }
+    },
+    "PQC_80": {
+      "command": "MISSION PQC 5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B",
+      "scenario": "PQC",
+      "profile": "OBC-1U-LIMITED",
+      "profile_mhz": 80,
+      "elapsed_us": 40115,
+      "bytes_total": 837,
+      "result": "DELIVERED",
+      "source": "hardware-live",
+      "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B",
+      "raw_response": {
+        "scenario": "PQC",
+        "op": "mission_message",
+        "message": "HELLO_UFF",
+        "result": "DELIVERED",
+        "crypto": "ML-KEM-512",
+        "cipher": "AES-128-GCM",
+        "checksum": "NONE",
+        "confirmation": "AES-128-GCM",
+        "key_source": "ML-KEM-512",
+        "key_policy": "ephemeral_per_message",
+        "key_match": "1",
+        "tag_ready": "1",
+        "tag_match": "1",
+        "aead_match": "1",
+        "decrypt_ok": "1",
+        "crc_match": "1",
+        "payload_len": "41",
+        "payload_crc32": "0x86F559B3",
+        "bytes_payload": "41",
+        "bytes_ciphertext": "41",
+        "bytes_mlkem": "768",
+        "bytes_nonce": "12",
+        "bytes_gcm_tag": "16",
+        "bytes_crypto": "796",
+        "bytes_checksum": "0",
+        "bytes_total": "837",
+        "nonce_bytes": "12",
+        "gcm_tag_bytes": "16",
+        "ciphertext_bytes": "41",
+        "nonce_crc32": "0xC16601DF",
+        "ciphertext_crc32": "0xE5670C2E",
+        "gcm_tag_crc32": "0x4DC24BF9",
+        "keygen_us": "10463",
+        "encap_us": "11822",
+        "decap_us": "15210",
+        "rng_us": "23",
+        "kdf_us": "1536",
+        "encrypt_us": "622",
+        "decrypt_us": "337",
+        "tag_us": "622",
+        "verify_us": "337",
+        "crc_us": "0",
+        "elapsed_us": "40115",
+        "heap": "201412",
+        "min_heap": "197624",
+        "profile": "OBC-1U-LIMITED",
+        "cpu_mhz": "80"
+      }
+    }
+  },
+  "faults": {
+    "NONE": {
+      "command": "FAULT NONE 5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B 28 0X80",
+      "guard": "NONE",
+      "result": "SILENT",
+      "byte_index": 28,
+      "bit_mask": 128,
+      "before_byte": 52,
+      "after_byte": 180,
+      "crc_before": 2264226227,
+      "crc_after": 647986340,
+      "elapsed_us": 27,
+      "source": "hardware-live",
+      "raw_response": {
+        "result": "SILENT",
+        "guard": "NONE",
+        "payload_len": "41",
+        "byte_index": "28",
+        "bit_mask": "0x80",
+        "before_byte": "0x34",
+        "after_byte": "0xB4",
+        "crc_before": "0x86F559B3",
+        "crc_after": "0x269F7CA4",
+        "elapsed_us": "27"
+      }
+    },
+    "CRC32": {
+      "command": "FAULT CRC32 5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B 28 0X80",
+      "guard": "CRC32",
+      "result": "DETECTED_GUARD",
+      "byte_index": 28,
+      "bit_mask": 128,
+      "before_byte": 52,
+      "after_byte": 180,
+      "crc_before": 2264226227,
+      "crc_after": 647986340,
+      "elapsed_us": 20,
+      "source": "hardware-live",
+      "raw_response": {
+        "result": "DETECTED_GUARD",
+        "guard": "CRC32",
+        "payload_len": "41",
+        "byte_index": "28",
+        "bit_mask": "0x80",
+        "before_byte": "0x34",
+        "after_byte": "0xB4",
+        "crc_before": "0x86F559B3",
+        "crc_after": "0x269F7CA4",
+        "elapsed_us": "20"
+      }
+    }
+  },
+  "selection": {
+    "byte_index": 28,
+    "bit_mask": 128,
+    "bit_position": 231,
+    "pot_value": 2889
+  },
+  "cycle_summaries": [
+    {
+      "cycle": 1,
+      "duration_seconds": 1.2138833480057656,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 128,
+        "bit_position": 231,
+        "pot_value": 2887
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 775,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14424,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40131,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 2,
+      "duration_seconds": 1.211890874998062,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 64,
+        "bit_position": 230,
+        "pot_value": 2883
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 761,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14410,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40069,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 3,
+      "duration_seconds": 1.212690222004312,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 128,
+        "bit_position": 231,
+        "pot_value": 2887
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 761,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14408,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40061,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 4,
+      "duration_seconds": 1.2144393650014536,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 64,
+        "bit_position": 230,
+        "pot_value": 2885
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 761,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14414,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40080,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 5,
+      "duration_seconds": 1.2121000150000327,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 64,
+        "bit_position": 230,
+        "pot_value": 2883
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 762,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14401,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40085,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 6,
+      "duration_seconds": 1.213565985999594,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 128,
+        "bit_position": 231,
+        "pot_value": 2891
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 761,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14418,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40062,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 7,
+      "duration_seconds": 1.212334740004735,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 128,
+        "bit_position": 231,
+        "pot_value": 2889
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 770,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14415,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40099,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 8,
+      "duration_seconds": 1.2118680630010203,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 128,
+        "bit_position": 231,
+        "pot_value": 2889
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 754,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14420,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40075,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 9,
+      "duration_seconds": 1.2110333669988904,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 128,
+        "bit_position": 231,
+        "pot_value": 2887
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 774,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14410,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40092,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 10,
+      "duration_seconds": 1.2126264830003493,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 64,
+        "bit_position": 230,
+        "pot_value": 2886
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 754,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14417,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40093,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 11,
+      "duration_seconds": 1.2104954969981918,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 64,
+        "bit_position": 230,
+        "pot_value": 2886
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 770,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14411,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40070,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 12,
+      "duration_seconds": 1.215341194998473,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 64,
+        "bit_position": 230,
+        "pot_value": 2885
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 759,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14412,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40083,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 13,
+      "duration_seconds": 1.215608862999943,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 64,
+        "bit_position": 230,
+        "pot_value": 2882
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 769,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14413,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40078,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 14,
+      "duration_seconds": 1.2298663120018318,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 64,
+        "bit_position": 230,
+        "pot_value": 2886
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 761,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14403,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 43055,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 15,
+      "duration_seconds": 1.2147411959958845,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 64,
+        "bit_position": 230,
+        "pot_value": 2884
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 766,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14400,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40068,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 16,
+      "duration_seconds": 1.2119673070046701,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 64,
+        "bit_position": 230,
+        "pot_value": 2883
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 754,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14407,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40072,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 64,
+          "before_byte": 52,
+          "after_byte": 116,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 17,
+      "duration_seconds": 1.22077219899802,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 128,
+        "bit_position": 231,
+        "pot_value": 2889
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 771,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14418,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40097,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 18,
+      "duration_seconds": 1.2137083889974747,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 128,
+        "bit_position": 231,
+        "pot_value": 2889
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 754,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14424,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40079,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 19,
+      "duration_seconds": 1.2129039349965751,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 128,
+        "bit_position": 231,
+        "pot_value": 2887
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 770,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14403,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40064,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    },
+    {
+      "cycle": 20,
+      "duration_seconds": 1.2130026739978348,
+      "selection": {
+        "byte_index": 28,
+        "bit_mask": 128,
+        "bit_position": 231,
+        "pot_value": 2889
+      },
+      "measurements": {
+        "CLASSIC_240": {
+          "elapsed_us": 762,
+          "bytes_total": 69,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_240": {
+          "elapsed_us": 14430,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        },
+        "PQC_80": {
+          "elapsed_us": 40115,
+          "bytes_total": 837,
+          "result": "DELIVERED",
+          "source": "hardware-live",
+          "payload_hex": "5051432D5341547C4D53473D48454C4C4F5F5546467C54454D503D32342E357C5354415455533D4F4B"
+        }
+      },
+      "faults": {
+        "NONE": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "SILENT",
+          "source": "hardware-live"
+        },
+        "CRC32": {
+          "byte_index": 28,
+          "bit_mask": 128,
+          "before_byte": 52,
+          "after_byte": 180,
+          "result": "DETECTED_GUARD",
+          "source": "hardware-live"
+        }
+      }
+    }
+  ],
+  "rejected_events": 0,
+  "error": null,
+  "session_log": "docs/stand/evidence/hardware_20_cycle_smoke.jsonl",
+  "runtime_session_log": "logs/stand/repeatability/20260720/20260720T231511Z_stand_hardware_7189ffdc.jsonl",
+  "limitations": [
+    "O driver administrativo acionou as duas transições de cada ciclo; BUTTON_PING físico é validado separadamente.",
+    "Os tempos visuais foram reduzidos; as métricas criptográficas são respostas reais da Wisdom.",
+    "Os ciclos administrativos não substituem o ensaio físico de 30 ciclos/3 horas."
+  ]
+}

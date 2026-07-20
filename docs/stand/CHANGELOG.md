@@ -24,6 +24,10 @@
   produção e registrado seu JSONL autocontido;
 - adicionada rastreabilidade explícita de todos os itens P0 e entregáveis,
   sem converter gates presenciais pendentes em `PASS`.
+- executados 20 ciclos reais acelerados, com 60 missões, 40 falhas, zero erros
+  e 20/20 pares `NONE`/`CRC32` coerentes;
+- endurecido o gate do potenciômetro para contar mudanças de posição, e não
+  uma amostra inicial repetida a cada ciclo.
 
 Pendente para a release do evento: executar e anexar aceite físico, ensaio com
 cinco pessoas e evidência de montagem no estande.

@@ -27,7 +27,7 @@ Este documento confronta os critérios do
 | 14 | modo simulado explicitamente rotulado | PASS | screenshots, vídeo e testes contêm `MODO VISUAL SIMULADO` | nenhum |
 | 15 | reset automático | PASS | teste automatizado e temporizador de 18 s; perfil 240 MHz é restaurado | nenhum |
 | 16 | funcionamento offline | PASS | inicializador e fluxo completo passaram sem rede usando fixture local vinculada por SHA-256 | testar também no notebook definitivo |
-| 17 | 30 ciclos sem crash | FAIL | soak acelerado concluiu 50/50, mas não substitui hardware | executar campanha física longa |
+| 17 | 30 ciclos sem crash | FAIL | 20/20 ciclos reais administrativos e 50/50 offline passaram | executar 30+ ciclos físicos na campanha longa |
 | 18 | runbook pronto | PASS | `docs/stand/RUNBOOK.md` isola logs de aceite e documenta abertura, operação e recuperação | revisão por segundo operador ainda recomendada |
 | 19 | vídeo de backup pronto | PASS | `docs/stand/evidence/stand_backup_simulated.mp4`, 36 s, 1366×768, rótulo de simulação | testar reprodução no monitor definitivo |
 | 20 | ensaio geral concluído | FAIL | smoke real administrativo não é ensaio completo de montagem e público | executar ensaio no conjunto físico final |
@@ -39,12 +39,12 @@ release candidate e não deve receber tag final.
 
 | Gate | Estado | Evidência | Limitação |
 |---|---|---|---|
-| parser, estados, timeout e ordem | PASS | 122 testes Python | nenhum conhecido nos casos cobertos |
-| 20 repetições coerentes do bit flip | PARCIAL | 50 ciclos determinísticos offline, zero divergências | repetir pelo menos 20 vezes na campanha física |
+| parser, estados, timeout e ordem | PASS | 123 testes Python | nenhum conhecido nos casos cobertos |
+| 20 repetições coerentes do bit flip | PASS | 20/20 ciclos reais administrativos, zero divergências nos pares `NONE`/`CRC32` | ações físicas continuam no gate longo separado |
 | recuperação USB | PARCIAL | cliente reconecta, handshake antigo é invalidado e há teste lógico | dez recuperações físicas pendentes |
 | resistência de 3 h | FAIL | não executada | operador deve executar 2 h de atração + 1 h de ciclos |
 | 100 ações de botão | FAIL | zero eventos físicos no JSONL de smoke | realizar pelo menos 100 ações físicas |
-| 100 mudanças do potenciômetro | FAIL | uma seleção real no smoke | realizar pelo menos 100 mudanças distintas |
+| 100 mudanças do potenciômetro | FAIL | sessão de 20 ciclos: 20 amostras, 6 transições e 2 posições sem giro deliberado | realizar pelo menos 100 mudanças físicas de posição |
 | teste com cinco pessoas | FAIL | somente template CSV | coletar respostas e verificar os critérios 4/5 |
 
 ## Entregáveis exigidos
@@ -55,7 +55,7 @@ release candidate e não deve receber tag final.
 | auditoria, especificação, runbook, precisão, validação e changelog | PASS | `docs/stand/` |
 | screenshot de cada estado | PASS | `docs/stand/evidence/states/` |
 | log de ciclo completo em hardware | PASS | `docs/stand/evidence/hardware_production_timing_cycle.jsonl` |
-| resultado dos testes automatizados | PASS | `docs/stand/evidence/software_validation.json`: 122 testes e demais comandos obrigatórios |
+| resultado dos testes automatizados | PASS | `docs/stand/evidence/software_validation.json`: 123 testes e demais comandos obrigatórios |
 | vídeo de backup | PASS | `docs/stand/evidence/stand_backup_simulated.mp4` |
 | vídeo do fluxo completo em hardware | FAIL | não capturado | filmar o ensaio com botão físico |
 | resultado dos 30 ciclos | FAIL | não produzido | executar validador sobre a campanha longa |

@@ -107,7 +107,10 @@ implementar.
   ciclos simulados e dois smokes completos na Wisdom em 2026-07-20;
 - os smokes reais confirmaram CLASSIC/PQC a 240 MHz, PQC a 80 MHz, leitura do
   potenciômetro e a mesma falha em NONE/CRC32; o ciclo com timing de produção
-  chegou a `SUMMARY` em 51,55 s.
+  chegou a `SUMMARY` em 51,55 s;
+- uma sessão adicional de 20 ciclos reais acelerados concluiu 60 missões e 40
+  falhas sem erro, mas usou acionamento administrativo e não substitui o gate
+  físico longo.
 
 ### Não implementado
 Nenhuma etapa técnica de implementação permanece aberta para o MVP do

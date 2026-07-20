@@ -153,7 +153,9 @@ Não execute esta validação durante atendimento ao público.
 3. Complete pelo menos 30 ciclos sem reiniciar a aplicação. Mire 34 ciclos e
    use o botão também em `SUMMARY` para recomeçar; assim as três ações físicas
    por ciclo alcançam naturalmente mais de 100 pressões.
-4. Registre pelo menos 100 mudanças distintas do potenciômetro.
+4. Registre pelo menos 100 mudanças distintas do potenciômetro. O validador
+   conta somente transições da posição de bit destacada; leituras repetidas e
+   a primeira amostra da sessão não contam como movimento.
 5. Faça dez desconexões/reconexões USB controladas entre ciclos, aguardando o
    novo handshake antes de continuar.
 6. Encerre normalmente com `Ctrl+Q`, para registrar `session_end`.

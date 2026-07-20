@@ -765,6 +765,8 @@ Validado em 2026-07-20:
 - dois ciclos curtos reais na Wisdom com CLASSIC/PQC a 240 MHz, PQC a 80 MHz,
   leitura A39 e par FAULT coerente; um deles preservou os tempos da configuração
   de produção e chegou a `SUMMARY` em 51,55 s;
+- 20 ciclos reais administrativos acelerados, com 60 missões, 40 falhas,
+  zero erros e pares `NONE`/`CRC32` coerentes em todos os ciclos;
 - o evento físico `BUTTON_PING` não foi observado nas duas janelas de teste e
   precisa de repetição assistida.
 
