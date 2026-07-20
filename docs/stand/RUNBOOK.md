@@ -140,19 +140,30 @@ O vídeo e a fixture não são leitura atual da placa. Diga isso ao público.
 
 Não execute esta validação durante atendimento ao público.
 
-1. Mantenha uma sessão por pelo menos 3 h: 2 h em atração contínua e 1 h com
-   ciclos periódicos.
-2. Complete pelo menos 30 ciclos sem reiniciar a aplicação.
-3. Registre pelo menos 100 pressões físicas e 100 mudanças distintas do
-   potenciômetro.
-4. Faça dez desconexões/reconexões USB controladas entre ciclos e recupere a
-   interface.
-5. Convide cinco pessoas externas e preencha
-   `docs/stand/evidence/AUDIENCE_TEST_TEMPLATE.csv`.
-6. Valide os JSONL gerados:
+1. Abra uma sessão exclusiva para o aceite, sem misturar logs de smoke ou
+   simulação:
 
    ```bash
-   python3 tools/validate_stand_logs.py logs/stand/AAAAMMDD/*.jsonl
+   ./scripts/run_stand.sh --port /dev/ttyUSB0 \
+     --stand-log-dir logs/stand/acceptance
+   ```
+
+2. Mantenha essa mesma sessão por pelo menos 3 h: 2 h em atração contínua e
+   1 h com ciclos periódicos.
+3. Complete pelo menos 30 ciclos sem reiniciar a aplicação. Mire 34 ciclos e
+   use o botão também em `SUMMARY` para recomeçar; assim as três ações físicas
+   por ciclo alcançam naturalmente mais de 100 pressões.
+4. Registre pelo menos 100 mudanças distintas do potenciômetro.
+5. Faça dez desconexões/reconexões USB controladas entre ciclos, aguardando o
+   novo handshake antes de continuar.
+6. Encerre normalmente com `Ctrl+Q`, para registrar `session_end`.
+7. Convide cinco pessoas externas e preencha
+   `docs/stand/evidence/AUDIENCE_TEST_TEMPLATE.csv`.
+8. Valide apenas os JSONL de hardware desse diretório:
+
+   ```bash
+   python3 tools/validate_stand_logs.py \
+     logs/stand/acceptance/AAAAMMDD/*_stand_hardware_*.jsonl
    ```
 
 O gate padrão exige modo hardware, handshake, 30 ciclos, 100 ações de botão,
