@@ -98,6 +98,18 @@ class StandConfigurationTests(unittest.TestCase):
         self.assertTrue(fixture["official_candidate"])
         self.assertEqual(fixture["failed"], 0)
 
+    def test_default_visual_flow_stays_within_one_hundred_seconds(self):
+        config = StandConfig.load(DEFAULT_CONFIG_PATH)
+        worst_case_without_serial_timeouts = (
+            config.intro_seconds
+            + min(3.5, config.comparison_hold_seconds / 2)
+            + config.comparison_hold_seconds * 2
+            + config.interaction_timeout_seconds
+            + config.fault_hold_seconds * 2
+            + config.auto_reset_seconds
+        )
+        self.assertLessEqual(worst_case_without_serial_timeouts, 100)
+
     def test_fixture_rejects_a_payload_without_official_metrics(self):
         config = replace(StandConfig.load(DEFAULT_CONFIG_PATH), payload="OUTRO PAYLOAD")
         with self.assertRaisesRegex(StandConfigError, "payload da fixture"):
