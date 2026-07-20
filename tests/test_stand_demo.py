@@ -26,7 +26,7 @@ from stand_demo import (
     parse_mission_response,
     safe_ratio,
 )
-from tools.validate_stand_logs import count_disconnect_recoveries, validate_cycle
+from tools.validate_stand_logs import count_disconnect_recoveries, count_pot_activity, validate_cycle
 
 
 class FastStandFlow:
@@ -401,6 +401,16 @@ class StandLoggingAndRenderingTests(unittest.TestCase):
 
 
 class StandAcceptanceValidatorTests(unittest.TestCase):
+    def test_pot_gate_ignores_repeated_initial_samples(self):
+        records = [
+            {"event": "fault_selection", "session_id": "a", "bit_position": 20},
+            {"event": "fault_selection", "session_id": "a", "bit_position": 20},
+            {"event": "fault_selection", "session_id": "a", "bit_position": 21},
+            {"event": "fault_selection", "session_id": "a", "bit_position": 21},
+            {"event": "fault_selection", "session_id": "a", "bit_position": 30},
+        ]
+        self.assertEqual(count_pot_activity(records), (5, 2, 3))
+
     def test_disconnect_gate_counts_only_a_later_recovery(self):
         records = [
             {"event": "connection", "session_id": "a", "connected": False},

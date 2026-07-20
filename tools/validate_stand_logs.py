@@ -52,6 +52,28 @@ def count_disconnect_recoveries(records: list[dict[str, object]]) -> tuple[int, 
     return disconnects, recoveries
 
 
+def count_pot_activity(records: list[dict[str, object]]) -> tuple[int, int, int]:
+    """Count samples, selected-bit transitions and unique selected positions."""
+    last_position: dict[str, int] = {}
+    unique_positions: set[tuple[str, int]] = set()
+    samples = 0
+    changes = 0
+    for record in records:
+        if record.get("event") != "fault_selection":
+            continue
+        try:
+            position = int(record["bit_position"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        session = str(record.get("session_id"))
+        samples += 1
+        if session in last_position and last_position[session] != position:
+            changes += 1
+        last_position[session] = position
+        unique_positions.add((session, position))
+    return samples, changes, len(unique_positions)
+
+
 def validate_cycle(record: dict[str, object]) -> list[str]:
     errors = []
     measurements = record.get("measurements", {})
@@ -114,7 +136,7 @@ def main(argv=None) -> int:
     cycles = [record for record in records if record.get("event") == "cycle_complete"]
     errors = [record for record in records if record.get("event") == "error"]
     buttons = [record for record in records if record.get("event") == "button" and record.get("origin") == "physical"]
-    pot_changes = [record for record in records if record.get("event") == "fault_selection"]
+    pot_samples, pot_changes, pot_unique_positions = count_pot_activity(records)
 
     disconnects, disconnect_recoveries = count_disconnect_recoveries(records)
 
@@ -137,7 +159,7 @@ def main(argv=None) -> int:
         "handshake_present": bool(handshakes),
         "cycles": len(cycles) >= args.min_cycles,
         "button_actions": len(buttons) >= args.min_button_actions,
-        "pot_changes": len(pot_changes) >= args.min_pot_changes,
+        "pot_changes": pot_changes >= args.min_pot_changes,
         "disconnect_recoveries": disconnect_recoveries >= args.min_disconnects,
         "continuous_runtime": max_continuous >= args.min_continuous_seconds,
         "no_errors": not errors,
@@ -154,7 +176,9 @@ def main(argv=None) -> int:
             "handshakes": len(handshakes),
             "cycles": len(cycles),
             "button_actions": len(buttons),
-            "pot_changes": len(pot_changes),
+            "pot_samples": pot_samples,
+            "pot_changes": pot_changes,
+            "pot_unique_positions": pot_unique_positions,
             "disconnects": disconnects,
             "disconnect_recoveries": disconnect_recoveries,
             "errors": len(errors),
