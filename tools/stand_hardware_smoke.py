@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one accelerated end-to-end stand cycle against real hardware."""
+"""Run one end-to-end stand cycle against real hardware."""
 
 from __future__ import annotations
 
@@ -41,7 +41,12 @@ def main(argv=None) -> int:
     parser.add_argument("--port", default="/dev/ttyUSB0")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=8.0)
-    parser.add_argument("--overall-timeout", type=float, default=35.0)
+    parser.add_argument("--overall-timeout", type=float, help="limite total; padrão 35 s acelerado ou 120 s em produção")
+    parser.add_argument(
+        "--production-timings",
+        action="store_true",
+        help="preserva os tempos visuais do config em vez de acelerar o ciclo",
+    )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--output", type=Path, default=ROOT / "docs" / "stand" / "evidence" / "hardware_smoke.json")
     parser.add_argument(
@@ -52,8 +57,9 @@ def main(argv=None) -> int:
     parser.add_argument("--log-dir", type=Path, default=ROOT / "logs" / "stand" / "smoke")
     args = parser.parse_args(argv)
 
-    config = replace(
-        StandConfig.load(args.config),
+    base_config = StandConfig.load(args.config)
+    config = base_config if args.production_timings else replace(
+        base_config,
         intro_seconds=0.12,
         comparison_hold_seconds=0.12,
         fault_hold_seconds=0.12,
@@ -61,6 +67,13 @@ def main(argv=None) -> int:
         pot_poll_interval_seconds=0.05,
         button_debounce_seconds=0.05,
     )
+    overall_timeout = (
+        args.overall_timeout
+        if args.overall_timeout is not None
+        else (120.0 if args.production_timings else 35.0)
+    )
+    if overall_timeout <= 0:
+        parser.error("--overall-timeout deve ser positivo")
     client = DashboardSerialClient(port=args.port, baudrate=args.baud, timeout=args.timeout)
     logger = StandSessionLogger(args.log_dir, mode="hardware", config=config)
     controller = StandController(config, client.send, mode="hardware", logger=logger)
@@ -78,7 +91,7 @@ def main(argv=None) -> int:
     captured_duration = None
     client.start()
     try:
-        while time.monotonic() - started < args.overall_timeout:
+        while time.monotonic() - started < overall_timeout:
             now = time.monotonic()
             for event_type, payload in client.poll():
                 controller.handle_serial_event(event_type, payload, now=now)
@@ -135,6 +148,7 @@ def main(argv=None) -> int:
         "schema_version": "pqc-sat-stand-hardware-smoke-v1",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "result": result,
+        "timing_mode": "production-config" if args.production_timings else "accelerated",
         "port": args.port,
         "states_seen": states_seen,
         "handshake": controller.handshake,
@@ -150,7 +164,11 @@ def main(argv=None) -> int:
         "runtime_session_log": report_path(logger.path),
         "limitations": [
             "O driver administrativo acionou as duas transições de botão; BUTTON_PING físico é validado separadamente.",
-            "Os tempos visuais foram reduzidos; as métricas criptográficas são respostas reais da Wisdom.",
+            (
+                "Os tempos visuais vieram da configuração de produção."
+                if args.production_timings
+                else "Os tempos visuais foram reduzidos; as métricas criptográficas são respostas reais da Wisdom."
+            ),
             "Um ciclo curto não substitui o ensaio de 30 ciclos/3 horas.",
         ],
     }
