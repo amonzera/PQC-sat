@@ -1,0 +1,96 @@
+{
+  "schema_version": "pqc-sat-stand-fixture-v1",
+  "source_kind": "official-campaign",
+  "source_path": "logs/20260702T044907Z_final_metrics_dev-ttyusb0.json",
+  "source_sha256": "bcf16f1f49f6433ca7bdfde000023af1cb3b72546a3af16d570fe212edd6ce8d",
+  "collected_at": "2026-07-02T04:49:07Z",
+  "official_candidate": true,
+  "failed": 0,
+  "mission_runs": 600,
+  "fault_runs": 400,
+  "payload": "PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK",
+  "profiles": {
+    "BASELINE": {
+      "cpu_mhz": 240,
+      "missions": {
+        "CLASSIC": {
+          "scenario": "CLASSIC",
+          "result": "DELIVERED",
+          "crypto": "AES-128-GCM",
+          "cipher": "AES-128-GCM",
+          "checksum": "NONE",
+          "key_source": "RANDOM_SESSION",
+          "elapsed_us": 611,
+          "bytes_total": 69,
+          "bytes_payload": 41,
+          "bytes_crypto": 28,
+          "bytes_checksum": 0,
+          "keygen_us": 0,
+          "encap_us": 0,
+          "decap_us": 0,
+          "encrypt_us": 365,
+          "decrypt_us": 125,
+          "heap": 201412,
+          "min_heap": 197624,
+          "key_match": 1,
+          "aead_match": 1,
+          "tag_match": 1,
+          "crc_match": 1
+        },
+        "PQC": {
+          "scenario": "PQC",
+          "result": "DELIVERED",
+          "crypto": "ML-KEM-512",
+          "cipher": "AES-128-GCM",
+          "checksum": "NONE",
+          "key_source": "ML-KEM-512",
+          "elapsed_us": 14152,
+          "bytes_total": 837,
+          "bytes_payload": 41,
+          "bytes_crypto": 796,
+          "bytes_checksum": 0,
+          "keygen_us": 3743,
+          "encap_us": 3953,
+          "decap_us": 5029,
+          "encrypt_us": 389,
+          "decrypt_us": 124,
+          "heap": 201412,
+          "min_heap": 197624,
+          "key_match": 1,
+          "aead_match": 1,
+          "tag_match": 1,
+          "crc_match": 1
+        }
+      }
+    },
+    "OBC-1U-LIMITED": {
+      "cpu_mhz": 80,
+      "missions": {
+        "PQC": {
+          "scenario": "PQC",
+          "result": "DELIVERED",
+          "crypto": "ML-KEM-512",
+          "cipher": "AES-128-GCM",
+          "checksum": "NONE",
+          "key_source": "ML-KEM-512",
+          "elapsed_us": 40197,
+          "bytes_total": 837,
+          "bytes_payload": 41,
+          "bytes_crypto": 796,
+          "bytes_checksum": 0,
+          "keygen_us": 10524,
+          "encap_us": 11882,
+          "decap_us": 15259,
+          "encrypt_us": 600,
+          "decrypt_us": 313,
+          "heap": 201412,
+          "min_heap": 197624,
+          "key_match": 1,
+          "aead_match": 1,
+          "tag_match": 1,
+          "crc_match": 1
+        }
+      }
+    }
+  }
+}

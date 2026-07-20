@@ -7582,17 +7582,28 @@ class Onboarding:
 # --- Loop Principal -----------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(description="PQC-SAT Mission Control Dashboard")
+    parser.add_argument("--stand", action="store_true", help="inicia a experiência guiada do estande SBPC")
     parser.add_argument("--serial", action="store_true", help="conecta comandos do dashboard ao ESP32")
     parser.add_argument("--simulated", action="store_true", help="modo de desenvolvimento sem travar no hardware")
     parser.add_argument("--no-splash", action="store_true", help="pula a tela inicial curta")
     parser.add_argument("--port", help="porta serial, por exemplo /dev/ttyUSB0 ou COM3")
     parser.add_argument("--baud", type=int, default=115200, help="baudrate da serial")
     parser.add_argument("--serial-timeout", type=float, default=SERIAL_TIMEOUT_SECONDS, help="timeout serial em segundos")
+    parser.add_argument("--windowed", action="store_true", help="abre o modo estande em janela redimensionável")
+    parser.add_argument("--stand-config", help="configuração JSON do modo estande")
+    parser.add_argument("--stand-fixture", help="fixture oficial para o modo estande simulado")
+    parser.add_argument("--stand-log-dir", help="diretório dos logs JSONL do estande")
+    parser.add_argument("--diagnostic", action="store_true", help="mostra diagnóstico administrativo no modo estande")
+    parser.add_argument("--max-runtime-seconds", type=float, help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    if args.stand:
+        from stand_demo import run_stand
+
+        return run_stand(args, serial_client_factory=DashboardSerialClient)
     init_display()
     if not args.no_splash:
         mode_label = "MODO SIMULADO" if args.simulated else "PROCURANDO BLACKBOARD WISDOM"
