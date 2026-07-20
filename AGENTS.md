@@ -104,9 +104,10 @@ implementar.
 - modo estande SBPC em release candidate de software na branch
   `sbpc-stand-demo`, com máquina de estados guiada, fixture oficial offline,
   logs JSONL, scripts operacionais, screenshots, vídeo de contingência, 50
-  ciclos simulados e um smoke completo na Wisdom em 2026-07-20;
-- o smoke real do modo estande confirmou CLASSIC/PQC a 240 MHz, PQC a 80 MHz,
-  leitura do potenciômetro e a mesma falha em NONE/CRC32.
+  ciclos simulados e dois smokes completos na Wisdom em 2026-07-20;
+- os smokes reais confirmaram CLASSIC/PQC a 240 MHz, PQC a 80 MHz, leitura do
+  potenciômetro e a mesma falha em NONE/CRC32; o ciclo com timing de produção
+  chegou a `SUMMARY` em 51,55 s.
 
 ### Não implementado
 Nenhuma etapa técnica de implementação permanece aberta para o MVP do

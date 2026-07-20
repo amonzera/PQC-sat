@@ -14,6 +14,12 @@ Estado geral: **release candidate; aceite longo e ensaio com público pendentes*
 - soak acelerado: `docs/stand/evidence/simulated_soak.json`;
 - smoke real autocontido: `docs/stand/evidence/hardware_smoke.json`;
 - log JSONL do ciclo real: `docs/stand/evidence/hardware_smoke_cycle.jsonl`;
+- ciclo real com tempos de produção:
+  `docs/stand/evidence/hardware_production_timing.json` e
+  `docs/stand/evidence/hardware_production_timing_cycle.jsonl`;
+- matriz completa do handover: `docs/stand/REQUIREMENTS_TRACEABILITY.md`;
+- resultado reproduzível da validação de software:
+  `docs/stand/evidence/software_validation.json`;
 - logs JSONL detalhados: `logs/stand/`;
 - modelo para avaliação de cinco visitantes:
   `docs/stand/evidence/AUDIENCE_TEST_TEMPLATE.csv`.
@@ -62,20 +68,21 @@ O diagnóstico completo em `/dev/ttyUSB0` passou com `HELLO`, `STATUS`,
 `FAULT` em `NONE`/`CRC32` e restauração a 240 MHz.
 
 O runner ponta a ponta percorreu todos os estados até `SUMMARY` usando o
-controlador e renderer reais, com tempos didáticos reduzidos. Evidência:
-`docs/stand/evidence/hardware_smoke.json`; o JSONL correspondente também
-passou pelo validador de invariantes com limiares de smoke. A entrada oficial
-`dashboard.py --stand` fez handshake e encerrou com `session_end` limpo.
+controlador e renderer reais. Além do smoke acelerado, uma segunda execução
+manteve exatamente os tempos de `config/stand_demo.json` e chegou à conclusão
+em 51,55 s. Os dois JSONL passaram pelo validador de invariantes com limiares
+de ciclo curto. A entrada oficial `dashboard.py --stand` também fez handshake
+e encerrou com `session_end` limpo.
 
 Resultados dessa execução curta:
 
 | Etapa | Evidência real |
 |---|---|
 | Handshake | `PQC-SAT-WISDOM`, `BlackBoard-Wisdom`, protocolo V1 |
-| CLASSIC 240 MHz | `DELIVERED`, AES-128-GCM, 846 µs, 69 B |
-| PQC 240 MHz | `DELIVERED`, ML-KEM-512 + AES-128-GCM, 14.470 µs, 837 B |
-| PQC 80 MHz | `DELIVERED`, 40.065 µs, 837 B |
-| Potenciômetro | A39=2885 → byte 28, máscara `0x40` |
+| CLASSIC 240 MHz | `DELIVERED`, AES-128-GCM, 838 µs, 69 B |
+| PQC 240 MHz | `DELIVERED`, ML-KEM-512 + AES-128-GCM, 14.453 µs, 837 B |
+| PQC 80 MHz | `DELIVERED`, 40.061 µs, 837 B |
+| Potenciômetro | A39=2884 → byte 28, máscara `0x40` |
 | FAULT NONE | `0x34 ^ 0x40 = 0x74`, `SILENT` |
 | FAULT CRC32 | mesmo byte/máscara/antes/depois, `DETECTED_GUARD` |
 | Restauração | `PROFILE BASELINE`, 240 MHz |
@@ -104,10 +111,10 @@ não iniciou automaticamente a campanha longa, conforme a regra do projeto.
 
 | Item | Estado | Evidência | Limitação restante |
 |---|---|---|---|
-| Hardware real | PASS | `docs/stand/evidence/hardware_smoke.json` | botão físico ainda não observado |
-| Baseline/PQC | PASS | smoke real: CLASSIC/PQC entregues com mesmo payload | apenas um ciclo do novo modo |
-| 240/80 MHz | PASS | smoke real confirmou 240 e 80 MHz, ambos com 837 B em PQC | resistência longa pendente |
-| Bit flip | PASS | smoke real: byte 28, `0x34 → 0x74`, máscara `0x40` | acionamento do botão foi administrativo |
+| Hardware real | PASS | `docs/stand/evidence/hardware_production_timing.json` | botão físico ainda não observado |
+| Baseline/PQC | PASS | ciclo real de 51,55 s: CLASSIC/PQC com mesmo payload | apenas um ciclo com timing de produção |
+| 240/80 MHz | PASS | ciclo real confirmou 240 e 80 MHz, ambos com 837 B em PQC | resistência longa pendente |
+| Bit flip | PASS | ciclo real: byte 28, `0x34 → 0x74`, máscara `0x40` | acionamento do botão foi administrativo |
 | CRC32 | PASS | mesma falha: `SILENT` e `DETECTED_GUARD` | campanha longa do estande pendente |
 | Precisão científica | PASS | `SCIENTIFIC_ACCURACY.md`, auditoria e parsers tipados | revisão oral contínua no evento |
 | 30 ciclos | FAIL | soak offline 50/50 não substitui hardware | executar gate físico do runbook |

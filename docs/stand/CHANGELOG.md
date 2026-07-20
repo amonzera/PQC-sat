@@ -20,6 +20,10 @@
 - adicionados testes de parser, estados, timeout, reconexão lógica, mapeamento
   do potenciômetro, XOR, fixture, logs, reset e resoluções;
 - criados runbook, especificação, precisão científica e relatório de validação.
+- validado um ciclo real de 51,55 s com os tempos exatos da configuração de
+  produção e registrado seu JSONL autocontido;
+- adicionada rastreabilidade explícita de todos os itens P0 e entregáveis,
+  sem converter gates presenciais pendentes em `PASS`.
 
 Pendente para a release do evento: executar e anexar aceite físico, ensaio com
 cinco pessoas e evidência de montagem no estande.

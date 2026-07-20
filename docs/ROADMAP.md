@@ -762,10 +762,11 @@ Validado em 2026-07-20:
 
 - 50 ciclos acelerados de fixture, 100 ações lógicas de botão e 100 mudanças
   de potenciômetro sem falha;
-- um ciclo curto real na Wisdom com CLASSIC/PQC a 240 MHz, PQC a 80 MHz,
-  leitura A39 e par FAULT coerente;
-- o evento físico `BUTTON_PING` não foi observado na janela de teste e precisa
-  de repetição assistida.
+- dois ciclos curtos reais na Wisdom com CLASSIC/PQC a 240 MHz, PQC a 80 MHz,
+  leitura A39 e par FAULT coerente; um deles preservou os tempos da configuração
+  de produção e chegou a `SUMMARY` em 51,55 s;
+- o evento físico `BUTTON_PING` não foi observado nas duas janelas de teste e
+  precisa de repetição assistida.
 
 Gate restante:
 
