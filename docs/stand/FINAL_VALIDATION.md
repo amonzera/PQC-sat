@@ -55,6 +55,13 @@ Resultado mais recente: 124 testes Python, import headless, `py_compile`,
 `git diff --check` e build PlatformIO passam. O firmware compilado ocupa
 70,3% da flash e 17,3% da RAM estática.
 
+Em 2026-07-21, nenhuma porta `/dev/ttyUSB*` ou `/dev/ttyACM*` estava exposta
+pelo sistema. Assim, a integração visual nova foi validada por fixture,
+renderização dos nove estados e testes automatizados, mas seu smoke curto na
+Wisdom não foi repetido. As medições físicas abaixo continuam sendo evidência
+do controlador/protocolo de 2026-07-20, não uma execução física posterior à
+troca do renderer.
+
 ## Soak offline
 
 `python3 tools/stand_soak.py --cycles 50` concluiu:
@@ -122,6 +129,8 @@ resistência presencial.
 
 ## Pendências que impedem o aceite completo
 
+- repetir um smoke curto de `dashboard.py --presentation` assim que a porta da
+  Wisdom reaparecer;
 - observar `BUTTON_PING` físico e usá-lo para iniciar/avançar a interface;
 - executar 30 ciclos físicos sem crash;
 - registrar 100 pressões, 100 mudanças do potenciômetro e dez recuperações USB;
@@ -138,7 +147,7 @@ não iniciou automaticamente a campanha longa, conforme a regra do projeto.
 
 | Item | Estado | Evidência | Limitação restante |
 |---|---|---|---|
-| Hardware real | PASS | ciclo de produção + 20 ciclos reais acelerados | botão físico ainda não observado |
+| Hardware real | PARCIAL | ciclo de produção + 20 ciclos reais acelerados no controlador | renderer integrado ainda sem repetição física; botão não observado |
 | Baseline/PQC | PASS | ciclo real de 51,55 s: CLASSIC/PQC com mesmo payload | apenas um ciclo com timing de produção |
 | 240/80 MHz | PASS | ciclo real confirmou 240 e 80 MHz, ambos com 837 B em PQC | resistência longa pendente |
 | Bit flip | PASS | ciclo real: byte 28, `0x34 → 0x74`, máscara `0x40` | acionamento do botão foi administrativo |

@@ -64,7 +64,9 @@ release candidate e não deve receber tag final.
 
 ## Decisão de release
 
-O software e o ciclo curto em hardware estão validados. O handover completo
-ainda não está encerrado porque botão físico, monitor/montagem, resistência,
-vídeo real e avaliação com público exigem ação presencial. O procedimento
-exato para produzir essas evidências está em `docs/stand/RUNBOOK.md`.
+O overlay integrado está validado em software; o controlador e o protocolo
+mantêm a evidência do ciclo curto em hardware de 2026-07-20. Como nenhuma porta
+serial estava disponível em 2026-07-21, ainda é preciso repetir o smoke curto
+com o renderer novo. O handover completo também depende de botão físico,
+monitor/montagem, resistência, vídeo real e avaliação com público. O
+procedimento exato está em `docs/stand/RUNBOOK.md`.

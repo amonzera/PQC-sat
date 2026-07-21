@@ -1,18 +1,19 @@
 {
   "schema_version": "pqc-sat-stand-software-validation-v1",
-  "created_at": "2026-07-20T23:18:05Z",
-  "tested_revision": "5d50fdca3ea0e0af518c5cfd6d3b529b00a6140d",
-  "result": "PASS_FOR_SOFTWARE_AND_SHORT_HARDWARE_SCOPE",
+  "created_at": "2026-07-21T18:00:00Z",
+  "tested_revision": "03b2a4efd0625ebb168b41608a2f1aec6e40f90d",
+  "result": "PASS_FOR_INTEGRATED_SOFTWARE_SCOPE_HARDWARE_RECHECK_PENDING",
   "environment": {
     "python": "3.14.6",
     "pygame_ce": "2.5.7",
-    "hardware_port": "/dev/ttyUSB0"
+    "hardware_port": null,
+    "prior_hardware_port": "/dev/ttyUSB0"
   },
   "checks": [
     {
       "command": "SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -m unittest discover",
       "result": "PASS",
-      "tests": 123,
+      "tests": 124,
       "failures": 0
     },
     {
@@ -42,19 +43,46 @@
       "flash_percent": 70.3
     },
     {
-      "command": "tools/stand_hardware_smoke.py --production-timings",
+      "command": "SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 dashboard.py --presentation --simulated --windowed --no-splash --max-runtime-seconds 2",
       "result": "PASS",
+      "renderer": "dashboard-native"
+    },
+    {
+      "command": "python3 tools/stand_soak.py --cycles 50",
+      "result": "PASS",
+      "cycles_completed": 50,
+      "rejected_events": 0,
+      "rss_growth_bytes": 0
+    },
+    {
+      "command": "scripts/generate_stand_backup.sh",
+      "result": "PASS",
+      "screenshots": 9,
+      "resolution": "1366x768",
+      "video_duration_seconds": 36
+    },
+    {
+      "command": "python3 tools/serial_console.py --list-ports",
+      "result": "BLOCKED",
+      "detail": "No serial ports found on 2026-07-21; integrated hardware smoke was not repeated"
+    },
+    {
+      "command": "tools/stand_hardware_smoke.py --production-timings",
+      "result": "PRIOR_PASS_NOT_REPEATED",
+      "validated_at": "2026-07-20",
       "cycle_duration_seconds": 51.545521326996095,
       "evidence": "docs/stand/evidence/hardware_production_timing.json"
     },
     {
       "command": "tools/validate_stand_logs.py hardware_production_timing_cycle.jsonl com limiares de ciclo curto",
-      "result": "PASS",
+      "result": "PRIOR_PASS_NOT_REPEATED",
+      "validated_at": "2026-07-20",
       "cycle_errors": 0
     },
     {
       "command": "tools/stand_hardware_smoke.py --cycles 20",
-      "result": "PASS",
+      "result": "PRIOR_PASS_NOT_REPEATED",
+      "validated_at": "2026-07-20",
       "completed_cycles": 20,
       "mission_runs": 60,
       "fault_runs": 40,
@@ -63,7 +91,8 @@
     },
     {
       "command": "tools/validate_stand_logs.py hardware_20_cycle_smoke.jsonl com limiares de repetibilidade",
-      "result": "PASS",
+      "result": "PRIOR_PASS_NOT_REPEATED",
+      "validated_at": "2026-07-20",
       "cycle_errors": 0,
       "pot_samples": 20,
       "pot_changes": 6,
@@ -72,13 +101,16 @@
   ],
   "artifact_hashes": {
     "official_metrics_sha256": "bcf16f1f49f6433ca7bdfde000023af1cb3b72546a3af16d570fe212edd6ce8d",
-    "backup_video_sha256": "cb3c17d2738b74de83585d480d60d481108820ea7dbda7f01af20949419752e6",
+    "backup_video_sha256": "e9c745191551ffdc5fe5040223ebbebd2e1e0c6f8a5b37f42f372c3b573b5bff",
+    "integrated_attract_sha256": "c1b7e19d8b143991559d0f5162f449e3db4cd11af796fe3fc5b3c496ced81634",
+    "integrated_summary_sha256": "2446c9447260d5fc0a4db575c741bd730d37b298d2ff771d1d1ddea255581098",
     "hardware_20_cycle_report_sha256": "322f17995f53fc00d334c447256332c3a33718a39852bdc1683a2a2a7d1781cb",
     "hardware_20_cycle_jsonl_sha256": "40a113c6a3b7c37a2e2f909d80d623c5f97b13864e76a5c59aa20de5c8d680cb",
     "hardware_20_cycle_validation_sha256": "15984b00e8b53036b43f56b8a2ebc1d04f1da2378093e758715743f24a702bbb"
   },
   "limitations": [
     "Este resultado não aprova o gate físico de 30 ciclos e 3 horas.",
+    "A Wisdom não apareceu em nenhuma porta serial em 2026-07-21; o novo renderer integrado ainda requer repetição do smoke curto em hardware.",
     "As transições do smoke foram acionadas pelo driver administrativo, não pelo botão físico.",
     "Monitor definitivo, vídeo em hardware e avaliação com cinco pessoas permanecem pendentes."
   ]
