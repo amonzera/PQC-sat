@@ -16,8 +16,8 @@ Exemplos:
   ./scripts/run_stand.sh --simulated
   ./scripts/run_stand.sh --port /dev/ttyUSB0 --windowed
 
-O inicializador valida dependências e a Wisdom antes de abrir o modo estande.
-As demais opções são encaminhadas para `dashboard.py --stand`.
+O inicializador valida dependências e a Wisdom antes de abrir a apresentação
+integrada. As demais opções são encaminhadas para `dashboard.py --presentation`.
 EOF
 }
 
@@ -72,10 +72,10 @@ run_interface() {
       --who="PQC-SAT SBPC" \
       --why="demonstração contínua no estande" \
       --mode=block \
-      "${PYTHON_BIN}" dashboard.py --stand --no-splash "${ARGS[@]}"
+      "${PYTHON_BIN}" dashboard.py --presentation --no-splash "${ARGS[@]}"
   else
     echo "AVISO: bloqueio de suspensão indisponível; desative a suspensão manualmente." >&2
-    "${PYTHON_BIN}" dashboard.py --stand --no-splash "${ARGS[@]}"
+    "${PYTHON_BIN}" dashboard.py --presentation --no-splash "${ARGS[@]}"
   fi
 }
 

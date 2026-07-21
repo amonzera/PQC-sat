@@ -1,6 +1,6 @@
 # Validação final do modo estande SBPC
 
-Data: 2026-07-20
+Data: 2026-07-21
 Estado geral: **release candidate; aceite longo e ensaio com público pendentes**.
 
 ## Evidências produzidas
@@ -8,7 +8,8 @@ Estado geral: **release candidate; aceite longo e ensaio com público pendentes*
 - auditoria da base: `docs/stand/AUDIT_EXISTING.md`;
 - captura da interface anterior:
   `docs/stand/evidence/baseline_dashboard_1366x768.png`;
-- nove capturas do modo estande: `docs/stand/evidence/states/`;
+- nove capturas da apresentação integrada ao dashboard:
+  `docs/stand/evidence/states/`;
 - vídeo offline de contingência, claramente simulado:
   `docs/stand/evidence/stand_backup_simulated.mp4`;
 - soak acelerado: `docs/stand/evidence/simulated_soak.json`;
@@ -45,9 +46,12 @@ Na base anterior havia 96 testes. O modo estande adicionou cobertura para:
 - mesma falha em NONE/CRC32;
 - log JSONL;
 - rótulo permanente de simulação;
-- renderização de todos os estados e escala 1366×768/1920×1080.
+- renderização de todos os estados dentro do `DashboardPanel` original e nas
+  resoluções 1366×768/1920×1080;
+- encaminhamento de `BUTTON_PING` pelo cliente serial do dashboard para a
+  máquina de estados guiada.
 
-Resultado mais recente: 123 testes Python, import headless, `py_compile`,
+Resultado mais recente: 124 testes Python, import headless, `py_compile`,
 `git diff --check` e build PlatformIO passam. O firmware compilado ocupa
 70,3% da flash e 17,3% da RAM estática.
 
@@ -72,7 +76,8 @@ O diagnóstico completo em `/dev/ttyUSB0` passou com `HELLO`, `STATUS`,
 `FAULT` em `NONE`/`CRC32` e restauração a 240 MHz.
 
 O runner ponta a ponta percorreu todos os estados até `SUMMARY` usando o
-controlador e renderer reais. Além do smoke acelerado, uma segunda execução
+controlador real. Desde 2026-07-21, o smoke de renderização usa o overlay nativo
+do dashboard, em vez do shell visual separado. Além do smoke acelerado, uma segunda execução
 manteve exatamente os tempos de `config/stand_demo.json` e chegou à conclusão
 em 51,55 s. Os dois JSONL passaram pelo validador de invariantes com limiares
 de ciclo curto. A entrada oficial `dashboard.py --stand` também fez handshake

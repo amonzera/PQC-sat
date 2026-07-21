@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Guided, offline-capable SBPC stand experience for PQC-SAT.
+"""State model and validation helpers for the guided PQC-SAT presentation.
 
 The state machine is deliberately independent from Pygame.  Hardware values
 enter the presentation only after a typed response has been accepted; the
 simulated mode uses a provenance-labelled fixture from the official campaign.
+The production surface is hosted by ``dashboard.py`` so the visitor remains
+inside the existing mission-control dashboard.
 """
 
 from __future__ import annotations

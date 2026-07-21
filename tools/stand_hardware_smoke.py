@@ -18,13 +18,12 @@ if str(ROOT) not in sys.path:
 
 import pygame  # noqa: E402
 
-from dashboard import DashboardSerialClient  # noqa: E402
+from dashboard import DashboardSerialClient, render_dashboard_presentation_frame  # noqa: E402
 from stand_demo import (  # noqa: E402
     DEFAULT_CONFIG_PATH,
     DemoState,
     StandConfig,
     StandController,
-    StandRenderer,
     StandSessionLogger,
 )
 
@@ -85,7 +84,6 @@ def main(argv=None) -> int:
     logger = StandSessionLogger(args.log_dir, mode="hardware", config=config)
     controller = StandController(config, client.send, mode="hardware", logger=logger)
     pygame.font.init()
-    renderer = StandRenderer()
     states_seen = []
     started = time.monotonic()
     start_pressed = False
@@ -105,6 +103,7 @@ def main(argv=None) -> int:
                 controller.handle_serial_event(event_type, payload, now=now)
             if controller.state.value not in states_seen:
                 states_seen.append(controller.state.value)
+                render_dashboard_presentation_frame(controller, now=now)
             if (
                 controller.ready
                 and controller.state == DemoState.ATTRACT
@@ -121,13 +120,13 @@ def main(argv=None) -> int:
             ):
                 bit_pressed = controller.handle_button(now=now, origin="hardware-smoke-driver")
             controller.update(now=now)
-            renderer.render(controller, now=now)
             if controller.state == DemoState.ERROR:
                 error = controller.error_message
                 break
             if controller.state == DemoState.SUMMARY:
                 if controller.state.value not in states_seen:
                     states_seen.append(controller.state.value)
+                    render_dashboard_presentation_frame(controller, now=now)
                 captured_measurements = {key: asdict(value) for key, value in controller.measurements.items()}
                 captured_faults = {key: asdict(value) for key, value in controller.fault_results.items()}
                 captured_selection = asdict(controller.selection) if controller.selection else None

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from dashboard import render_dashboard_presentation_frame  # noqa: E402
 from stand_demo import (  # noqa: E402
     DEFAULT_CONFIG_PATH,
     DEFAULT_FIXTURE_PATH,
@@ -21,7 +22,6 @@ from stand_demo import (  # noqa: E402
     FixtureSerialClient,
     StandConfig,
     StandController,
-    StandRenderer,
 )
 
 
@@ -91,7 +91,6 @@ def main(argv=None) -> int:
 
     pygame.init()
     controller = build_completed_fixture_controller(args.config, args.fixture)
-    renderer = StandRenderer()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for index, state in enumerate(STATE_ORDER):
         controller.state = state
@@ -99,9 +98,11 @@ def main(argv=None) -> int:
         if state == DemoState.ERROR:
             controller.error_message = "Exemplo de recuperação: timeout aguardando a Wisdom"
             controller.connection_status = "USB desconectado — reconecte e tente novamente"
-        frame = renderer.render(controller, now=2.0)
-        if (args.width, args.height) != frame.get_size():
-            frame = pygame.transform.smoothscale(frame, (args.width, args.height))
+        frame = render_dashboard_presentation_frame(
+            controller,
+            size=(args.width, args.height),
+            now=2.0,
+        )
         output = args.output_dir / f"{index:02d}_{state.value.lower()}_{args.width}x{args.height}.png"
         pygame.image.save(frame, output)
         print(output)

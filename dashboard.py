@@ -340,14 +340,18 @@ FONT_PIXEL   = load_font("monospace", 13)
 FONT_LABEL   = load_font("monospace", 13)
 
 
-def init_display():
-    """Initialize the fullscreen display after CLI arguments are parsed."""
+def init_display(*, windowed=False, windowed_size=(1366, 768)):
+    """Initialize the dashboard display after CLI arguments are parsed."""
     global WIDTH, HEIGHT, screen, clock
 
     pygame.init()
-    info = pygame.display.Info()
-    WIDTH, HEIGHT = info.current_w, info.current_h
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN | pygame.DOUBLEBUF)
+    if windowed:
+        WIDTH, HEIGHT = (int(windowed_size[0]), int(windowed_size[1]))
+        screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.DOUBLEBUF)
+    else:
+        info = pygame.display.Info()
+        WIDTH, HEIGHT = info.current_w, info.current_h
+        screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN | pygame.DOUBLEBUF)
     pygame.display.set_caption("PQC-SAT Mission Control Dashboard")
     clock = pygame.time.Clock()
 
@@ -1465,8 +1469,12 @@ class Satellite:
 class DashboardPanel:
     """Painel lateral com informacoes de telemetria e comandos."""
 
-    def __init__(self, serial_client=None):
+    def __init__(self, serial_client=None, *, stand_controller=None, stand_diagnostic=False):
         self.serial_client = serial_client
+        self.stand_controller = stand_controller
+        self.stand_mode = stand_controller is not None
+        self.stand_diagnostic = bool(stand_diagnostic)
+        self.stand_action_rects = {}
         self.serial_connected = False
         self.serial_status = "SERIAL DESATIVADA"
         self.hardware_payload = {}
@@ -1587,8 +1595,9 @@ class DashboardPanel:
             self.serial_status = "INICIANDO SERIAL"
             self._append_history("SERIAL", "INICIANDO")
             self.serial_client.start()
-            for command in SERIAL_STARTUP_COMMANDS:
-                self._queue_serial_command(command, visible=True)
+            if not self.stand_mode:
+                for command in SERIAL_STARTUP_COMMANDS:
+                    self._queue_serial_command(command, visible=True)
 
     def close(self, *, auto_save=True):
         if auto_save and self.session_dirty and (self.experiment_events or self.hardware_samples):
@@ -1608,6 +1617,9 @@ class DashboardPanel:
             self.command_history.pop(0)
 
     def handle_event(self, event):
+        if self.stand_mode and self._handle_stand_event(event):
+            return True
+
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.top_results_btn_rect is not None and self.top_results_btn_rect.collidepoint(event.pos):
                 self._execute_command("PQC_RESULTS")
@@ -1693,6 +1705,39 @@ class DashboardPanel:
             else:
                 if len(self.input_text) < 30 and event.unicode.isprintable():
                     self.input_text += event.unicode
+
+    def _handle_stand_event(self, event):
+        """Keep visitor input inside the guided presentation while it is active."""
+        if event.type == pygame.KEYDOWN:
+            if event.key in {pygame.K_SPACE, pygame.K_RETURN}:
+                self.stand_controller.handle_button(origin="keyboard")
+            elif event.key == pygame.K_F12:
+                self.stand_diagnostic = not self.stand_diagnostic
+            elif event.key == pygame.K_HOME:
+                self.stand_controller.reset_to_attract(reason="operator_home_key")
+            elif event.key == pygame.K_r and self.stand_controller.state.value == "ERROR":
+                self.stand_controller.reset_to_attract(reason="operator_retry_key")
+            elif event.key in {pygame.K_LEFT, pygame.K_PAGEDOWN}:
+                self._adjust_stand_simulated_pot(-512 if event.key == pygame.K_PAGEDOWN else -128)
+            elif event.key in {pygame.K_RIGHT, pygame.K_PAGEUP}:
+                self._adjust_stand_simulated_pot(512 if event.key == pygame.K_PAGEUP else 128)
+            return True
+
+        # The dashboard below remains visible as context, but its manual command
+        # blocks are intentionally disabled during the visitor's guided cycle.
+        if event.type in {pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEWHEEL}:
+            return True
+        return False
+
+    def _adjust_stand_simulated_pot(self, delta):
+        if getattr(self.stand_controller, "mode", "hardware") != "simulated":
+            return
+        if not hasattr(self.serial_client, "set_pot"):
+            return
+        config = self.stand_controller.config
+        current = int(getattr(self.serial_client, "pot_value", config.pot_minimum))
+        self.serial_client.set_pot(current + int(delta))
+        self.stand_controller.note_interaction()
 
     def _handle_mission_overlay_event(self, event):
         if not getattr(self, "mission_overlay_visible", False):
@@ -3202,18 +3247,26 @@ class DashboardPanel:
         self._update_bit_rain(dt)
         self._advance_demo(dt)
         self._drain_serial_events()
+        if self.stand_mode:
+            self.stand_controller.update(now=time.monotonic())
 
     def _drain_serial_events(self):
         if self.serial_client is None:
             return
 
         for event_type, payload in self.serial_client.poll():
+            if self.stand_mode:
+                self.stand_controller.handle_serial_event(event_type, payload, now=time.monotonic())
             if event_type == "state":
                 self.serial_connected = bool(payload["connected"])
                 self.serial_status = payload["status"]
                 if self.serial_connected:
                     status = "ONLINE"
-                    self.pqc_algorithm = "ML-KEM-512 (DISPONÍVEL)"
+                    if self.stand_mode and self.stand_controller.mode == "simulated":
+                        status = "FIXTURE"
+                        self.pqc_algorithm = "ML-KEM-512 (FIXTURE)"
+                    else:
+                        self.pqc_algorithm = "ML-KEM-512 (DISPONÍVEL)"
                 elif self.serial_status.startswith("OPENING"):
                     status = "OPENING"
                 else:
@@ -3321,7 +3374,8 @@ class DashboardPanel:
             if payload.get("result"):
                 self.session_status = f"HW {payload['result']}"
             self.hardware_payload = payload
-            self._open_fault_overlay_from_payload(command, payload)
+            if not self.stand_mode:
+                self._open_fault_overlay_from_payload(command, payload)
         elif command.startswith("TELEMETRY"):
             self.hardware_payload = payload
         elif command.startswith("STATUS"):
@@ -3346,7 +3400,10 @@ class DashboardPanel:
                 if snapshot:
                     payload.update(self._mission_context_fields(snapshot))
             self.hardware_payload = payload
-            self._open_mission_overlay(payload)
+            if self.stand_mode:
+                self.last_mission = dict(payload)
+            else:
+                self._open_mission_overlay(payload)
             scenario = payload.get("scenario", "MISSION")
             result = payload.get("result", "")
             self.session_status = f"{scenario} {result}".strip()
@@ -3945,8 +4002,524 @@ class DashboardPanel:
         # OTIMIZAÇÃO SEMINÁRIO
         self._draw_bit_rain(surface)
         self._draw_bottom_bar(surface, t)
+        if self.stand_mode:
+            self._draw_stand_presentation(surface, t)
         if getattr(self, "results_overlay_visible", False):
             self._draw_results_overlay(surface, t)
+
+    def _stand_overlay_geometry(self):
+        margin = max(22, int(min(WIDTH, HEIGHT) * 0.032))
+        top = 56
+        bottom = 38
+        return pygame.Rect(margin, top, WIDTH - margin * 2, HEIGHT - top - bottom - margin)
+
+    @staticmethod
+    def _stand_state_progress(state_name):
+        return {
+            "ATTRACT": -1,
+            "INTRO": 0,
+            "RUN_240": 1,
+            "RUN_80": 2,
+            "SELECT_BIT": 3,
+            "FAULT_NONE": 4,
+            "FAULT_CRC": 5,
+            "SUMMARY": 6,
+        }.get(state_name, -1)
+
+    def _draw_stand_presentation(self, surface, t):
+        """Render the guided mission as a native layer of the existing dashboard."""
+        controller = self.stand_controller
+        state_name = controller.state.value
+        rect = self._stand_overlay_geometry()
+
+        shade = pygame.Surface((WIDTH, HEIGHT - 44), pygame.SRCALPHA)
+        pygame.draw.rect(shade, (0, 2, 10, 112), shade.get_rect())
+        surface.blit(shade, (0, 44))
+
+        panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(panel, (*C_PANEL_BG, 235), panel.get_rect(), border_radius=10)
+        pygame.draw.rect(panel, (*C_ACCENT_CYAN, 215), panel.get_rect(), width=2, border_radius=10)
+        pygame.draw.rect(panel, (*C_PANEL_HEADER, 245), (0, 0, rect.width, 82), border_radius=10)
+        pygame.draw.line(panel, (*C_PANEL_BORDER, 210), (0, 82), (rect.width, 82), 1)
+        surface.blit(panel, rect.topleft)
+
+        title = FONT_BODY.render("MISSÃO GUARDIÕES DO BIT  •  APRESENTAÇÃO INTERATIVA", True, C_ACCENT_CYAN)
+        surface.blit(title, (rect.x + 20, rect.y + 12))
+
+        mode_text = controller.persistent_mode_label
+        mode_color = C_ACCENT_GREEN if controller.ready and controller.mode == "hardware" else C_ACCENT_PURPLE
+        if controller.mode == "hardware" and not controller.ready:
+            mode_color = C_ACCENT_ORANGE
+        mode_surface = self._render_clipped(FONT_LABEL, mode_text, mode_color, min(470, rect.width // 2))
+        surface.blit(mode_surface, (rect.right - mode_surface.get_width() - 20, rect.y + 15))
+
+        labels = ("MISSÃO", "240 MHz", "80 MHz", "BIT", "SEM CRC", "CRC32", "FIM")
+        active_index = self._stand_state_progress(state_name)
+        progress_left = rect.x + 34
+        progress_right = rect.right - 34
+        progress_y = rect.y + 60
+        pygame.draw.line(surface, (45, 74, 112), (progress_left, progress_y), (progress_right, progress_y), 2)
+        for index, label in enumerate(labels):
+            ratio = index / max(1, len(labels) - 1)
+            px = int(progress_left + (progress_right - progress_left) * ratio)
+            complete = active_index >= index
+            active = active_index == index
+            color = C_ACCENT_GREEN if complete else C_TEXT_DIM
+            if active:
+                color = C_ACCENT_CYAN
+                pulse = 7 + int(2 * (0.5 + 0.5 * math.sin(t * 4.0)))
+                pygame.draw.circle(surface, (*C_ACCENT_CYAN, 45), (px, progress_y), pulse + 5, 1)
+            pygame.draw.circle(surface, color, (px, progress_y), 6 if active else 4)
+            label_surface = FONT_LABEL.render(label, True, color)
+            surface.blit(label_surface, (px - label_surface.get_width() // 2, progress_y + 9))
+
+        body = pygame.Rect(rect.x + 24, rect.y + 94, rect.width - 48, rect.height - 126)
+        draw_state = {
+            "ATTRACT": self._draw_stand_attract,
+            "INTRO": self._draw_stand_intro,
+            "RUN_240": self._draw_stand_run_240,
+            "RUN_80": self._draw_stand_run_80,
+            "SELECT_BIT": self._draw_stand_select_bit,
+            "FAULT_NONE": self._draw_stand_fault_none,
+            "FAULT_CRC": self._draw_stand_fault_crc,
+            "SUMMARY": self._draw_stand_summary,
+            "ERROR": self._draw_stand_error,
+        }.get(state_name, self._draw_stand_error)
+        draw_state(surface, body, controller, t)
+
+        source = controller.measurement_source_label
+        source_surface = self._render_clipped(FONT_LABEL, source, C_TEXT_DIM, rect.width - 48)
+        surface.blit(source_surface, (rect.x + 24, rect.bottom - 24))
+
+        if self.stand_diagnostic:
+            self._draw_stand_diagnostic(surface, rect, controller)
+
+    def _draw_stand_centered(self, surface, font, text, color, center_x, y, max_width, *, line_gap=6):
+        lines = self._wrap_text_for_width(font, text, max_width)
+        for line in lines:
+            rendered = font.render(line, True, color)
+            surface.blit(rendered, (center_x - rendered.get_width() // 2, y))
+            y += rendered.get_height() + line_gap
+        return y
+
+    @staticmethod
+    def _draw_stand_card_shell(surface, rect, accent, *, fill=(8, 16, 34)):
+        pygame.draw.rect(surface, fill, rect, border_radius=8)
+        pygame.draw.rect(surface, accent, rect, width=2, border_radius=8)
+        pygame.draw.line(surface, accent, (rect.x + 12, rect.y + 42), (rect.right - 12, rect.y + 42), 1)
+
+    def _draw_stand_attract(self, surface, body, controller, t):
+        center_x = body.centerx
+        y = body.y + 32
+        y = self._draw_stand_centered(
+            surface,
+            FONT_LARGE,
+            "UM ÚNICO BIT PODE MUDAR UMA MISSÃO ESPACIAL",
+            C_TEXT_PRIMARY,
+            center_x,
+            y,
+            body.width - 120,
+            line_gap=4,
+        )
+        y = self._draw_stand_centered(
+            surface,
+            FONT_HEADER,
+            "Você consegue descobrir qual proteção percebe a falha?",
+            C_TEXT_DIM,
+            center_x,
+            y + 8,
+            body.width - 180,
+        )
+
+        orbit = pygame.Rect(center_x - 245, y + 26, 490, 138)
+        pygame.draw.ellipse(surface, (35, 92, 150), orbit, 2)
+        earth_center = (center_x, orbit.centery)
+        pygame.draw.circle(surface, (34, 112, 204), earth_center, 45)
+        pygame.draw.circle(surface, C_ACCENT_CYAN, earth_center, 45, 2)
+        sat_x = int(center_x + math.cos(t * 0.55) * orbit.width * 0.48)
+        sat_y = int(orbit.centery + math.sin(t * 0.55) * orbit.height * 0.46)
+        pygame.draw.rect(surface, C_SAT_BODY, (sat_x - 18, sat_y - 11, 36, 22), border_radius=4)
+        pygame.draw.rect(surface, C_SAT_PANEL_BLUE, (sat_x - 43, sat_y - 7, 23, 14))
+        pygame.draw.rect(surface, C_SAT_PANEL_BLUE, (sat_x + 20, sat_y - 7, 23, 14))
+        pygame.draw.circle(surface, C_SAT_GOLD, (sat_x, sat_y - 14), 4)
+
+        ready = controller.ready
+        prompt_color = C_ACCENT_GREEN if ready else C_ACCENT_ORANGE
+        prompt = pygame.Rect(center_x - min(430, body.width // 2 - 40), body.bottom - 104, min(860, body.width - 80), 76)
+        pygame.draw.rect(surface, (10, 42, 42) if ready else (50, 34, 12), prompt, border_radius=9)
+        pygame.draw.rect(surface, prompt_color, prompt, width=2, border_radius=9)
+        if ready and controller.mode == "hardware":
+            message = "PRESSIONE O BOTÃO D27 DA PLACA PARA COMEÇAR"
+        elif ready:
+            message = "ENSAIO VISUAL: PRESSIONE ESPAÇO PARA COMEÇAR"
+        else:
+            message = "AGUARDANDO HANDSHAKE COM A BLACKBOARD WISDOM"
+        self._draw_stand_centered(surface, FONT_HEADER, message, prompt_color, prompt.centerx, prompt.y + 22, prompt.width - 30)
+
+    def _draw_stand_intro(self, surface, body, controller, _t):
+        y = self._draw_stand_centered(
+            surface,
+            FONT_LARGE,
+            "MISSÃO: ENVIAR TELEMETRIA CRÍTICA À ESTAÇÃO TERRESTRE",
+            C_TEXT_PRIMARY,
+            body.centerx,
+            body.y + 28,
+            body.width - 100,
+        )
+        payload_rect = pygame.Rect(body.x + 90, y + 28, body.width - 180, 108)
+        self._draw_stand_card_shell(surface, payload_rect, C_ACCENT_CYAN)
+        label = FONT_LABEL.render("MESMO PAYLOAD EM TODAS AS ETAPAS", True, C_TEXT_DIM)
+        surface.blit(label, (payload_rect.x + 18, payload_rect.y + 14))
+        self._draw_stand_centered(
+            surface,
+            FONT_HEADER,
+            controller.config.payload_display,
+            C_ACCENT_CYAN,
+            payload_rect.centerx,
+            payload_rect.y + 57,
+            payload_rect.width - 36,
+        )
+
+        facts = (
+            ("PLACA REAL", "A Wisdom executa a criptografia e mede o tempo.", C_ACCENT_GREEN),
+            ("COMPARAÇÃO JUSTA", "O payload permanece idêntico em cada cenário.", C_ACCENT_CYAN),
+            ("FALHA CONTROLADA", "O bit flip é injetado por software; não há radiação real.", C_ACCENT_ORANGE),
+        )
+        gap = 14
+        card_w = (body.width - gap * 2 - 80) // 3
+        card_y = payload_rect.bottom + 34
+        for index, (title, text_value, color) in enumerate(facts):
+            card = pygame.Rect(body.x + 40 + index * (card_w + gap), card_y, card_w, 126)
+            self._draw_stand_card_shell(surface, card, color)
+            title_surface = FONT_BODY.render(title, True, color)
+            surface.blit(title_surface, (card.x + 14, card.y + 12))
+            self._draw_wrapped_text(surface, FONT_SMALL, text_value, C_TEXT_PRIMARY, card.x + 14, card.y + 55, card.width - 28, line_spacing=19, max_lines=3)
+
+        remaining = max(0.0, controller.config.intro_seconds - controller.state_elapsed())
+        countdown = FONT_LABEL.render(f"Preparando comparação em {remaining:0.1f} s", True, C_TEXT_DIM)
+        surface.blit(countdown, (body.centerx - countdown.get_width() // 2, body.bottom - 34))
+
+    def _draw_stand_measurement_card(self, surface, rect, title, measurement, accent, role):
+        self._draw_stand_card_shell(surface, rect, accent)
+        title_surface = FONT_HEADER.render(title, True, accent)
+        surface.blit(title_surface, (rect.x + 16, rect.y + 11))
+        self._draw_wrapped_text(surface, FONT_LABEL, role, C_TEXT_DIM, rect.x + 16, rect.y + 52, rect.width - 32, line_spacing=16, max_lines=2)
+        if measurement is None:
+            waiting = FONT_BODY.render("EXECUTANDO NA PLACA...", True, C_TEXT_PRIMARY)
+            surface.blit(waiting, (rect.centerx - waiting.get_width() // 2, rect.centery + 8))
+            return
+
+        metrics_y = rect.y + 102
+        metric_gap = 10
+        metric_w = (rect.width - 42 - metric_gap) // 2
+        values = (
+            ("TEMPO REAL", _format_elapsed(measurement.elapsed_us), C_ACCENT_CYAN),
+            ("PACOTE", f"{measurement.bytes_total} B", C_ACCENT_ORANGE),
+            ("CLOCK", f"{measurement.profile_mhz} MHz", C_TEXT_PRIMARY),
+            ("RESULTADO", "ENTREGUE" if measurement.result == "DELIVERED" else measurement.result, C_ACCENT_GREEN),
+        )
+        for index, (label, value, color) in enumerate(values):
+            box = pygame.Rect(
+                rect.x + 16 + (index % 2) * (metric_w + metric_gap),
+                metrics_y + (index // 2) * 62,
+                metric_w,
+                52,
+            )
+            self._draw_overlay_metric_box(surface, label, value, box.x, box.y, box.width, box.height, color)
+        source = self._render_clipped(FONT_LABEL, measurement.source.upper(), C_TEXT_DIM, rect.width - 32)
+        surface.blit(source, (rect.x + 16, rect.bottom - 25))
+
+    def _draw_stand_run_240(self, surface, body, controller, _t):
+        self._draw_stand_centered(
+            surface,
+            FONT_TITLE,
+            "1. MESMO PAYLOAD, DUAS FORMAS DE PREPARAR A SESSÃO — 240 MHz",
+            C_TEXT_PRIMARY,
+            body.centerx,
+            body.y + 8,
+            body.width - 70,
+        )
+        gap = 22
+        card_w = (body.width - gap - 40) // 2
+        card_y = body.y + 62
+        card_h = body.height - 112
+        classic = controller.measurements.get("CLASSIC_240")
+        pqc = controller.measurements.get("PQC_240")
+        self._draw_stand_measurement_card(
+            surface,
+            pygame.Rect(body.x + 20, card_y, card_w, card_h),
+            "BASELINE AES-GCM",
+            classic,
+            C_ACCENT_ORANGE,
+            "Chave AES efêmera gerada localmente; baseline simétrico.",
+        )
+        self._draw_stand_measurement_card(
+            surface,
+            pygame.Rect(body.x + 20 + card_w + gap, card_y, card_w, card_h),
+            "ML-KEM-512 + AES-GCM",
+            pqc,
+            C_ACCENT_PURPLE,
+            "ML-KEM estabelece o segredo; AES-GCM cifra e autentica.",
+        )
+
+    def _draw_stand_run_80(self, surface, body, controller, _t):
+        self._draw_stand_centered(
+            surface,
+            FONT_TITLE,
+            "2. O MESMO ML-KEM EM UM PERFIL EXPERIMENTAL DE 80 MHz",
+            C_TEXT_PRIMARY,
+            body.centerx,
+            body.y + 8,
+            body.width - 80,
+        )
+        gap = 22
+        card_w = (body.width - gap - 40) // 2
+        card_y = body.y + 62
+        card_h = body.height - 126
+        pqc_240 = controller.measurements.get("PQC_240")
+        pqc_80 = controller.measurements.get("PQC_80")
+        self._draw_stand_measurement_card(
+            surface,
+            pygame.Rect(body.x + 20, card_y, card_w, card_h),
+            "PQC EM 240 MHz",
+            pqc_240,
+            C_ACCENT_CYAN,
+            "Baseline integral da ESP32.",
+        )
+        self._draw_stand_measurement_card(
+            surface,
+            pygame.Rect(body.x + 20 + card_w + gap, card_y, card_w, card_h),
+            "PQC EM 80 MHz",
+            pqc_80,
+            C_ACCENT_PURPLE,
+            "Perfil OBC-1U-LIMITED do experimento.",
+        )
+        if pqc_240 is not None and pqc_80 is not None and pqc_240.elapsed_us:
+            ratio = pqc_80.elapsed_us / pqc_240.elapsed_us
+            note = f"Resultado desta execução: 80 MHz levou {ratio:.1f}× o tempo de 240 MHz. Não é medição de energia."
+        else:
+            note = "Aguardando a placa confirmar o perfil e devolver a medição real."
+        self._draw_stand_centered(surface, FONT_LABEL, note, C_TEXT_DIM, body.centerx, body.bottom - 34, body.width - 80)
+
+    def _draw_stand_select_bit(self, surface, body, controller, _t):
+        self._draw_stand_centered(
+            surface,
+            FONT_TITLE,
+            "3. GIRE O POTENCIÔMETRO VN/A39 PARA ESCOLHER UM BIT",
+            C_TEXT_PRIMARY,
+            body.centerx,
+            body.y + 8,
+            body.width - 80,
+        )
+        selection = controller.selection
+        payload = controller.config.payload_bytes
+        selected_index = selection.byte_index if selection is not None else None
+        cells_per_row = min(len(payload), 21)
+        cell_gap = 5
+        cell_w = min(42, (body.width - 100 - (cells_per_row - 1) * cell_gap) // cells_per_row)
+        rows = math.ceil(len(payload) / cells_per_row)
+        grid_w = cells_per_row * cell_w + (cells_per_row - 1) * cell_gap
+        grid_x = body.centerx - grid_w // 2
+        grid_y = body.y + 72
+        for index, byte in enumerate(payload):
+            row, col = divmod(index, cells_per_row)
+            cell = pygame.Rect(grid_x + col * (cell_w + cell_gap), grid_y + row * 48, cell_w, 39)
+            active = index == selected_index
+            color = C_ACCENT_ORANGE if active else C_PANEL_BORDER
+            pygame.draw.rect(surface, (42, 26, 12) if active else (9, 17, 33), cell, border_radius=4)
+            pygame.draw.rect(surface, color, cell, width=2 if active else 1, border_radius=4)
+            value = FONT_LABEL.render(f"{byte:02X}", True, color if active else C_TEXT_PRIMARY)
+            surface.blit(value, (cell.centerx - value.get_width() // 2, cell.y + 6))
+            number = FONT_LABEL.render(str(index), True, C_TEXT_DIM)
+            surface.blit(number, (cell.centerx - number.get_width() // 2, cell.y + 22))
+
+        gauge_y = grid_y + rows * 48 + 38
+        gauge = pygame.Rect(body.x + 110, gauge_y, body.width - 220, 14)
+        pygame.draw.rect(surface, (12, 24, 43), gauge, border_radius=7)
+        pygame.draw.rect(surface, C_PANEL_BORDER, gauge, width=1, border_radius=7)
+        if selection is not None:
+            config = controller.config
+            ratio = (selection.pot_value - config.pot_minimum) / max(1, config.pot_maximum - config.pot_minimum)
+            marker_x = int(gauge.x + max(0.0, min(1.0, ratio)) * gauge.width)
+            pygame.draw.circle(surface, C_ACCENT_ORANGE, (marker_x, gauge.centery), 11)
+            before = payload[selection.byte_index]
+            selected_bit = int(math.log2(selection.bit_mask))
+            detail = (
+                f"POT {selection.pot_value}  •  BYTE {selection.byte_index} = 0x{before:02X} "
+                f"•  BIT {selected_bit}  •  MÁSCARA 0x{selection.bit_mask:02X}"
+            )
+            binary = f"{before:08b}  →  {before ^ selection.bit_mask:08b}"
+        else:
+            detail = "LENDO O POTENCIÔMETRO DA WISDOM..."
+            binary = "--------  →  --------"
+        self._draw_stand_centered(surface, FONT_BODY, detail, C_ACCENT_ORANGE, body.centerx, gauge.bottom + 25, body.width - 90)
+        self._draw_stand_centered(surface, FONT_LARGE, binary, C_TEXT_PRIMARY, body.centerx, gauge.bottom + 62, body.width - 100)
+        self._draw_stand_centered(
+            surface,
+            FONT_HEADER,
+            "PRESSIONE D27 PARA FIXAR ESTE BIT E INJETAR A FALHA",
+            C_ACCENT_GREEN,
+            body.centerx,
+            body.bottom - 42,
+            body.width - 80,
+        )
+
+    def _draw_stand_fault_card(self, surface, rect, title, measurement, accent, explanation):
+        self._draw_stand_card_shell(surface, rect, accent)
+        title_surface = FONT_HEADER.render(title, True, accent)
+        surface.blit(title_surface, (rect.x + 16, rect.y + 11))
+        if measurement is None:
+            waiting = FONT_BODY.render("EXECUTANDO A MESMA FALHA...", True, C_TEXT_PRIMARY)
+            surface.blit(waiting, (rect.centerx - waiting.get_width() // 2, rect.centery - 10))
+            return
+        before = f"{measurement.before_byte:08b}"
+        after = f"{measurement.after_byte:08b}"
+        binary = FONT_LARGE.render(f"{before}  →  {after}", True, C_TEXT_PRIMARY)
+        surface.blit(binary, (rect.centerx - binary.get_width() // 2, rect.y + 78))
+        detail = f"byte {measurement.byte_index}  •  máscara 0x{measurement.bit_mask:02X}"
+        detail_surface = FONT_LABEL.render(detail, True, C_TEXT_DIM)
+        surface.blit(detail_surface, (rect.centerx - detail_surface.get_width() // 2, rect.y + 130))
+        result_color = C_ACCENT_RED if measurement.result == "SILENT" else C_ACCENT_GREEN
+        result_text = "CORRUPÇÃO SILENCIOSA" if measurement.result == "SILENT" else "FALHA DETECTADA"
+        result = FONT_HEADER.render(result_text, True, result_color)
+        surface.blit(result, (rect.centerx - result.get_width() // 2, rect.y + 164))
+        self._draw_wrapped_text(surface, FONT_SMALL, explanation, C_TEXT_PRIMARY, rect.x + 18, rect.y + 208, rect.width - 36, line_spacing=19, max_lines=3)
+        crc_line = f"CRC antes {measurement.crc_before:08X}  •  depois {measurement.crc_after:08X}"
+        crc_surface = self._render_clipped(FONT_LABEL, crc_line, C_TEXT_DIM, rect.width - 36)
+        surface.blit(crc_surface, (rect.centerx - crc_surface.get_width() // 2, rect.bottom - 28))
+
+    def _draw_stand_fault_none(self, surface, body, controller, _t):
+        self._draw_stand_centered(
+            surface,
+            FONT_TITLE,
+            "4. PRIMEIRO ENSAIO: PAYLOAD SEM GUARDIÃO",
+            C_TEXT_PRIMARY,
+            body.centerx,
+            body.y + 8,
+            body.width - 80,
+        )
+        card = pygame.Rect(body.x + 150, body.y + 62, body.width - 300, body.height - 98)
+        self._draw_stand_fault_card(
+            surface,
+            card,
+            "FAULT NONE",
+            controller.fault_results.get("NONE"),
+            C_ACCENT_RED,
+            "O byte mudou e nenhuma referência de integridade foi comparada. O harness classificou o resultado como SILENT.",
+        )
+
+    def _draw_stand_fault_crc(self, surface, body, controller, _t):
+        self._draw_stand_centered(
+            surface,
+            FONT_TITLE,
+            "5. REPETINDO EXATAMENTE O MESMO BIT FLIP COM CRC32",
+            C_TEXT_PRIMARY,
+            body.centerx,
+            body.y + 8,
+            body.width - 80,
+        )
+        gap = 22
+        card_w = (body.width - gap - 40) // 2
+        card_y = body.y + 62
+        card_h = body.height - 98
+        self._draw_stand_fault_card(
+            surface,
+            pygame.Rect(body.x + 20, card_y, card_w, card_h),
+            "SEM GUARDIÃO",
+            controller.fault_results.get("NONE"),
+            C_ACCENT_RED,
+            "A corrupção passou silenciosamente no ensaio localizado de payload.",
+        )
+        self._draw_stand_fault_card(
+            surface,
+            pygame.Rect(body.x + 20 + card_w + gap, card_y, card_w, card_h),
+            "COM CRC32",
+            controller.fault_results.get("CRC32"),
+            C_ACCENT_GREEN,
+            "O CRC32 de referência divergiu após a mutação e tornou a corrupção acidental observável.",
+        )
+
+    def _draw_stand_summary(self, surface, body, controller, _t):
+        self._draw_stand_centered(
+            surface,
+            FONT_LARGE,
+            "MISSÃO CONCLUÍDA",
+            C_ACCENT_GREEN,
+            body.centerx,
+            body.y + 6,
+            body.width - 80,
+        )
+        conclusions = (
+            ("ML-KEM-512", "Estabelece o segredo compartilhado pós-quântico.", C_ACCENT_PURPLE),
+            ("AES-128-GCM", "Cifra e autentica a mensagem enviada.", C_ACCENT_CYAN),
+            ("CRC32", "Detecta corrupção acidental na região coberta; não impede atacante.", C_ACCENT_GREEN),
+        )
+        gap = 16
+        card_w = (body.width - 80 - gap * 2) // 3
+        card_y = body.y + 72
+        for index, (title, explanation, color) in enumerate(conclusions):
+            card = pygame.Rect(body.x + 40 + index * (card_w + gap), card_y, card_w, 145)
+            self._draw_stand_card_shell(surface, card, color)
+            title_surface = FONT_HEADER.render(title, True, color)
+            surface.blit(title_surface, (card.centerx - title_surface.get_width() // 2, card.y + 13))
+            self._draw_wrapped_text(surface, FONT_SMALL, explanation, C_TEXT_PRIMARY, card.x + 16, card.y + 62, card.width - 32, line_spacing=20, max_lines=3)
+
+        classic = controller.measurements.get("CLASSIC_240")
+        pqc = controller.measurements.get("PQC_240")
+        pqc_80 = controller.measurements.get("PQC_80")
+        metric_y = card_y + 178
+        if classic and pqc and pqc_80 and classic.elapsed_us:
+            summary = (
+                f"Nesta execução: baseline { _format_elapsed(classic.elapsed_us) } / {classic.bytes_total} B  •  "
+                f"PQC 240 MHz { _format_elapsed(pqc.elapsed_us) } / {pqc.bytes_total} B  •  "
+                f"PQC 80 MHz { _format_elapsed(pqc_80.elapsed_us) }"
+            )
+        else:
+            summary = "As conclusões numéricas só aparecem depois de respostas aceitas da placa ou da fixture oficial rotulada."
+        self._draw_stand_centered(surface, FONT_BODY, summary, C_TEXT_PRIMARY, body.centerx, metric_y, body.width - 100)
+
+        prompt = "PRESSIONE D27 PARA RECOMEÇAR" if controller.mode == "hardware" else "PRESSIONE ESPAÇO PARA RECOMEÇAR"
+        self._draw_stand_centered(surface, FONT_HEADER, prompt, C_ACCENT_GREEN, body.centerx, body.bottom - 38, body.width - 80)
+
+    def _draw_stand_error(self, surface, body, controller, _t):
+        card = pygame.Rect(body.x + 130, body.y + 48, body.width - 260, body.height - 96)
+        self._draw_stand_card_shell(surface, card, C_ACCENT_RED, fill=(42, 12, 24))
+        title = FONT_LARGE.render("FLUXO INTERROMPIDO COM SEGURANÇA", True, C_ACCENT_RED)
+        surface.blit(title, (card.centerx - title.get_width() // 2, card.y + 40))
+        self._draw_stand_centered(
+            surface,
+            FONT_HEADER,
+            controller.error_message or "Resposta inválida ou conexão indisponível.",
+            C_TEXT_PRIMARY,
+            card.centerx,
+            card.y + 120,
+            card.width - 80,
+        )
+        self._draw_stand_centered(
+            surface,
+            FONT_BODY,
+            "Nenhum valor foi inventado. Verifique a Wisdom e pressione D27 ou R para voltar ao início.",
+            C_TEXT_DIM,
+            card.centerx,
+            card.bottom - 86,
+            card.width - 80,
+        )
+
+    def _draw_stand_diagnostic(self, surface, outer_rect, controller):
+        pending = controller.pending.command if controller.pending is not None else "--"
+        lines = (
+            f"ESTADO {controller.state.value} / {controller.substage}",
+            f"CONEXÃO {controller.connection_status}",
+            f"PENDENTE {pending}",
+            f"CICLOS {controller.completed_cycles}  REJEITADOS {controller.rejected_events}",
+        )
+        rect = pygame.Rect(outer_rect.right - 510, outer_rect.bottom - 122, 486, 92)
+        panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(panel, (0, 0, 0, 225), panel.get_rect(), border_radius=6)
+        pygame.draw.rect(panel, C_ACCENT_ORANGE, panel.get_rect(), width=1, border_radius=6)
+        surface.blit(panel, rect.topleft)
+        for index, line in enumerate(lines):
+            surface.blit(self._render_clipped(FONT_LABEL, line, C_ACCENT_ORANGE, rect.width - 20), (rect.x + 10, rect.y + 9 + index * 19))
 
     def _results_overlay_geometry(self):
         margin = max(18, int(min(WIDTH, HEIGHT) * 0.025))
@@ -6694,54 +7267,65 @@ class DashboardPanel:
         subtitle = FONT_SMALL.render(sub_text, True, C_TEXT_DIM)
         surface.blit(subtitle, (title_x + title.get_width() + 15, 14))
 
-        # Botoes centrais: resultados e retorno ao onboarding
-        btn_h = 26
-        results_w = 240 if WIDTH >= 1500 else 156
-        onboarding_w = 132 if WIDTH >= 1500 else 112
-        btn_gap = 8
-        group_w = results_w + btn_gap + onboarding_w
-        btn_x = (WIDTH - group_w) // 2
-        btn_y = (bar_h - btn_h) // 2
-        self.top_results_btn_rect = pygame.Rect(btn_x, btn_y, results_w, btn_h)
-        self.top_onboarding_btn_rect = pygame.Rect(self.top_results_btn_rect.right + btn_gap, btn_y, onboarding_w, btn_h)
+        if self.stand_mode:
+            self.top_results_btn_rect = None
+            self.top_onboarding_btn_rect = None
+            state_label = self.stand_controller.state.value.replace("_", " ")
+            guided = FONT_SMALL.render(f"APRESENTAÇÃO GUIADA  •  {state_label}", True, C_ACCENT_GREEN)
+            surface.blit(guided, ((WIDTH - guided.get_width()) // 2, 14))
+        else:
+            # Botoes centrais: resultados e retorno ao onboarding
+            btn_h = 26
+            results_w = 240 if WIDTH >= 1500 else 156
+            onboarding_w = 132 if WIDTH >= 1500 else 112
+            btn_gap = 8
+            group_w = results_w + btn_gap + onboarding_w
+            btn_x = (WIDTH - group_w) // 2
+            btn_y = (bar_h - btn_h) // 2
+            self.top_results_btn_rect = pygame.Rect(btn_x, btn_y, results_w, btn_h)
+            self.top_onboarding_btn_rect = pygame.Rect(self.top_results_btn_rect.right + btn_gap, btn_y, onboarding_w, btn_h)
 
-        try:
-            mouse_pos = pygame.mouse.get_pos()
-        except pygame.error:
-            mouse_pos = (-1, -1)
-        results_hovered = self.top_results_btn_rect.collidepoint(mouse_pos)
-        onboarding_hovered = self.top_onboarding_btn_rect.collidepoint(mouse_pos)
+            try:
+                mouse_pos = pygame.mouse.get_pos()
+            except pygame.error:
+                mouse_pos = (-1, -1)
+            results_hovered = self.top_results_btn_rect.collidepoint(mouse_pos)
+            onboarding_hovered = self.top_onboarding_btn_rect.collidepoint(mouse_pos)
 
-        fill_c = (28, 42, 82) if results_hovered else (8, 16, 34)
-        border_c = C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else (C_ACCENT_CYAN if results_hovered else C_PANEL_BORDER)
-        self._draw_hud_button_shell(surface, self.top_results_btn_rect, fill_c, border_c)
+            fill_c = (28, 42, 82) if results_hovered else (8, 16, 34)
+            border_c = C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else (C_ACCENT_CYAN if results_hovered else C_PANEL_BORDER)
+            self._draw_hud_button_shell(surface, self.top_results_btn_rect, fill_c, border_c)
 
-        btn_label = "RESULTADOS CONSOLIDADOS" if WIDTH >= 1500 else "RESULTADOS"
-        btn_txt = FONT_LABEL.render(btn_label, True, C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else C_TEXT_PRIMARY)
-        surface.blit(
-            btn_txt,
-            (
-                self.top_results_btn_rect.x + (self.top_results_btn_rect.width - btn_txt.get_width()) // 2,
-                btn_y + (btn_h - btn_txt.get_height()) // 2,
-            ),
-        )
+            btn_label = "RESULTADOS CONSOLIDADOS" if WIDTH >= 1500 else "RESULTADOS"
+            btn_txt = FONT_LABEL.render(btn_label, True, C_ACCENT_GREEN if getattr(self, "results_overlay_visible", False) else C_TEXT_PRIMARY)
+            surface.blit(
+                btn_txt,
+                (
+                    self.top_results_btn_rect.x + (self.top_results_btn_rect.width - btn_txt.get_width()) // 2,
+                    btn_y + (btn_h - btn_txt.get_height()) // 2,
+                ),
+            )
 
-        intro_fill = (34, 36, 74) if onboarding_hovered else (8, 16, 34)
-        intro_border = C_ACCENT_ORANGE if onboarding_hovered else C_PANEL_BORDER
-        self._draw_hud_button_shell(surface, self.top_onboarding_btn_rect, intro_fill, intro_border)
-        intro_label = "ONBOARDING" if WIDTH >= 1500 else "INTRO"
-        intro_txt = FONT_LABEL.render(intro_label, True, C_ACCENT_ORANGE if onboarding_hovered else C_TEXT_PRIMARY)
-        surface.blit(
-            intro_txt,
-            (
-                self.top_onboarding_btn_rect.x + (self.top_onboarding_btn_rect.width - intro_txt.get_width()) // 2,
-                btn_y + (btn_h - intro_txt.get_height()) // 2,
-            ),
-        )
+            intro_fill = (34, 36, 74) if onboarding_hovered else (8, 16, 34)
+            intro_border = C_ACCENT_ORANGE if onboarding_hovered else C_PANEL_BORDER
+            self._draw_hud_button_shell(surface, self.top_onboarding_btn_rect, intro_fill, intro_border)
+            intro_label = "ONBOARDING" if WIDTH >= 1500 else "INTRO"
+            intro_txt = FONT_LABEL.render(intro_label, True, C_ACCENT_ORANGE if onboarding_hovered else C_TEXT_PRIMARY)
+            surface.blit(
+                intro_txt,
+                (
+                    self.top_onboarding_btn_rect.x + (self.top_onboarding_btn_rect.width - intro_txt.get_width()) // 2,
+                    btn_y + (btn_h - intro_txt.get_height()) // 2,
+                ),
+            )
 
         # Lado direito: clock + link
         conn_pulse = int(180 + 75 * math.sin(t * 3))
-        if self.serial_client is None:
+        if self.stand_mode and self.stand_controller.mode == "simulated":
+            conn_color = (170, 70, conn_pulse)
+            conn_label = "FIXTURE OFFLINE"
+            conn_text_color = C_ACCENT_PURPLE
+        elif self.serial_client is None:
             conn_color = (0, 80, conn_pulse)
             conn_label = "MODO SIM"
             conn_text_color = C_ACCENT_CYAN
@@ -6868,7 +7452,9 @@ class DashboardPanel:
         surface.blit(bar_surf, (0, bar_y))
         self.live_payload_toggle_rect = None
 
-        if self.serial_client is None:
+        if self.stand_mode and self.stand_controller.mode == "simulated":
+            esp32_item = "SAT: FIXTURE OFFLINE"
+        elif self.serial_client is None:
             esp32_item = "SAT: SIMULADO"
         elif self.serial_connected:
             esp32_item = "SAT: CONECTADO"
@@ -7579,10 +8165,56 @@ class Onboarding:
         return True
 
 
+def render_dashboard_presentation_frame(controller, *, size=(1366, 768), now=0.0, diagnostic=False):
+    """Render one off-screen frame through the same dashboard layer used live."""
+    global WIDTH, HEIGHT
+
+    WIDTH, HEIGHT = int(size[0]), int(size[1])
+    frame = pygame.Surface((WIDTH, HEIGHT))
+    stars = StarField(180)
+    earth = Earth()
+    satellite = Satellite(earth)
+    nebula = Nebula()
+    dust = CosmicDust(28)
+    shooting_stars = ShootingStars()
+    panel = DashboardPanel(stand_controller=controller, stand_diagnostic=diagnostic)
+    # A non-None transport marker makes the persistent HUD follow the
+    # controller's proven connection state without opening a second serial
+    # consumer in evidence/tests.
+    panel.serial_client = object()
+    panel.serial_connected = bool(controller.connected)
+    panel.serial_status = controller.connection_status
+    panel.pqc_algorithm = (
+        "ML-KEM-512 (FIXTURE)" if controller.mode == "simulated" else "ML-KEM-512 (DISPONÍVEL)"
+    )
+    if controller.measurements:
+        latest = tuple(controller.measurements.values())[-1]
+        panel.hardware_state.update(latest.raw_response)
+
+    frame.fill(C_SPACE_BG)
+    nebula.draw(frame, now)
+    stars.draw(frame, now)
+    dust.draw(frame)
+    shooting_stars.draw(frame)
+    earth.draw(frame, now)
+    if controller.ready or controller.mode == "simulated":
+        satellite.draw(frame, now)
+    else:
+        panel.draw_satellite_lock(frame, now)
+    panel.draw(frame, now, satellite)
+    return frame
+
+
 # --- Loop Principal -----------------------------------------------------------
 def parse_args():
     parser = argparse.ArgumentParser(description="PQC-SAT Mission Control Dashboard")
-    parser.add_argument("--stand", action="store_true", help="inicia a experiência guiada do estande SBPC")
+    parser.add_argument(
+        "--stand",
+        "--presentation",
+        dest="stand",
+        action="store_true",
+        help="abre a apresentação guiada dentro do dashboard existente",
+    )
     parser.add_argument("--serial", action="store_true", help="conecta comandos do dashboard ao ESP32")
     parser.add_argument("--simulated", action="store_true", help="modo de desenvolvimento sem travar no hardware")
     parser.add_argument("--no-splash", action="store_true", help="pula a tela inicial curta")
@@ -7598,21 +8230,70 @@ def parse_args():
     return parser.parse_args()
 
 
+def build_stand_runtime(args, *, config=None):
+    """Create the guided controller around the dashboard's existing transport."""
+    from stand_demo import (
+        DEFAULT_CONFIG_PATH,
+        DEFAULT_FIXTURE_PATH,
+        DEFAULT_LOG_DIR as DEFAULT_STAND_LOG_DIR,
+        FixtureSerialClient,
+        StandConfig,
+        StandController,
+        StandSessionLogger,
+    )
+
+    if config is None:
+        config = StandConfig.load(args.stand_config or DEFAULT_CONFIG_PATH)
+    mode = "simulated" if args.simulated else "hardware"
+    fixture_source = ""
+    if mode == "simulated":
+        client = FixtureSerialClient(args.stand_fixture or DEFAULT_FIXTURE_PATH, config)
+        fixture_source = client.source_label
+    else:
+        client = DashboardSerialClient(
+            port=args.port,
+            baudrate=args.baud,
+            timeout=args.serial_timeout,
+        )
+    logger = StandSessionLogger(
+        args.stand_log_dir or DEFAULT_STAND_LOG_DIR,
+        mode=mode,
+        config=config,
+        fixture_source=fixture_source,
+    )
+    controller = StandController(config, client.send, mode=mode, logger=logger)
+    return config, client, controller, logger
+
+
 def main():
     args = parse_args()
+    stand_config = None
     if args.stand:
-        from stand_demo import run_stand
+        from stand_demo import DEFAULT_CONFIG_PATH, StandConfig
 
-        return run_stand(args, serial_client_factory=DashboardSerialClient)
-    init_display()
+        stand_config = StandConfig.load(args.stand_config or DEFAULT_CONFIG_PATH)
+
+    init_display(
+        windowed=bool(args.stand and args.windowed),
+        windowed_size=stand_config.windowed_size if stand_config is not None else (1366, 768),
+    )
     if not args.no_splash:
-        mode_label = "MODO SIMULADO" if args.simulated else "PROCURANDO BLACKBOARD WISDOM"
+        if args.stand:
+            mode_label = "APRESENTAÇÃO GUIADA — SIMULADA" if args.simulated else "APRESENTAÇÃO GUIADA — PROCURANDO WISDOM"
+        else:
+            mode_label = "MODO SIMULADO" if args.simulated else "PROCURANDO BLACKBOARD WISDOM"
         if not show_splash(mode_label):
             pygame.quit()
             return
 
-    serial_client = None
-    if args.serial or args.port or not args.simulated:
+    stand_controller = None
+    stand_logger = None
+    if args.stand:
+        stand_config, serial_client, stand_controller, stand_logger = build_stand_runtime(args, config=stand_config)
+        print(f"PQC-SAT presentation log: {stand_logger.path}")
+    else:
+        serial_client = None
+    if not args.stand and (args.serial or args.port or not args.simulated):
         serial_client = DashboardSerialClient(
             port=args.port,
             baudrate=args.baud,
@@ -7626,15 +8307,22 @@ def main():
     dust = CosmicDust(50)
     shooting_stars = ShootingStars()
 
-    if not args.no_splash:
+    if not args.stand and not args.no_splash:
         onboarding = Onboarding(stars, earth, satellite, nebula, dust, shooting_stars)
         if not onboarding.run(screen, clock):
             pygame.quit()
             return
 
-    dashboard = DashboardPanel(serial_client=serial_client)
+    dashboard = DashboardPanel(
+        serial_client=serial_client,
+        stand_controller=stand_controller,
+        stand_diagnostic=args.diagnostic,
+    )
+    if stand_logger is not None:
+        stand_logger.write("display_started", size=screen.get_size(), windowed=bool(args.windowed), renderer="dashboard-native")
     running = True
     t = 0.0
+    started_at = time.monotonic()
 
     try:
         while running:
@@ -7648,13 +8336,24 @@ def main():
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_q and (pygame.key.get_mods() & pygame.KMOD_CTRL):
                         running = False
+                    elif args.stand and event.key == pygame.K_ESCAPE:
+                        args.windowed = not args.windowed
+                        init_display(windowed=args.windowed, windowed_size=stand_config.windowed_size)
+                        stars = StarField(350)
+                        earth = Earth()
+                        satellite = Satellite(earth)
+                        nebula = Nebula()
+                        dust = CosmicDust(50)
+                        shooting_stars = ShootingStars()
+                        if stand_logger is not None:
+                            stand_logger.write("display_mode", windowed=args.windowed, size=screen.get_size())
                     else:
                         dashboard.handle_event(event)
                 elif event.type != pygame.KEYDOWN:
                     dashboard.handle_event(event)
 
             # -- Atualizacao --
-            if dashboard.request_onboarding:
+            if not args.stand and dashboard.request_onboarding:
                 dashboard.request_onboarding = False
                 onboarding = Onboarding(stars, earth, satellite, nebula, dust, shooting_stars)
                 if not onboarding.run(screen, clock):
@@ -7690,14 +8389,27 @@ def main():
             dashboard.draw(screen, t, satellite)
 
             pygame.display.flip()
+            if args.max_runtime_seconds is not None and time.monotonic() - started_at >= args.max_runtime_seconds:
+                running = False
     finally:
         exc_type, _exc_value, _exc_tb = sys.exc_info()
         try:
-            dashboard.close()
+            dashboard.close(auto_save=not args.stand)
         except Exception as cleanup_exc:
             if exc_type is None:
                 raise
             print(f"cleanup failed: {cleanup_exc}", file=sys.stderr)
+        finally:
+            if stand_logger is not None:
+                try:
+                    stand_logger.write(
+                        "application_stopped",
+                        state=stand_controller.state.value,
+                        completed_cycles=stand_controller.completed_cycles,
+                        renderer="dashboard-native",
+                    )
+                finally:
+                    stand_logger.close()
         pygame.quit()
 
 

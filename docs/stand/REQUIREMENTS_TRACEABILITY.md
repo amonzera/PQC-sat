@@ -1,6 +1,6 @@
 # Rastreabilidade de requisitos do handover SBPC
 
-Data da auditoria: 2026-07-20
+Data da auditoria: 2026-07-21
 
 Este documento confronta os critérios do
 `HANDOVER_ESTANDE_SBPC_PQC_SAT.md` com evidência verificável da branch
@@ -16,7 +16,7 @@ Este documento confronta os critérios do
 | 3 | AES-128/256 resolvido pelo código | PASS | firmware usa chave de 16 B e retorna `cipher=AES-128-GCM`; smoke real aceito pelo parser | nenhum |
 | 4 | baseline nomeado corretamente | PASS | UI usa `BASELINE AES-GCM`; `SCIENTIFIC_ACCURACY.md` proíbe chamá-lo de ECDH | nenhum |
 | 5 | localização da falha CRC descrita corretamente | PASS | tela `FAULT_NONE`, tela `FAULT_CRC` e documentação identificam harness de payload separado de AES-GCM | nenhum |
-| 6 | modo estande em tela cheia | PARCIAL | `pygame.FULLSCREEN`, alternância por `Esc` e renderização 1366×768/1920×1080 testados | ensaiar tela cheia no monitor definitivo |
+| 6 | modo estande em tela cheia | PARCIAL | apresentação agora é overlay nativo do `DashboardPanel`; fullscreen, `Esc` e renderização 1366×768/1920×1080 testados | ensaiar tela cheia no monitor definitivo |
 | 7 | fluxo de até 100 segundos | PASS | ciclo real com configuração de produção: 51,55 s até `SUMMARY`; teste automatizado limita o pior caso visual a 100 s | nenhum |
 | 8 | botão físico inicia e avança | FAIL | parser e firmware estão testados; duas janelas, de 30 s e 45 s, não observaram `BUTTON_PING` | repetir com acionamento físico observado |
 | 9 | potenciômetro seleciona bit | PASS | smoke real: A39=2884 → byte 28, máscara `0x40`, bit global 230 | resistência física pendente, sem invalidar o ciclo curto |
@@ -39,7 +39,7 @@ release candidate e não deve receber tag final.
 
 | Gate | Estado | Evidência | Limitação |
 |---|---|---|---|
-| parser, estados, timeout e ordem | PASS | 123 testes Python | nenhum conhecido nos casos cobertos |
+| parser, estados, timeout e ordem | PASS | 124 testes Python, incluindo encaminhamento de `BUTTON_PING` pelo dashboard | nenhum conhecido nos casos cobertos |
 | 20 repetições coerentes do bit flip | PASS | 20/20 ciclos reais administrativos, zero divergências nos pares `NONE`/`CRC32` | ações físicas continuam no gate longo separado |
 | recuperação USB | PARCIAL | cliente reconecta, handshake antigo é invalidado e há teste lógico | dez recuperações físicas pendentes |
 | resistência de 3 h | FAIL | não executada | operador deve executar 2 h de atração + 1 h de ciclos |
@@ -51,11 +51,11 @@ release candidate e não deve receber tag final.
 
 | Entregável | Estado | Caminho ou evidência |
 |---|---|---|
-| código, testes, fixture, scripts e configuração | PASS | `stand_demo.py`, `tests/test_stand_demo.py`, `fixtures/stand/`, `scripts/`, `config/stand_demo.json` |
+| código, testes, fixture, scripts e configuração | PASS | UI em `dashboard.py`; controlador em `stand_demo.py`; `tests/test_stand_demo.py`, `fixtures/stand/`, `scripts/`, `config/stand_demo.json` |
 | auditoria, especificação, runbook, precisão, validação e changelog | PASS | `docs/stand/` |
 | screenshot de cada estado | PASS | `docs/stand/evidence/states/` |
 | log de ciclo completo em hardware | PASS | `docs/stand/evidence/hardware_production_timing_cycle.jsonl` |
-| resultado dos testes automatizados | PASS | `docs/stand/evidence/software_validation.json`: 123 testes e demais comandos obrigatórios |
+| resultado dos testes automatizados | PASS | `docs/stand/evidence/software_validation.json`: 124 testes e demais comandos obrigatórios |
 | vídeo de backup | PASS | `docs/stand/evidence/stand_backup_simulated.mp4` |
 | vídeo do fluxo completo em hardware | FAIL | não capturado | filmar o ensaio com botão físico |
 | resultado dos 30 ciclos | FAIL | não produzido | executar validador sobre a campanha longa |

@@ -1,5 +1,19 @@
 # Changelog do modo estande SBPC
 
+## 2026-07-21 — apresentação integrada ao dashboard
+
+- corrigida a arquitetura visual: `dashboard.py --presentation` e o alias
+  `--stand` agora permanecem no loop, cenário e `DashboardPanel` originais;
+- substituído o desvio de produção para o shell visual separado por um overlay
+  nativo com nove estados, progresso, instruções físicas, medições e erro seguro;
+- preservados `StandController`, parsers, fixture, logs e invariantes seriais já
+  validados, sem duplicar o protocolo nem mover criptografia para o notebook;
+- eventos `BUTTON_PING` agora são encaminhados pelo próprio `DashboardPanel`
+  para a apresentação guiada, mantendo também o efeito visual do dashboard;
+- capturas e smoke de renderização passaram a usar a superfície integrada;
+- adicionado teste de integração dashboard–botão físico; suíte passa com 124
+  testes.
+
 ## 2026-07-20 — release candidate de software
 
 - preservada a versão do seminário na branch original e criado o trabalho em

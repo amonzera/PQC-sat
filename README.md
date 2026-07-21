@@ -34,7 +34,8 @@ O repositório contém hoje:
   interpretar os resultados e responder às perguntas da banca;
 - uma proposta acadêmica em DOCX;
 - um roadmap consolidado como histórico final das etapas implementadas;
-- modo estande SBPC `--stand`, com fluxo guiado por botão/potenciômetro,
+- apresentação interativa SBPC `--presentation` (alias `--stand`) dentro do
+  dashboard, com fluxo guiado por botão/potenciômetro,
   comparação 240/80 MHz, mesma falha NONE/CRC32, logging JSONL e fallback
   offline explicitamente rotulado.
 
@@ -137,7 +138,9 @@ Use `Ctrl+Q` para encerrar.
 
 ### Modo estande SBPC
 
-Com a Wisdom conectada, a forma recomendada de abrir a experiência guiada é:
+A experiência guiada é uma camada nativa do dashboard existente: mantém a
+Terra, o satélite, o HUD, a barra de conexão e o mesmo `DashboardSerialClient`.
+Não abre um segundo aplicativo visual. Com a Wisdom conectada, use:
 
 ```bash
 ./scripts/run_stand.sh --port /dev/ttyUSB0 --restart-on-crash
@@ -146,8 +149,11 @@ Com a Wisdom conectada, a forma recomendada de abrir a experiência guiada é:
 O mesmo entrypoint pode ser chamado diretamente:
 
 ```bash
-python3 dashboard.py --stand --port /dev/ttyUSB0
+python3 dashboard.py --presentation --port /dev/ttyUSB0
 ```
+
+`--stand` permanece como alias operacional de `--presentation` para os scripts
+do estande.
 
 O modo estande exige handshake antes de iniciar, usa o mesmo payload em
 `CLASSIC`/`PQC`/240/80, lê `ANALOG POT`, repete byte e máscara nos dois

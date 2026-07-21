@@ -2,10 +2,12 @@ import json
 from dataclasses import asdict, replace
 from pathlib import Path
 import tempfile
+import time
 import unittest
 
 import pygame
 
+import dashboard
 from stand_demo import (
     AnimationModel,
     DEFAULT_CONFIG_PATH,
@@ -18,7 +20,6 @@ from stand_demo import (
     StandConfigError,
     StandController,
     StandProtocolError,
-    StandRenderer,
     StandSessionLogger,
     fault_selection_from_pot,
     flip_selected_bit,
@@ -385,19 +386,41 @@ class StandLoggingAndRenderingTests(unittest.TestCase):
             self.assertEqual(records[1]["command"], "MISSION PQC")
             self.assertEqual(records[-1]["event"], "session_end")
 
-    def test_every_state_renders_at_required_resolutions(self):
+    def test_every_state_renders_inside_dashboard_at_required_resolutions(self):
         flow = FastStandFlow()
         controller = flow.complete()
-        renderer = StandRenderer()
         for state in DemoState:
             controller.state = state
             if state == DemoState.ERROR:
                 controller.error_message = "timeout de teste"
-            frame = renderer.render(controller, now=1.0, diagnostic=True)
-            self.assertEqual(frame.get_size(), (1366, 768))
             for resolution in ((1366, 768), (1920, 1080)):
-                scaled = pygame.transform.smoothscale(frame, resolution)
-                self.assertEqual(scaled.get_size(), resolution)
+                frame = dashboard.render_dashboard_presentation_frame(
+                    controller,
+                    size=resolution,
+                    now=1.0,
+                    diagnostic=True,
+                )
+                self.assertEqual(frame.get_size(), resolution)
+
+    def test_dashboard_forwards_physical_button_to_guided_controller(self):
+        config = replace(StandConfig.load(DEFAULT_CONFIG_PATH), button_debounce_seconds=0.01)
+        client = FixtureSerialClient(DEFAULT_FIXTURE_PATH, config, latency_seconds=0)
+        controller = StandController(config, client.send, mode="simulated", now=time.monotonic())
+        panel = dashboard.DashboardPanel(client, stand_controller=controller)
+        try:
+            panel.update(0.01)
+            self.assertTrue(controller.ready)
+            client._scheduled.append(
+                (
+                    time.monotonic(),
+                    ("event", {"name": "BUTTON_PING", "payload": {"source": "D27"}}),
+                )
+            )
+            panel.update(0.01)
+            self.assertEqual(controller.state, DemoState.INTRO)
+            self.assertEqual(panel.ping_effect_count, 1)
+        finally:
+            panel.close(auto_save=False)
 
 
 class StandAcceptanceValidatorTests(unittest.TestCase):

@@ -15,18 +15,24 @@ e repete a mesma falha com e sem CRC32.
 
 ## Arquitetura
 
-`dashboard.py --stand` delega a experiência para `stand_demo.py`. O modo
-estande reutiliza `DashboardSerialClient`, que por sua vez reutiliza
+`dashboard.py --presentation` (ou o alias `--stand`) executa a experiência no
+mesmo loop, cenário e `DashboardPanel` do dashboard original. `stand_demo.py`
+mantém somente o modelo controlado da missão, os parsers tipados, a fixture e
+o logger; a superfície de produção é renderizada pelo próprio `dashboard.py`.
+O modo reutiliza `DashboardSerialClient`, que por sua vez reutiliza
 `tools/serial_bridge.py` e `tools/serial_protocol.py`. Não existe segundo
 parser serial nem implementação criptográfica no notebook.
 
 ```text
 botão/potenciômetro ─┐
                      v
-Wisdom <─ USB ─> DashboardSerialClient ─> StandController ─> StandRenderer
+Wisdom <─ USB ─> DashboardSerialClient ─> StandController
                      |                       |
                      |                       └─ JSONL datado
-                     └─ timeout/reconexão
+                     v
+         DashboardPanel + cenário Terra/satélite
+                     |
+                     └─ apresentação guiada nativa
 ```
 
 O núcleo criptográfico permanece no firmware. O controlador só avança quando
