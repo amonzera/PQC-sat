@@ -12,12 +12,20 @@ from pqc_sat.infrastructure.wisdom import (
 from tools.serial_bridge import PortInfo, SerialBridgeError
 
 
-def hello_fields(*, game="STAGED_V1", node="PQC-SAT-WISDOM"):
+def hello_fields(
+    *,
+    game="STAGED_V1",
+    kex="FAIR_V1",
+    session_bench="FAIR_SESSION_V1",
+    node="PQC-SAT-WISDOM",
+):
     return (
         f"node={node}",
         "board=BlackBoard-Wisdom",
         "proto=V1",
         f"game={game}",
+        f"kex={kex}",
+        f"session_bench={session_bench}",
         "uptime_ms=1234",
     )
 
@@ -62,6 +70,8 @@ class WisdomDiscoveryTests(unittest.TestCase):
             baudrate=115200,
             timeout=1.25,
             require_staged_game=True,
+            require_fair_kex=True,
+            require_session_bench=True,
         )
 
     def test_candidate_list_does_not_depend_on_cp210_metadata(self):
@@ -98,6 +108,7 @@ class WisdomDiscoveryTests(unittest.TestCase):
             "/dev/ttyUSB0",
             bridge_factory=FakeBridge,
             require_staged_game=False,
+            require_fair_kex=False,
         )
 
         self.assertEqual(device.port, "/dev/ttyUSB0")
@@ -135,6 +146,15 @@ class WisdomDiscoveryTests(unittest.TestCase):
         payload["uptime_ms"] = "invalid"
         with self.assertRaisesRegex(SerialBridgeError, "uptime_ms"):
             validate_wisdom_handshake(payload)
+
+    def test_production_handshake_requires_session_benchmark_capability(self):
+        payload = dict(
+            field.split("=", 1)
+            for field in hello_fields(session_bench="")
+        )
+
+        with self.assertRaisesRegex(WisdomFirmwareError, "FAIR_SESSION_V1"):
+            validate_wisdom_handshake(payload, require_session_bench=True)
 
 
 if __name__ == "__main__":

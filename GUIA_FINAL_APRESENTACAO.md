@@ -6,10 +6,18 @@ o documento separado de algoritmos. O objetivo é permitir que um aluno leia do
 começo ao fim, compreenda o projeto com profundidade, ensaie a demonstração e
 responda perguntas sem superestimar o que foi implementado.
 
-Estado documental: 2026-07-21. Os resultados oficiais continuam sendo os da
-bateria de 2026-07-02. O jogo `STAGED_V1` está validado em software, mas o
-firmware desta revisão ainda precisa ser gravado e validado fisicamente; não o
-apresente como concluído antes dos gates de `docs/stand/FINAL_VALIDATION.md`.
+Estado documental: 2026-07-23. O jogo público agora compara ECDH P-256 e
+ML-KEM-512 sob `KEX_FAIR_V1`, usando o mesmo wolfCrypt, HKDF-SHA256 e
+AES-128-GCM. O firmware desta revisão ainda precisa ser gravado e validado
+fisicamente; não o apresente como concluído antes dos gates de
+`docs/stand/FINAL_VALIDATION.md`.
+
+> Aviso de transição científica: os números da bateria de 2026-07-02 medem o
+> legado `CLASSIC` (chave AES local) versus `PQC` (ML-KEM). Eles permanecem
+> úteis como histórico de engenharia, mas não são resultados ECDH versus
+> ML-KEM. Até a bateria `tools/kex_metrics_battery.py` produzir um JSON
+> `pqc-sat-kex-fair-metrics-v2` aceito, não use as razões 23,2x, 39,1x ou 12,1x
+> como conclusão da nova pesquisa.
 
 ## 1. Como estudar este documento
 
@@ -22,8 +30,8 @@ Faça três passagens:
 Se houver pouco tempo, leia nesta ordem:
 
 1. seção 2, resumo de um minuto;
-2. seção 8, os três cenários;
-3. seção 11, resultados oficiais;
+2. seção 2, o contrato ECDH/ML-KEM;
+3. `docs/METRICAS_CONSOLIDADAS.md`, protocolo da nova coleta;
 4. seção 17, roteiro de 20 minutos;
 5. seção 17.5, roteiro externo do jogo por fases;
 6. seção 18, perguntas difíceis;
@@ -36,32 +44,33 @@ Wisdom com ESP32. A placa representa um computador de bordo, ou OBC,
 educacional inspirado em CubeSats. Ela não é um CubeSat real nem equipamento
 certificado para voo.
 
-A mesma mensagem é processada em três cenários:
+A mesma mensagem é processada em dois caminhos de estabelecimento, cada um
+com guardião `NONE` ou `CRC32`:
 
-| Cenário | Estabelecimento de chave | Proteção da mensagem | Guardião adicional |
-|---|---|---|---|
-| `CLASSIC` | chave AES efêmera gerada localmente | AES-128-GCM | nenhum |
-| `PQC` | ML-KEM-512 | AES-128-GCM | nenhum |
-| `PQC_CRC32` | ML-KEM-512 | AES-128-GCM | CRC32 no plaintext protegido |
+| Cenário | Estabelecimento de segredo | Componentes comuns |
+|---|---|---|
+| `ECDH` | ECDH P-256 efêmero | wolfCrypt RNG + HKDF-SHA256 + AES-128-GCM |
+| `MLKEM` | ML-KEM-512 efêmero | wolfCrypt RNG + HKDF-SHA256 + AES-128-GCM |
 
 O projeto responde a duas perguntas:
 
-1. Qual é o custo de introduzir estabelecimento de chave pós-quântico em um
-   hardware limitado?
+1. Quais custos de tempo, memória e comunicação são observados ao comparar
+   ECDH P-256 e ML-KEM-512 sob a mesma implementação e configuração?
 2. Como tornar visível uma corrupção acidental de um bit no payload?
 
-Na bateria oficial AES-GCM, em `BASELINE` a 240 MHz, `PQC` foi 23,2 vezes mais
-lento e 12,1 vezes maior em bytes que `CLASSIC`. Em 80 MHz, a razão temporal
-subiu para 39,1 vezes. Nos testes de payload, 200/200 falhas sem CRC32 foram
-silenciosas e 200/200 falhas com CRC32 foram detectadas.
+Ainda não existe bateria oficial para o novo contrato. O experimento registra
+setup do receptor, operação do iniciador, operação do receptor, HKDF,
+AES-GCM, heap e bytes públicos. A ordem ECDH/ML-KEM alterna por ciclo para
+reduzir deriva temporal. Os resultados só serão apresentados depois do flash,
+smoke e coleta controlada na Wisdom.
 
 Resposta curta recomendada:
 
-> O projeto mostra que ML-KEM-512 funciona em um ESP32, mas altera fortemente
-> o orçamento de tempo e comunicação. AES-GCM continua cifrando e autenticando
-> a mensagem; ML-KEM estabelece a chave. O CRC32 não é criptografia: ele é um
-> recurso didático para transformar corrupção acidental de payload em erro
-> observável.
+> Comparamos ECDH P-256 e ML-KEM-512 no mesmo wolfCrypt e fazemos os dois
+> segredos passarem pelo mesmo HKDF e AES-GCM. Assim medimos algoritmo mais
+> implementação, compilador, hardware e configuração, sem fingir que o
+> baseline AES local era ECDH. O CRC32 continua sendo um instrumento didático
+> de corrupção acidental, não autenticação.
 
 ## 3. Contexto do problema
 
@@ -132,14 +141,15 @@ medida. Tempo de CPU é indicador de custo computacional, não watts ou joules.
 
 ### 4.1 Pergunta principal
 
-> Qual é o custo observado de inserir ML-KEM-512 e CRC32 na entrega de uma
-> mensagem curta em uma Wisdom/ESP32 operando a 240 MHz e em um perfil
-> experimental limitado a 80 MHz?
+> Quais custos de tempo, memória e comunicação são observados ao estabelecer
+> uma sessão efêmera com ECDH P-256 ou ML-KEM-512, usando o mesmo wolfCrypt,
+> HKDF-SHA256 e AES-128-GCM, em uma Wisdom/ESP32 a 240 MHz e 80 MHz?
 
 ### 4.2 Hipóteses
 
-- **H1:** `PQC` terá maior tempo total que `CLASSIC`.
-- **H2:** `PQC` terá pacote maior por incluir ciphertext ML-KEM.
+- **H1:** `MLKEM` terá maior material público total que `ECDH`.
+- **H2:** os tempos de setup, iniciador e receptor diferirão entre os KEX; a
+  direção e a magnitude serão afirmadas somente após a coleta.
 - **H3:** limitar a CPU a 80 MHz aumentará o custo temporal, sem alterar os
   tamanhos do protocolo.
 - **H4:** CRC32 acrescentará 4 bytes e detectará todo single-bit flip dentro da
@@ -150,7 +160,7 @@ medida. Tempo de CPU é indicador de custo computacional, não watts ou joules.
 
 - integração funcional de ML-KEM-512 real no ESP32;
 - entrega de mensagem com AES-128-GCM;
-- custo relativo dos três cenários no hardware usado;
+- custo relativo de ECDH P-256 e ML-KEM-512 no hardware usado;
 - efeito do perfil de 80 MHz;
 - diferença entre corrupção silenciosa e erro detectado;
 - confirmação operacional de divergência de chave em ensaio de bancada.
@@ -556,7 +566,8 @@ ou uso da chave em um protocolo autenticado.
 ### 10.2 Variáveis observadas
 
 - `elapsed_us`: tempo total;
-- `keygen_us`, `encap_us`, `decap_us`: etapas ML-KEM;
+- `setup_us`, `initiator_us`, `responder_us`: papéis comparáveis dos dois KEX;
+- `keygen_us`, `encap_us`, `decap_us`: aliases didáticos e métricas do legado;
 - `rng_us`, `kdf_us`: aleatoriedade e derivação;
 - `encrypt_us`, `decrypt_us`: AES-GCM;
 - `crc_us`: custo de CRC;
@@ -570,7 +581,7 @@ ou uso da chave em um protocolo autenticado.
 A demonstração manual ensina. A bateria automatizada consolida resultados.
 Nunca use cliques ao vivo como substituto para a coleta estatística oficial.
 
-Fonte AES-GCM oficial atual:
+Fonte histórica AES-GCM do protocolo legado:
 
 ```text
 logs/20260702T044907Z_final_metrics_dev-ttyusb0.json
@@ -586,9 +597,14 @@ Resumo:
 400 testes FAULT
 ```
 
-## 11. Resultados oficiais e interpretação
+## 11. Resultados históricos do protocolo legado
 
-### 11.1 `MISSION` em 240 MHz
+As tabelas desta seção documentam `CLASSIC/PQC` antes de `KEX_FAIR_V1`. Elas
+podem sustentar regressão e histórico de engenharia, mas não a comparação
+ECDH/ML-KEM. Até a coleta FAIR, não há tabela numérica oficial para a pergunta
+de pesquisa atual.
+
+### 11.1 `MISSION` legado em 240 MHz
 
 | Métrica média | CLASSIC | PQC | PQC+CRC32 |
 |---|---:|---:|---:|
@@ -602,7 +618,7 @@ Resumo:
 | CRC | 0 | 0 | 32 us |
 | resultado | DELIVERED | DELIVERED | DELIVERED |
 
-### 11.2 `MISSION` em 80 MHz
+### 11.2 `MISSION` legado em 80 MHz
 
 | Métrica média | CLASSIC | PQC | PQC+CRC32 |
 |---|---:|---:|---:|
@@ -616,7 +632,7 @@ Resumo:
 | CRC | 0 | 0 | 53 us |
 | resultado | DELIVERED | DELIVERED | DELIVERED |
 
-### 11.3 Razões principais
+### 11.3 Razões históricas, proibidas como resultado FAIR
 
 | Comparação | 240 MHz | 80 MHz |
 |---|---:|---:|
@@ -714,11 +730,15 @@ estação. Cada parada mostra o que entra, o que acontece, o que sai e a evidên
 real. Voltar a mensagem só volta a explicação: não desfaz operação, não altera
 resultado e não bloqueia novamente a confirmação.
 
-Ordem lógica do caminho PQC:
+Ordens lógicas dos caminhos FAIR:
 
 ```text
-PAYLOAD -> CRC opcional -> KEYGEN -> ENCAP -> DECAP -> KDF -> AES-GCM
-        -> CRC DO QUADRO -> CANAL -> GCM -> CRC DA APLICAÇÃO -> RESULTADO
+ECDH:  CHAVE PÚBLICA DO RECEPTOR -> CHAVE/PONTO DO INICIADOR
+       -> SEGREDO NO RECEPTOR -> HKDF -> AES-GCM
+MLKEM: CHAVE PÚBLICA DO RECEPTOR -> ENCAP/CÁPSULA
+       -> DECAP/SEGREDO NO RECEPTOR -> HKDF -> AES-GCM
+AMBOS: CRC opcional -> CRC DO QUADRO -> CANAL
+       -> GCM -> CRC DA APLICAÇÃO -> RESULTADO
 ```
 
 ### 12.4 Encerramento
@@ -727,7 +747,7 @@ PAYLOAD -> CRC opcional -> KEYGEN -> ENCAP -> DECAP -> KDF -> AES-GCM
 detecção, custo e diagnóstico e oferece um contrafactual qualitativo. Não há
 nota ou ranking. A mensagem pode ser arrastada pela revisão completa de
 preparar, proteger, transmitir, verificar e eventual retransmissão. Os
-resultados oficiais da bateria continuam neste guia e em
+os resultados históricos e o estado da coleta FAIR continuam neste guia e em
 `docs/METRICAS_CONSOLIDADAS.md`; a partida pública não atualiza estatísticas.
 
 ### 12.5 Superfície técnica separada
@@ -817,11 +837,10 @@ entre dispositivos independentes.
 > decapsulamento. AES-GCM cifra e autentica. O CRC32 não protege contra
 > atacante; ele detecta o bit-flip controlado da demo.
 >
-> A bateria oficial mostrou 611 microssegundos e 69 bytes em CLASSIC contra
-> 14.152 microssegundos e 837 bytes em PQC a 240 MHz. Em 80 MHz, PQC chegou a
-> 40.197 microssegundos. As falhas sem CRC passaram silenciosamente e todas as
-> falhas com CRC foram detectadas. A conclusão é que PQC cabe na placa, mas
-> muda principalmente o orçamento de tempo e comunicação.
+> A coleta anterior mostrou que ML-KEM cabe na placa e que o custo depende
+> fortemente do perfil, mas o baseline era uma chave AES local, não ECDH. Por
+> isso, os números antigos ficam como histórico. A conclusão quantitativa nova
+> só será formulada depois da bateria pareada ECDH/ML-KEM no wolfCrypt.
 
 ## 17. Roteiro de apresentação de 20 minutos
 
@@ -847,9 +866,9 @@ python3 dashboard.py --port /dev/ttyUSB0
 | 0–2 min | provocação e problema |
 | 2–5 min | ameaça quântica e arquitetura híbrida |
 | 5–7 min | três cenários e hipóteses |
-| 7–13 min | demo CLASSIC, PQC e PQC+CRC |
+| 7–13 min | demo ECDH, ML-KEM e CRC opcional |
 | 13–15 min | falha silenciosa versus detectada |
-| 15–18 min | resultados oficiais |
+| 15–18 min | metodologia FAIR e resultados, somente se a coleta estiver aceita |
 | 18–20 min | limites, próximos passos e perguntas |
 
 ### 17.3 Abertura
@@ -863,10 +882,10 @@ Explique que a resposta será observada na placa, não apenas estimada.
 
 ### 17.4 Condução da interface única
 
-Faça uma partida de 2–3 minutos com o roteiro abaixo. Depois da partida, use os
-resultados oficiais deste documento para contextualizar custo: 23,2x no tempo
-e 12,1x nos bytes a 240 MHz na coleta controlada. Não trate uma partida pública
-como nova amostra estatística.
+Faça uma partida de 2–3 minutos com o roteiro abaixo. Depois da partida,
+explique os campos medidos e o desenho pareado. Enquanto a coleta FAIR estiver
+pendente, não anuncie razão de velocidade ou bytes entre ECDH e ML-KEM. Não
+trate uma partida pública como nova amostra estatística.
 
 Feche com:
 
@@ -888,13 +907,13 @@ e use a faixa verde ou peça um novo D27 em cada linha. Não antecipe o incident
 
 | Fase | Frase do apresentador | Pergunta ao visitante | Conceito teórico | Animação esperada | Resposta segura | Afirmação proibida |
 |---|---|---|---|---|---|---|
-| `ATTRACT` | “Vamos acompanhar uma mensagem real processada pela Wisdom.” | “Pronto para assumir a missão?” | busca automática; abertura por `INICIAR MISSÃO` ou D27 | Terra, CubeSat e chamada mínima; segue direto às escolhas | “Ainda não há resultado; o `HELLO` só confirmou a capacidade.” | “A placa está online” sem `game=STAGED_V1` |
+| `ATTRACT` | “Vamos acompanhar uma mensagem real processada pela Wisdom.” | “Pronto para assumir a missão?” | busca automática; abertura por `INICIAR MISSÃO` ou D27 | Terra, CubeSat e chamada mínima; segue direto às escolhas | “Ainda não há resultado; o `HELLO` só confirmou a capacidade.” | “A placa está pronta” sem `game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` |
 | `SELECT_MISSION` | “Escolha qual consequência você quer proteger.” | “Qual mensagem tolera menos erro?” | payload, prioridade e prazo | desenhos de telemetria, comando e configuração; o selecionado pulsa | “O prazo é contexto didático, não deadline de voo certificado.” | “A missão representa um satélite real em operação.” |
 | `SELECT_PROFILE` | “Agora escolha o ritmo de CPU do experimento.” | “80 MHz deve aumentar qual custo?” | perfil controlado e tempo de CPU | chips ilustrados mostram ritmos distintos, sem ícone de energia | “80 MHz é um perfil experimental; não medimos energia.” | “Todo CubeSat opera a 80 MHz” ou “economizamos energia.” |
-| `SELECT_KEY_MODE` | “Escolha como a chave AES será obtida.” | “ML-KEM cifra a mensagem ou estabelece um segredo?” | KEM, KDF e cifra simétrica | chave local e cápsula ML-KEM percorrem caminhos visuais distintos | “ML-KEM estabelece; AES-GCM cifra e autentica.” | “ML-KEM criptografa o payload” ou “CLASSIC é ECDH.” |
+| `SELECT_KEY_MODE` | “Escolha como o segredo será estabelecido.” | “ECDH e ML-KEM fazem qual parte da sessão?” | acordo clássico, KEM pós-quântico, KDF e cifra simétrica | pontos ECDH e chave/cápsula ML-KEM percorrem caminhos visuais distintos | “Os dois estabelecem segredo; HKDF deriva e AES-GCM protege a mensagem.” | “ML-KEM criptografa o payload” ou “ECDH usa chave AES pré-compartilhada.” |
 | `SELECT_GUARD` | “Decida se o plaintext leva um CRC da aplicação.” | “Um CRC válido prova autenticidade?” | checksum e região coberta | blocos do payload recebem ou não o bloco verde de +4 B | “CRC detecta corrupção acidental; não autentica.” | “CRC impede ataque” ou “CRC substitui GCM.” |
-| `PREPARE` | “A Wisdom está serializando exatamente a mensagem escolhida.” | “Onde o CRC entra quando ligado?” | representação em bytes e referência anterior à falha | bytes só surgem durante serialização; CRC muda de previsto para calculando e anexado; depois arraste a mensagem | “A animação está ampliada; o tempo numérico vem da resposta.” | “Esses segundos são o tempo real da placa.” |
-| `PROTECT` | “Agora o segredo é obtido e o AES-GCM protege o pacote.” | “Qual parte muda entre CLASSIC e PQC?” | KeyGen, Encaps, Decaps, KDF, nonce e tag | entrada, operação ativa e saída ainda apagada; depois arraste por cada subtiming | “Todas as opções usam AES-128-GCM; PQC muda o estabelecimento.” | “PQC substitui o AES” ou “a tag é um CRC.” |
+| `PREPARE` | “A Wisdom está serializando exatamente a mensagem escolhida.” | “Onde o CRC entra quando ligado?” | representação em bytes e referência anterior à falha | bytes só surgem durante serialização; CRC muda de previsto para calculando e anexado; depois arraste a mensagem | “A animação está ampliada; os números de recursos ficam reservados ao debrief.” | “Esses segundos são o tempo real da placa.” |
+| `PROTECT` | “Agora o segredo é obtido e o AES-GCM protege o pacote.” | “Qual parte muda entre ECDH e ML-KEM?” | setup, iniciador, receptor, HKDF, nonce e tag | pontos ECDH ou chave/cápsula ML-KEM; depois arraste por cada subtiming | “As duas opções usam o mesmo HKDF e AES-GCM; muda o estabelecimento.” | “PQC substitui o AES” ou “a tag é um CRC.” |
 | `TRANSMIT` | “Gire A39: ele escolhe o bit; a causa continua escondida.” | “Qual byte e máscara foram selecionados?” | vetor single-bit reproduzível e camada do incidente | a mensagem atravessa as estações; o bit aparece somente no ponto A39 e a revisão não revela a causa | “A falha é injetada por software e ainda não revela sua causa.” | “Observamos radiação real” ou “o potenciômetro mede radiação.” |
 | `VERIFY` | “Leia as três camadas na ordem: quadro, GCM e aplicação.” | “Qual foi a primeira evidência que falhou?” | integridade de transporte, autenticação e integridade pós-GCM | indicadores reais são revelados em ordem e podem ser revistos arrastando a mensagem | “O padrão sugere uma camada; não prova a causa física.” | “CRC distingue ataque de radiação.” |
 | `DIAGNOSE` | “Forme sua hipótese sem ver a resposta.” | “Canal, adulteração ou memória: qual combina com o padrão?” | inferência por evidências | hipótese apenas recebe destaque | “Você pode mudar a seleção até confirmar no verde ou D27.” | “A tela já identificou definitivamente a origem.” |
@@ -931,8 +950,9 @@ hardware acessível, mantendo explícita a ausência de qualificação espacial.
 **Por que não usar apenas AES?**  AES pressupõe que as pontas já compartilham
 uma chave. ML-KEM trata o estabelecimento dessa chave sob ameaça quântica.
 
-**Por que não usar ECDH?**  O escopo priorizou ML-KEM real. ECDH + AES-GCM é o
-próximo baseline para uma comparação assimétrica mais justa.
+**Por que usar ECDH?**  Ele fornece um baseline clássico assimétrico de acordo
+de chave. Compará-lo com ML-KEM no mesmo wolfCrypt reduz o viés de biblioteca
+que existia quando o baseline era apenas uma chave AES local.
 
 **Por que ML-KEM-512?**  É o conjunto mais leve da família e adequado à
 primeira integração embarcada. `512` não é tamanho da chave nem segurança em
@@ -976,8 +996,10 @@ são extensão futura necessária para comparar códigos de detecção.
 
 ### 18.4 Resultados
 
-**Qual é o número mais importante?**  Em 240 MHz, PQC foi 23,2x mais lento e
-12,1x maior que CLASSIC na bateria AES-GCM oficial.
+**Qual é o número mais importante?**  Ainda não existe um número FAIR oficial.
+O resultado principal, quando coletado, será a diferença pareada ML-KEM menos
+ECDH em tempo total, tempo online e bytes, sempre com o intervalo de confiança
+e a configuração declarada.
 
 **Por que PQC+CRC às vezes parece mais rápido que PQC?**  Variação natural. O
 subtempo de CRC é positivo; não há aceleração causada pelo checksum.
@@ -1020,9 +1042,10 @@ ser documentados em cada repetição.
 
 ### 18.6 Perguntas de banca mais críticas
 
-**A comparação CLASSIC/PQC é justa?**  É justa para medir o acréscimo de
-ML-KEM sobre um baseline simétrico definido. Não é comparação completa entre
-protocolos assimétricos equivalentes.
+**A comparação ECDH/ML-KEM é justa?**  Ela reduz um viés importante porque os
+dois KEX, o RNG, o HKDF e o AES-GCM usam o mesmo wolfCrypt, as mesmas flags e a
+mesma placa. Ainda assim, todo benchmark mede algoritmo + implementação +
+compilador + hardware + configuração; a conclusão deve citar esse contexto.
 
 **CRC dentro de AES-GCM é redundante?**  Como defesa criptográfica, sim. Como
 instrumento de diagnóstico e narrativa de corrupção acidental, ele mede uma
@@ -1035,8 +1058,10 @@ lógico, mas limita conclusões sobre rede, sincronização e interoperabilidade
 `cipher=AES-128-GCM`, sucesso AEAD e CRCs distintos de nonce, ciphertext e tag
 em 600 mensagens com plaintext fixo.
 
-**Como sabem que ML-KEM é real?**  O backend vendorizado executa os tamanhos e
-operações de ML-KEM-512, passou KAT e produziu tempos reais no hardware.
+**Como sabem que ML-KEM é real?**  O caminho FAIR chama as primitivas
+ML-KEM-512 do wolfCrypt e valida igualdade de segredo antes de usar AES-GCM.
+O KAT e os tempos já observados na placa pertencem ao backend legado; o caminho
+FAIR só poderá ser afirmado como validado depois do flash, smoke e bateria v2.
 
 **Biblioteca vendorizada é garantia de segurança?**  Não. Garante
 reprodutibilidade da revisão usada; auditoria e atualização continuam sendo
@@ -1044,20 +1069,24 @@ necessárias.
 
 ### 18.7 Implementação e termos da tela
 
-**Qual biblioteca ML-KEM foi usada?**  `mlkem-native` v1.1.0, revisão
-`d2cae2b`, vendorizada em `firmware/lib/mlkem_native` e configurada para
-ML-KEM-512.
+**Qual biblioteca ML-KEM foi usada?**  Na comparação FAIR atual, ECDH P-256 e
+ML-KEM-512 usam o mesmo wolfCrypt 5.9.2 em configuração portátil. A árvore
+local oficial está sob GPLv3 e não é versionada neste Git; uma distribuição
+comercial equivalente pode substituí-la sob licença própria. `mlkem-native` v1.1.0,
+revisão `d2cae2b`, permanece vendorizado somente para o protocolo legado e
+seus resultados históricos.
 
 **Por que não implementar ML-KEM do zero?**  Uma implementação própria
 aumentaria muito o risco criptográfico e desviaria o experimento para outro
 problema. A biblioteca vendorizada fixa a revisão e permite KAT e build
 reproduzíveis, embora não elimine a necessidade de auditoria.
 
-**O firmware gera um par ML-KEM por mensagem?**  Sim. `MISSION PQC` e
-`MISSION PQC_CRC32` incluem `KeyGen` em cada execução para tornar todo o custo
-visível. Um protocolo real poderia reutilizar ou provisionar material público
-segundo uma política de ciclo de vida, mudando o custo amortizado e exigindo
-proteção da chave privada.
+**O firmware gera um par por mensagem?**  `MISSION MLKEM` e `MISSION ECDH`
+medem uma sessão nova para uma mensagem. `SESSION_BENCH` estabelece uma sessão
+e processa 1, 100, 500 ou 1000 mensagens para medir o custo amortizado. No jogo,
+`GAME_PROTECT` estabelece a sessão da partida e `GAME_RETRY` cria material novo.
+Um protocolo real ainda precisaria definir ciclo de vida, rotação e proteção
+das chaves.
 
 **O baseline CLASSIC distribui a chave?**  Não. A chave efêmera é gerada e
 copiada entre os dois papéis lógicos dentro da placa. Por isso ele é referência
@@ -1162,13 +1191,14 @@ protótipo não mede rádio, perda de quadros, MTU, fragmentação, FEC, atraso 
 energia. Esses fatores podem tornar os 768 B do ciphertext KEM ainda mais
 relevantes.
 
-**Qual seria o próximo experimento mais forte?**  ECDH P-256 + AES-GCM como
-baseline assimétrico, duas placas, vários payloads, ordem aleatorizada, medição
-elétrica, falhas em rajada, anti-replay e repetição em múltiplas unidades.
+**Qual seria o próximo experimento mais forte?**  Duas placas representando
+pontas físicas distintas, vários payloads, ordem aleatorizada, pico de memória
+instrumentado por operação, medição elétrica, falhas em rajada, anti-replay e
+repetição em múltiplas unidades.
 
-**Qual é a conclusão se a heap ficou estável?**  RAM não foi o gargalo
-observado. Isso fortalece a conclusão específica de que tempo e comunicação
-dominaram; não elimina outras restrições de sistemas embarcados.
+**Qual é a conclusão se a heap ficar estável?**  Apenas que as leituras
+observadas não mostraram perda persistente ou novo mínimo global. Como o mínimo
+é histórico desde o boot, isso não prova igualdade de pico entre algoritmos.
 
 ### 18.10 Respostas de emergência em uma frase
 
@@ -1207,7 +1237,8 @@ opcional.
 ### 19.4 Ping físico não aparece
 
 No jogo por fases, D27 é um gate obrigatório: aborte a partida, confirme
-`HELLO game=STAGED_V1`, `DIGITAL BUTTON` e o evento com `pot`. Se não recuperar,
+`HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`,
+`DIGITAL BUTTON` e o evento com `pot`. Se não recuperar,
 interrompa a demonstração; não há fallback simulado e teclado não substitui o
 D27.
 
@@ -1239,12 +1270,15 @@ python3 tools/firmware_deploy.py --upload
 - projetor em 1920×1080 ou 1366×768;
 - fonte legível à distância;
 - Wisdom reconhecida;
-- firmware correto gravado e `HELLO game=STAGED_V1` confirmado;
+- firmware correto gravado e
+  `HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` confirmado;
+- `KEX_INFO` confirma wolfCrypt, HKDF-SHA256, AES-128-GCM e perfil portable;
 - perfil `BASELINE` para a demo principal;
 - três cartões de missão legíveis;
-- quatro combinações CLASSIC/PQC × NONE/CRC32 testadas;
+- quatro combinações ECDH/MLKEM × NONE/CRC32 testadas;
 - D27 físico e leitura A39 no `BUTTON_PING` testados;
-- standby liberado automaticamente somente por `HELLO STAGED_V1`;
+- standby liberado automaticamente somente por
+  `HELLO STAGED_V1/FAIR_V1/FAIR_SESSION_V1`;
 - abertura narrativa preservada e confirmada por `INICIAR MISSÃO` e D27;
 - uma partida pelo verde com `ANALOG POT` validado em `PROTECT`;
 - uma partida `GAME_BEGIN` … `GAME_END` com retry testada;
@@ -1259,13 +1293,13 @@ O aluno deve conseguir responder sem consultar:
 
 1. diferença entre ML-KEM e AES-GCM;
 2. diferença entre CRC32 e autenticação;
-3. por que CLASSIC não é ECDH;
-4. por que a chave pública não está nos 837 B;
-5. por que PQC+CRC pode variar no tempo;
+3. por que `CLASSIC/PQC` são apenas nomes do protocolo legado;
+4. diferença entre `wire_total_fresh` e `wire_total_preprovisioned`;
+5. por que a ordem ECDH/ML-KEM alterna em cada par;
 6. o que 80 MHz representa;
 7. por que energia não foi medida;
 8. diferença entre `KEY_MISMATCH` e `PROTOCOL_REJECT`;
-9. três números principais da bateria;
+9. por que ainda não há números FAIR oficiais;
 10. três limitações científicas.
 
 ## 21. Nova bateria de resultados
@@ -1305,10 +1339,35 @@ python3 tools/aes_gcm_metrics_battery.py \
   --dry-run --cycles 100 --bench-repeats 3 --bench-rounds 100
 ```
 
-`tools/final_metrics_battery.py` continua disponível como bateria geral, mas
-não verifica todos os campos específicos que qualificam a coleta pós-AES-GCM
-como fonte oficial. Para repetir essa bateria de regressão com os dois perfis,
-use:
+As baterias abaixo são históricas e servem somente para regressão do protocolo
+`CLASSIC`/`PQC`. Para a pesquisa atual, valide primeiro o plano pareado:
+
+```bash
+python3 tools/kex_metrics_battery.py \
+  --dry-run
+```
+
+Depois do flash e do smoke FAIR_V1, o operador coleta com:
+
+```bash
+python3 tools/kex_metrics_battery.py \
+  --port /dev/ttyUSB0 \
+  --deployment-manifest logs/firmware/<manifesto_deploy>.json \
+  --timeout 20 \
+  --fresh-cycles 100 \
+  --session-repeats 30 \
+  --message-counts 1 100 500 1000 \
+  --pause 0.25 \
+  --bench-repeats 3 \
+  --bench-rounds 100
+```
+
+O resultado esperado é um arquivo
+`logs/<timestamp>_kex_fair_metrics_dev-ttyusb0.json` com
+`official_candidate=true`, `failed=0`, 400 `fresh_mission_runs`, 480
+`session_bench_runs`, 6 `kex_bench_runs`, zero pares/células inválidos e zero
+divergências de perfil. `tools/final_metrics_battery.py` continua disponível como
+bateria geral legada:
 
 ```bash
 python3 tools/final_metrics_battery.py \
@@ -1320,7 +1379,7 @@ python3 tools/final_metrics_battery.py \
   --bench-rounds 100
 ```
 
-O resumo esperado é `ok=true`, `failed=0`, `mission_runs=600`,
+O resumo legado esperado é `ok=true`, `failed=0`, `mission_runs=600`,
 `pqc_bench_runs=6` e `fault_runs=400`. Tanto esse runner quanto o dedicado a
 AES-GCM executam `BASELINE` a 240 MHz e `OBC-1U-LIMITED` a 80 MHz; não é
 necessário iniciar uma bateria separada por frequência.
@@ -1334,7 +1393,11 @@ números deste guia. A interface pública não embute nem altera a bateria ofici
 
 ```text
 Placa: BlackBoard Wisdom / ESP32
+Contrato: KEX_FAIR_V1
+Clássica: ECDH P-256
 PQC: ML-KEM-512
+Backend comum: wolfCrypt portátil
+KDF comum: HKDF-SHA256
 Cifra: AES-128-GCM
 Guardião: CRC32
 Perfis: 240 MHz e 80 MHz experimental
@@ -1344,9 +1407,9 @@ Transporte da bancada: USB serial, sem rádio
 ### Cenários
 
 ```text
-CLASSIC    = chave AES efêmera + AES-GCM
-PQC        = ML-KEM -> chave AES -> AES-GCM
-PQC+CRC32  = ML-KEM -> AES-GCM(payload || CRC32)
+ECDH       = ECDH P-256 -> HKDF -> AES-GCM
+MLKEM      = ML-KEM-512 -> HKDF -> AES-GCM
+CRC32      = opção ortogonal dentro do plaintext protegido
 ```
 
 ### Tamanhos
@@ -1359,16 +1422,15 @@ ss ML-KEM: 32 B
 nonce GCM: 12 B
 tag GCM: 16 B
 CRC32: 4 B
-MISSION oficial: 69 / 837 / 841 B
+pub ECDH: 65 B + 65 B
 ```
 
 ### Resultados
 
 ```text
-240 MHz: 611 us / 14.152 us / 14.097 us
-80 MHz:  1.028 us / 40.197 us / 40.077 us
-PQC/CLASSIC: 23,2x em tempo e 12,1x em bytes a 240 MHz
-Falhas: 200/200 SILENT sem CRC; 200/200 detectadas com CRC
+ECDH versus ML-KEM: coleta FAIR_V1 ainda pendente
+Não reutilizar razões CLASSIC/PQC como resultado novo
+Falhas CRC32 históricas continuam evidência separada do KEX
 ```
 
 ### Limites
@@ -1378,16 +1440,16 @@ não é CubeSat real
 não há radiação real
 não há rádio
 energia não foi medida
-CLASSIC não inclui ECDH
+CLASSIC/PQC são nomes do protocolo legado
 80 MHz não é especificação universal
 ```
 
 ### Fechamento
 
-> ML-KEM funcionou na Wisdom, mas aumentou tempo e tráfego. AES-GCM protege a
-> mensagem; CRC32 torna a corrupção acidental visível. O resultado é uma
-> demonstração reproduzível de que segurança pós-quântica em hardware limitado
-> é possível, porém precisa entrar no orçamento do sistema.
+> ECDH e ML-KEM estabelecem segredos; o mesmo HKDF e AES-GCM completam a
+> sessão. A comparação mede algoritmo e implementação no contexto declarado.
+> CRC32 torna a corrupção acidental visível, mas não autentica. Os números
+> finais só entram aqui depois da coleta FAIR_V1 na Wisdom.
 
 ## 23. Glossário
 

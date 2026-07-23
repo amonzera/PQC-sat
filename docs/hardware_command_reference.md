@@ -6,14 +6,15 @@ BlackBoard Wisdom pelo protocolo serial `V1`.
 Durante a demonstração ao vivo, os blocos clicáveis do dashboard devem expor
 apenas comandos ligados ao enredo visual do projeto. Comandos de inventário,
 bancada, debug e expansão ficam documentados aqui para desenvolvimento, testes
-e manutenção; eles podem ser enviados pelo terminal textual avançado do painel
-ou pelo console `tools/serial_console.py`.
+e manutenção; eles podem ser enviados pelo console
+`tools/serial_console.py`.
 
-Comandos locais do dashboard, como `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`,
+Nomes da interface visual legada, como `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`,
 `DEMO_STOP`, `DEMO_RESTART`, `RUN_BATTERY`, `CHECKSUM`, `EXPORT_JSON` e
-`TOGGLE_LIVE_PAYLOAD`, não são comandos do firmware. O comando `MISSION`, por
-outro lado, existe no firmware e é o caminho principal da apresentação para
-medir `CLASSIC`, `CLASSIC_CRC32`, `PQC` e `PQC_CRC32`.
+`TOGGLE_LIVE_PAYLOAD`, não existem no dashboard público atual nem são comandos
+do firmware. O comando `MISSION` continua no firmware como ferramenta de
+pesquisa. A apresentação pública usa `GAME_*` com `ECDH` ou `MLKEM`; os
+cenários `CLASSIC`/`PQC` são compatibilidade histórica.
 
 ## Protocolo
 
@@ -46,24 +47,26 @@ python3 tools/serial_console.py --commands
 | Comando | Uso | Papel na demonstração |
 |---|---|---|
 | `STATUS` | `STATUS` | Mostra perfil, CPU, heap, flash e radio sob demanda. |
-| `MISSION` | `MISSION CLASSIC`, `MISSION CLASSIC_CRC32`, `MISSION PQC`, `MISSION PQC_CRC32` | Entrega mensagem curta e mede tempo, bytes, heap e resultado; `CLASSIC_CRC32` permite cruzar modo de chave e guardião. |
+| `MISSION` | `MISSION ECDH`, `MISSION ECDH_CRC32`, `MISSION MLKEM`, `MISSION MLKEM_CRC32` | Entrega mensagem curta no contrato `KEX_FAIR_V1`, medindo tempo, bytes, heap e resultado. |
+| `KEX_INFO` | `KEX_INFO` | Prova backend, versão, KDF, política de otimização, acelerações desligadas e tamanhos públicos. |
+| `KEX_BENCH` | `KEX_BENCH n` | Executa `n` pares ECDH/ML-KEM em ordem alternada, com `1 <= n <= 100`. |
+| `SESSION_BENCH` | `SESSION_BENCH ECDH\|MLKEM 1\|100\|500\|1000 payload_hex` | Mede uma sessão FAIR nova e o custo amortizado de várias mensagens. |
 | `GAME_*` | `GAME_BEGIN` … `GAME_END` | Protocolo transacional `STAGED_V1` do jogo público; cada comando executa uma etapa real separada. |
 | `INVESTIGATE` | `INVESTIGATE cenário incidente payload_hex índice máscara id` | Compatibilidade monolítica de bancada/fluxo legado para o mesmo experimento em camadas. |
-| `TOGGLE_LIVE_PAYLOAD` | comando local do dashboard | Liga/desliga o modo em que sensores reais da Wisdom geram o payload antes de `MISSION`. |
-| `DEMO` | `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`, `DEMO_STOP`, `DEMO_RESTART` | Comandos locais do dashboard para executar a apresentação A/B cronometrada. |
-| `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Comando serial técnico usado para validar bit-flip e CRC32 na placa. No dashboard, use `INJECT_FAULT` e `CRC_CHECK`. |
+| `TOGGLE_LIVE_PAYLOAD` | nome histórico, removido | Não é comando do firmware nem controle do dashboard público atual. |
+| `DEMO` | nome histórico, removido | Não existe no dashboard público nem no firmware. |
+| `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Comando serial técnico usado para validar bit-flip e CRC32 na placa. |
 | `OLED` | `OLED STANDBY` | Restaura o ícone robo-satélite no display. |
 
 `PING`, `TELEMETRY`, sensores, LED, RGB e bargraph continuam disponíveis pelo
 HELP/terminal textual e pelo `tools/serial_console.py`, mas não devem aparecer
 como blocos clicáveis da apresentação para evitar ruído visual e serial.
-O dashboard pode acionar LED/bargraph automaticamente depois de `MISSION` como
-efeito lúdico de custo relativo; isso não transforma LED/bargraph em métrica.
+O dashboard público não aciona essas funções como controles de apresentação.
 
-## Payload vivo no dashboard
+## Sensores e payload vivo legado
 
-O modo `Payload vivo` é uma orquestração do dashboard, não um novo comando de
-firmware. Quando ligado, antes de `ENVIAR MSG` o dashboard consulta:
+O modo visual `Payload vivo` e o botão `ENVIAR MSG` foram removidos. As leituras
+continuam disponíveis para diagnóstico pelo console:
 
 ```text
 SENSOR_READ TEMP_HUM
@@ -73,43 +76,56 @@ ANALOG POT
 DIGITAL BUTTON
 ```
 
-Com essas respostas, ele monta um payload ASCII compacto e envia uma chamada
-`MISSION` com payload hexadecimal:
-
-```text
-MISSION PQC_CRC32 5051432D5341547C533D34327C...
-```
-
-O firmware mede normalmente `bytes_payload`, `bytes_crypto`,
-`bytes_checksum`, `bytes_total`, `cipher=AES-128-GCM`, `elapsed_us`, heap e
-flags de validação. O
-dashboard guarda também os metadados locais do payload vivo no popup e no JSON:
-
-| Campo local | Significado |
-|---|---|
-| `payload_mode` | `LIVE` quando veio dos sensores; `FIXED` quando usa payload padrão. |
-| `payload_text` | Payload ASCII montado antes de converter para hex. |
-| `payload_seq` | Sequência do envio ao vivo. |
-| `sensor_temp_c_x100`, `sensor_hum_x100` | Leituras do HTU21D em escala inteira. |
-| `sensor_accel` | `x,y,z` do acelerômetro em mg. |
-| `sensor_light` | Leitura de luz/proximidade do APDS-9960. |
-| `sensor_pot` | Valor do potenciômetro A39. |
-| `sensor_button` | Estado do botão D27. |
-| `sensor_failures` | Lista de sensores que não responderam; o payload usa `NA`. |
-
-Para falhas ao vivo, o dashboard também usa `ANALOG POT` como seletor físico
-de bit-flip. No jogo por etapas, esse comando é solicitado de forma assíncrona
+No jogo por etapas, `ANALOG POT` é solicitado de forma assíncrona
 quando a faixa verde confirma `PROTECT`; D27 já fornece o mesmo valor em
 `BUTTON_PING`. O valor 0..4095 é mapeado para uma posição dentro do payload.
 
 O OLED continua com `OLED STANDBY`. O firmware atual não possui comando para
-escrever texto arbitrário no display; por isso fases como `KEYGEN`, `CRC` e
-`FAULT` aparecem no popup, enquanto LED/RGB/bargraph dão feedback físico de
-processamento e custo relativo.
+escrever texto arbitrário no display. LED/RGB/bargraph permanecem recursos de
+bancada e não representam custo científico.
 
 ## Comando MISSION
 
-`MISSION` é o comando principal para consolidar a comparação do seminário.
+`MISSION` mede uma sessão nova para uma mensagem e alimenta a bateria FAIR de
+terminal. Não é um botão da jornada pública.
+
+| Uso FAIR_V1 | Significado |
+|---|---|
+| `MISSION ECDH [payload_hex]` | ECDH P-256 efêmero estabelece o segredo; HKDF-SHA256 deriva a chave AES-128-GCM. |
+| `MISSION ECDH_CRC32 [payload_hex]` | Mesmo fluxo ECDH com CRC32 dentro do plaintext protegido. |
+| `MISSION MLKEM [payload_hex]` | ML-KEM-512 efêmero estabelece o segredo; o mesmo HKDF e AES-GCM completam a sessão. |
+| `MISSION MLKEM_CRC32 [payload_hex]` | Mesmo fluxo ML-KEM com CRC32 dentro do plaintext protegido. |
+
+Esses quatro comandos retornam `experiment=KEX_FAIR_V1`,
+`crypto_impl=wolfCrypt-portable`, `crypto_version=5.9.2`,
+`compiler=8.4.0`, `framework=arduino-esp32-2.0.17`,
+`build_profile=robocore_wisdom_esp32_fair`, `kdf=HKDF-SHA256`,
+`optimization=portable-software`, `target_asm=0`, `hw_crypto=0`,
+`setup_us`, `initiator_us`, `responder_us`, `kex_total_us`,
+`setup_bytes`, `response_bytes`, `data_bytes`, `wire_total_fresh` e
+`wire_total_preprovisioned`. ECDH usa 65 + 65 bytes públicos; ML-KEM-512 usa
+800 + 768 bytes.
+
+## Comando SESSION_BENCH
+
+```text
+SESSION_BENCH ECDH 1 payload_hex
+SESSION_BENCH MLKEM 100 payload_hex
+SESSION_BENCH ECDH 500 payload_hex
+SESSION_BENCH MLKEM 1000 payload_hex
+```
+
+Cada execução cria uma sessão FAIR, deriva as chaves AES-128 e processa a
+quantidade indicada de mensagens com nonces únicos. A resposta separa
+`session_setup_us`, `data_total_us`, `end_to_end_us`,
+`amortized_us_per_message`, bytes de handshake/dados/fio e memória observável:
+heap antes/depois, mínimo global, maior bloco e `stack_hwm_words`.
+
+O mínimo de heap é global desde o boot e não representa pico isolado do
+algoritmo. A consolidação oficial pareia ECDH/ML-KEM em ferramenta própria; não
+use uma chamada manual como resultado estatístico.
+
+### Compatibilidade histórica
 
 | Uso | Significado |
 |---|---|
@@ -135,7 +151,7 @@ Campos retornados:
 | `key_match` | Segredos ML-KEM bateram; sempre verdadeiro no clássico. |
 | `aead_match` / `tag_match` | A tag AES-GCM foi aceita e o plaintext verificado. `tag_match` fica como alias para compatibilidade. |
 | `crc_match` | CRC32 bateu quando checksum está ativo. |
-| `bytes_total` | Ciphertext do payload + ciphertext ML-KEM quando houver + nonce + tag GCM + CRC quando ativo. |
+| `bytes_total` | No legado, ciphertext do payload + ciphertext ML-KEM quando houver + nonce + tag GCM + CRC quando ativo. No FAIR_V1, coincide com `wire_total_fresh`. |
 | `elapsed_us` | Tempo total da entrega medida na placa. |
 | `keygen_us`, `encap_us`, `decap_us` | Subtempos ML-KEM; zero no cenário clássico. |
 | `rng_us`, `kdf_us`, `encrypt_us`, `decrypt_us`, `crc_us` | Custo de RNG, derivação, cifragem, decifragem/verificação e checksum. |
@@ -143,16 +159,19 @@ Campos retornados:
 
 `PQC_FAULT ... CONFIRM` permanece apenas como comando técnico de bancada para
 auditar sessões ML-KEM antigas do projeto. Ele não abre popup no dashboard e
-não faz parte da demonstração visual de falha. Na apresentação, a falha correta
-é `FAULT NONE|CRC32`, isto é: bit-flip em payload, sem checksum versus com
-CRC32. No fluxo `MISSION`, a autenticação da mensagem vem do AES-GCM.
+não faz parte da demonstração visual de falha. Na apresentação, o incidente é
+executado pelo protocolo `GAME_*`, com o guardião `NONE|CRC32`; `FAULT` fica
+restrito à bancada. No fluxo `MISSION`, a autenticação da mensagem vem do
+AES-GCM.
 
 ## Protocolo do jogo `STAGED_V1`
 
-O `HELLO` atual anuncia `game=STAGED_V1`. A sequência válida é:
+O `HELLO` atual anuncia
+`game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`. A sequência válida
+é:
 
 ```text
-GAME_BEGIN G000001 BASELINE PQC CRC32 RX_MEMORY 54454D503D383443
+GAME_BEGIN G000001 BASELINE MLKEM CRC32 RX_MEMORY 54454D503D383443
 GAME_PROTECT G000001
 GAME_TRANSMIT G000001 0 0x01
 GAME_VERIFY G000001

@@ -3,10 +3,11 @@
 Este diretorio contem o firmware do projeto para a RoboCore BlackBoard Wisdom.
 Ele implementa o bridge serial `V1`, inventário da placa e comandos de bancada
 para exercitar os perifericos integrados. Ele também executa um experimento
-pequeno de payload com bit-flip e CRC32, ML-KEM-512 real com `mlkem-native` e
-o comando `MISSION` para comparar entrega de mensagem em `CLASSIC`,
-`CLASSIC_CRC32`, `PQC` e `PQC_CRC32`. O jogo público usa o protocolo
-transacional `GAME_*` com capacidade `STAGED_V1`; o comando monolítico
+pequeno de payload com bit-flip e CRC32. O legado ML-KEM-512 com
+`mlkem-native` permanece disponível, mas o experimento comparativo novo usa o
+mesmo wolfCrypt para ECDH P-256, ML-KEM-512, HKDF-SHA256, RNG e AES-128-GCM.
+O jogo público usa o protocolo transacional `GAME_*` com capacidades
+`STAGED_V1` e `FAIR_V1`; o comando monolítico
 `INVESTIGATE` permanece para compatibilidade e bancada.
 
 O objetivo desta etapa e dominar a comunicação ESP32/notebook e preservar o
@@ -47,7 +48,10 @@ python3 tools/firmware_deploy.py --upload
 ```
 
 Esse utilitário usa argumentos de processo Python, sem shell/Bash, reaproveita
-a descoberta robusta do dashboard e valida `game=STAGED_V1` depois do reset.
+a descoberta robusta do dashboard e valida
+`game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` depois do reset.
+Somente então salva um manifesto em `logs/firmware/` com hashes do binário e
+das fontes, porta e handshakes.
 
 O firmware emite um evento de boot e aceita frames de uma linha:
 
@@ -118,8 +122,10 @@ python3 dashboard.py --port /dev/ttyUSB0
 ```
 
 O programa sonda as portas por `HELLO` e só abre a interface após validar a
-Wisdom. Sem placa, ou com firmware sem `game=STAGED_V1`, ele encerra com uma
-mensagem específica. O handshake inclui `uptime_ms`, permitindo rejeitar um
+Wisdom. Sem placa, ou com firmware sem
+`game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`, ele
+permanece no standby de busca e mostra o motivo da rejeição; não entra na
+narrativa. O handshake inclui `uptime_ms`, permitindo rejeitar um
 `BUTTON_PING` enfileirado antes de a interface estar pronta. Um `HELLO` novo
 também limpa qualquer sessão `GAME_*` anterior.
 
@@ -157,7 +163,13 @@ MISSION CLASSIC
 MISSION CLASSIC_CRC32
 MISSION PQC
 MISSION PQC_CRC32
-GAME_BEGIN TEST-STAGED BASELINE PQC CRC32 RX_MEMORY 54454D503D383443
+KEX_INFO
+KEX_BENCH 10
+MISSION ECDH
+MISSION MLKEM
+SESSION_BENCH ECDH 1 54454D503D383443
+SESSION_BENCH MLKEM 1 54454D503D383443
+GAME_BEGIN TEST-STAGED BASELINE MLKEM CRC32 RX_MEMORY 54454D503D383443
 GAME_PROTECT TEST-STAGED
 GAME_TRANSMIT TEST-STAGED 0 0x01
 GAME_VERIFY TEST-STAGED
@@ -183,12 +195,25 @@ Para a sequência completa de bancada, use
 - O sketch usa Arduino/PlatformIO para destravar o transporte rapidamente.
 - O backend criptográfico aparece como `crypto=ML-KEM-512` e usa
   `mlkem-native` v1.1.0 vendorizado em `firmware/lib/mlkem_native`.
+- O perfil `robocore_wisdom_esp32_fair` exige wolfSSL 5.9.2 em
+  `firmware/lib/wolfssl`; a árvore local é ignorada pelo Git. Veja
+  `WOLFSSL_LOCAL.md` para versão, commit e licença.
+- `KEX_INFO` registra versão, backend, compilador, framework, perfil de build,
+  HKDF, política de otimização, ausência de assembly/aceleração e tamanhos
+  públicos. `KEX_BENCH n` executa pares ECDH/ML-KEM em ordem alternada.
+- `SESSION_BENCH ECDH|MLKEM 1|100|500|1000 payload_hex` estabelece uma sessão
+  e mede tempo, bytes, heap livre antes/depois, mínimo global, maior bloco e
+  folga de stack ao processar várias mensagens AES-GCM.
 - A interface PQC real existe: `PQC_INFO` reporta alvo, backend, variante,
   commit, licença, tamanhos e métricas; `PQC_KAT`, `PQC_KEYGEN`,
   `PQC_ENCAP`, `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH` executam no firmware.
 - O comando `MISSION CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32 [payload_hex]` entrega uma mensagem
   curta e retorna tempos, bytes, heap, resultado, confirmação, checksum e
   subtempos de ML-KEM quando aplicável.
+- `MISSION ECDH|ECDH_CRC32|MLKEM|MLKEM_CRC32 [payload_hex]` usa o contrato
+  `KEX_FAIR_V1` e separa `setup_us`, `initiator_us`, `responder_us`,
+  `setup_bytes`, `response_bytes`, `data_bytes`, `wire_total_fresh` e
+  `wire_total_preprovisioned`.
 - `GAME_BEGIN`, `GAME_PROTECT`, `GAME_TRANSMIT`, `GAME_VERIFY`, `GAME_RETRY`,
   `GAME_END` e `GAME_ABORT` dividem a partida em etapas reais, mantêm uma única
   sessão, rejeitam ordem/ID incorreto e restauram o baseline ao encerrar.
@@ -219,8 +244,15 @@ Para a sequência completa de bancada, use
 
 ## Manutenção
 
-O MVP original do firmware está concluído. A extensão `STAGED_V1` está
-compilada, mas ainda depende de flash e smoke na Wisdom. Novas mudanças devem
+O MVP original do firmware está concluído. A extensão `STAGED_V1/FAIR_V1`
+atual com `SESSION_BENCH` compila em build limpo com 59.020 B de RAM,
+1.005.497 B de flash e binário de 1.012.080 B, SHA-256
+`9eba850f2ea493edbdb89d7103f85589456277426f50136a2e337f8dac32a18d`.
+Esta revisão corrige o campo `experiment` duplicado em `GAME_PROTECT` depois de
+ECDH/ML-KEM passarem no segundo smoke FAIR. O binário foi gravado pelo
+manifesto `20260723T155737Z` e o diagnóstico `20260723T160223Z` passou os 27
+registros curtos; baterias e aceite físico longo continuam pendentes. Novas
+mudanças devem
 preservar `MISSION`, `INVESTIGATE`, todos os `GAME_*`, `PQC_KAT`, `PQC_FAULT`,
 `PQC_BENCH 100`, `FAULT CRC32` e `BUTTON_PING` como regressão, sem expor chave
 privada, segredo compartilhado completo ou material suficiente para reconstruir

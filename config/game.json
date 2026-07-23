@@ -45,7 +45,7 @@
     "target_max_seconds": 180.0,
     "screen_input_guard_seconds": 0.22
   },
-  "key_modes": ["CLASSIC", "PQC"],
+  "key_modes": ["ECDH", "MLKEM"],
   "guards": ["NONE", "CRC32"],
   "missions": [
     {

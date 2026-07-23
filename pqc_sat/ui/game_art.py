@@ -148,6 +148,24 @@ _CUE_NARRATIVES = {
         "aleatoriedade interna",
         "par de chaves ML-KEM",
     ),
+    "ecdh_setup": (
+        "CHAVE EFÊMERA DO RECEPTOR",
+        "O receptor cria um par P-256 efêmero e publica apenas o ponto de 65 bytes.",
+        "aleatoriedade interna",
+        "chave pública do receptor",
+    ),
+    "ecdh_initiator": (
+        "SEGREDO NO INICIADOR",
+        "O iniciador cria outro par efêmero e combina sua chave secreta com a chave pública recebida.",
+        "chave pública do receptor",
+        "chave pública do iniciador + segredo",
+    ),
+    "ecdh_responder": (
+        "SEGREDO NO RECEPTOR",
+        "O receptor combina sua chave secreta com a chave pública do iniciador e obtém o mesmo segredo.",
+        "chave pública do iniciador",
+        "segredo reconstruído",
+    ),
     "encaps": (
         "CRIAR CÁPSULA",
         "Encaps usa a chave pública para produzir uma cápsula e um segredo compartilhado.",
@@ -309,18 +327,22 @@ def _cue_specs(stage: str, key_mode: str, guard: str):
             specs.append(("app_crc", "ANEXAR CRC32 DA APLICAÇÃO", "crc32", C_ACCENT_GREEN, None))
         specs.append(("packet", "MONTAR A MENSAGEM", "packet", C_ACCENT_BLUE, None))
         return specs
-    if stage == "PROTECT" and key_mode == "PQC":
+    if stage == "PROTECT" and key_mode == "MLKEM":
         return [
-            ("keygen", "KEYGEN ML-KEM-512", "pqc_keygen", C_ACCENT_PURPLE, "keygen_us"),
-            ("encaps", "ENCAPSULAR O SEGREDO", "capsule", C_ACCENT_CYAN, "encap_us"),
-            ("decaps", "DECAPSULAR NA WISDOM", "pqc_decaps", C_ACCENT_PURPLE, "decap_us"),
+            ("keygen", "RECEPTOR: KEYGEN ML-KEM", "pqc_keygen", C_ACCENT_PURPLE, "setup_us"),
+            ("encaps", "INICIADOR: ENCAPS", "capsule", C_ACCENT_CYAN, "initiator_us"),
+            ("decaps", "RECEPTOR: DECAPS", "pqc_decaps", C_ACCENT_PURPLE, "responder_us"),
             ("kdf", "DERIVAR A CHAVE AES", "kdf", C_ACCENT_ORANGE, "kdf_us"),
             ("nonce", "GERAR NONCE", "nonce", C_ACCENT_BLUE, "rng_us"),
             ("aes", "AES-GCM: CIPHERTEXT + TAG", "aes_gcm", C_ACCENT_GREEN, "encrypt_us"),
         ]
-    if stage == "PROTECT":
+    if stage == "PROTECT" and key_mode == "ECDH":
         return [
-            ("rng", "GERAR CHAVE AES + NONCE", "classic_key", C_ACCENT_ORANGE, "rng_us"),
+            ("ecdh_setup", "RECEPTOR: PAR ECDH P-256", "classic_key", C_ACCENT_ORANGE, "setup_us"),
+            ("ecdh_initiator", "INICIADOR: SEGREDO ECDH", "classic_key", C_ACCENT_CYAN, "initiator_us"),
+            ("ecdh_responder", "RECEPTOR: SEGREDO ECDH", "classic_key", C_ACCENT_ORANGE, "responder_us"),
+            ("kdf", "DERIVAR A CHAVE AES", "kdf", C_ACCENT_PURPLE, "kdf_us"),
+            ("nonce", "GERAR NONCE", "nonce", C_ACCENT_BLUE, "rng_us"),
             ("aes", "AES-GCM: CIPHERTEXT + TAG", "aes_gcm", C_ACCENT_GREEN, "encrypt_us"),
         ]
     if stage == "TRANSMIT":
@@ -341,13 +363,32 @@ def _cue_specs(stage: str, key_mode: str, guard: str):
             specs.append(("app", "CRC DA APLICAÇÃO AUSENTE", "no_crc", C_TEXT_DIM, None))
         return specs
     if stage == "RETRY":
-        return [
-            ("payload", "REUTILIZAR O PAYLOAD", "payload", C_ACCENT_CYAN, None),
-            ("fresh_key", "CRIAR NOVA CHAVE", "classic_key", C_ACCENT_ORANGE, None),
-            ("fresh_nonce", "CRIAR NOVO NONCE", "nonce", C_ACCENT_BLUE, None),
-            ("protect", "PROTEGER NOVAMENTE", "aes_gcm", C_ACCENT_PURPLE, None),
-            ("delivered", "CONFIRMAR A ENTREGA", "accept", C_ACCENT_GREEN, None),
-        ]
+        specs = [("payload", "REUTILIZAR O PAYLOAD", "payload", C_ACCENT_CYAN, None)]
+        if key_mode == "MLKEM":
+            specs.extend(
+                [
+                    ("keygen", "NOVO KEYGEN ML-KEM", "pqc_keygen", C_ACCENT_PURPLE, "setup_us"),
+                    ("encaps", "NOVA CÁPSULA", "capsule", C_ACCENT_CYAN, "initiator_us"),
+                    ("decaps", "NOVO SEGREDO", "pqc_decaps", C_ACCENT_PURPLE, "responder_us"),
+                ]
+            )
+        else:
+            specs.extend(
+                [
+                    ("ecdh_setup", "NOVO PAR ECDH DO RECEPTOR", "classic_key", C_ACCENT_ORANGE, "setup_us"),
+                    ("ecdh_initiator", "NOVO PAR ECDH DO INICIADOR", "classic_key", C_ACCENT_CYAN, "initiator_us"),
+                    ("ecdh_responder", "NOVO SEGREDO ECDH", "classic_key", C_ACCENT_ORANGE, "responder_us"),
+                ]
+            )
+        specs.extend(
+            [
+                ("kdf", "DERIVAR NOVA CHAVE AES", "kdf", C_ACCENT_ORANGE, "kdf_us"),
+                ("fresh_nonce", "CRIAR NOVO NONCE", "nonce", C_ACCENT_BLUE, "rng_us"),
+                ("protect", "PROTEGER NOVAMENTE", "aes_gcm", C_ACCENT_PURPLE, "encrypt_us"),
+                ("delivered", "CONFIRMAR A ENTREGA", "accept", C_ACCENT_GREEN, None),
+            ]
+        )
+        return specs
     return [("finish", "CONSOLIDAR A MISSÃO", "accept", C_ACCENT_GREEN, None)]
 
 
@@ -355,7 +396,7 @@ def build_didactic_timeline(
     stage: object,
     measurement: object | Mapping[str, object] | None,
     *,
-    key_mode: object = "CLASSIC",
+    key_mode: object = "ECDH",
     guard: object = "NONE",
 ) -> DidacticTimeline:
     """Build a deterministic replay only from an already accepted response."""

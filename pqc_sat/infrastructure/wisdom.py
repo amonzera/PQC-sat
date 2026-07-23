@@ -15,6 +15,8 @@ EXPECTED_NODE = "PQC-SAT-WISDOM"
 EXPECTED_BOARD = "BlackBoard-Wisdom"
 EXPECTED_PROTOCOL = "V1"
 EXPECTED_GAME = "STAGED_V1"
+EXPECTED_KEX = "FAIR_V1"
+EXPECTED_SESSION_BENCH = "FAIR_SESSION_V1"
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,8 @@ def validate_wisdom_handshake(
     payload: dict[str, str],
     *,
     require_staged_game: bool = True,
+    require_fair_kex: bool = True,
+    require_session_bench: bool = False,
 ) -> dict[str, str]:
     """Validate the fields required by the production game."""
 
@@ -40,6 +44,8 @@ def validate_wisdom_handshake(
     board = payload.get("board", "")
     protocol = payload.get("proto", "")
     game = payload.get("game", "")
+    kex = payload.get("kex", "")
+    session_bench = payload.get("session_bench", "")
     if node != EXPECTED_NODE or board != EXPECTED_BOARD:
         raise SerialBridgeError(
             "dispositivo serial não é a Wisdom do PQC-SAT "
@@ -52,6 +58,16 @@ def validate_wisdom_handshake(
     if require_staged_game and game != EXPECTED_GAME:
         raise WisdomFirmwareError(
             f"firmware sem o jogo por etapas: esperado game={EXPECTED_GAME}, recebido game={game or '-'}"
+        )
+    if require_fair_kex and kex != EXPECTED_KEX:
+        raise WisdomFirmwareError(
+            f"firmware sem o experimento justo: esperado kex={EXPECTED_KEX}, recebido kex={kex or '-'}"
+        )
+    if require_session_bench and session_bench != EXPECTED_SESSION_BENCH:
+        raise WisdomFirmwareError(
+            "firmware sem o benchmark de sessão: esperado "
+            f"session_bench={EXPECTED_SESSION_BENCH}, "
+            f"recebido session_bench={session_bench or '-'}"
         )
     try:
         uptime_ms = int(payload.get("uptime_ms", ""), 10)
@@ -139,6 +155,8 @@ def probe_wisdom(
     timeout: float = 2.0,
     bridge_factory: Callable[..., SerialBridge] = SerialBridge,
     require_staged_game: bool = True,
+    require_fair_kex: bool = True,
+    require_session_bench: bool = False,
 ) -> WisdomDevice:
     """Open one candidate and accept it only after a valid ``HELLO``."""
 
@@ -152,7 +170,12 @@ def probe_wisdom(
         raise SerialBridgeError(f"HELLO inválido em {port}: resposta sem campos key=value") from exc
     return WisdomDevice(
         port=port,
-        handshake=validate_wisdom_handshake(payload, require_staged_game=require_staged_game),
+        handshake=validate_wisdom_handshake(
+            payload,
+            require_staged_game=require_staged_game,
+            require_fair_kex=require_fair_kex,
+            require_session_bench=require_session_bench,
+        ),
     )
 
 
@@ -164,10 +187,18 @@ def discover_wisdom(
     listed_ports: Iterable[PortInfo] | None = None,
     bridge_factory: Callable[..., SerialBridge] = SerialBridge,
     require_staged_game: bool = True,
+    require_fair_kex: bool = True,
+    require_session_bench: bool = False,
 ) -> WisdomDevice:
     """Probe every candidate and return the single compatible Wisdom."""
 
-    expected_label = "Wisdom STAGED_V1" if require_staged_game else "Wisdom PQC-SAT"
+    expected_label = (
+        "Wisdom STAGED_V1/FAIR_V1/FAIR_SESSION_V1"
+        if require_staged_game and require_fair_kex and require_session_bench
+        else "Wisdom STAGED_V1/FAIR_V1"
+        if require_staged_game and require_fair_kex
+        else "Wisdom PQC-SAT"
+    )
 
     candidates = candidate_ports(explicit, listed_ports=listed_ports)
     if not candidates:
@@ -187,6 +218,8 @@ def discover_wisdom(
                     timeout=timeout,
                     bridge_factory=bridge_factory,
                     require_staged_game=require_staged_game,
+                    require_fair_kex=require_fair_kex,
+                    require_session_bench=require_session_bench,
                 )
             )
         except WisdomFirmwareError as exc:
@@ -217,6 +250,7 @@ def discover_wisdom(
 __all__ = (
     "EXPECTED_BOARD",
     "EXPECTED_GAME",
+    "EXPECTED_KEX",
     "EXPECTED_NODE",
     "EXPECTED_PROTOCOL",
     "WisdomDevice",

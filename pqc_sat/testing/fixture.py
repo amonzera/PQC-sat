@@ -9,6 +9,7 @@ import time
 import zlib
 
 from pqc_sat.stand.model import (
+    FAIR_KEY_MODES,
     GuardMode,
     IncidentScenario,
     KeyMode,
@@ -78,6 +79,8 @@ class FixtureSerialClient:
                 "proto": "V1",
                 "uptime_ms": "0",
                 "game": "STAGED_V1",
+                "kex": "FAIR_V1",
+                "crypto_impl": "fixture-historical-proxy",
                 "fixture_source": self.fixture.get("source_path"),
                 "fixture_sha256": self.fixture.get("source_sha256"),
             },
@@ -153,12 +156,16 @@ class FixtureSerialClient:
         return dict(self.fixture.get("profiles", {}).get(profile, {}))
 
     def _reference_mission(self, profile: str, key_mode: str) -> dict[str, object]:
+        reference_mode = {
+            KeyMode.ECDH.value: "CLASSIC",
+            KeyMode.MLKEM.value: "PQC",
+        }.get(key_mode, key_mode)
         profile_data = self._profile_data(profile)
-        mission = dict(profile_data.get("missions", {}).get(key_mode, {}))
+        mission = dict(profile_data.get("missions", {}).get(reference_mode, {}))
         if mission:
             return mission
         baseline = self._profile_data(self.config.baseline_name)
-        mission = dict(baseline.get("missions", {}).get(key_mode, {}))
+        mission = dict(baseline.get("missions", {}).get(reference_mode, {}))
         if profile == self.config.limited_name and mission:
             for key in (
                 "elapsed_us",
@@ -178,7 +185,12 @@ class FixtureSerialClient:
         key_mode = str(self._game["key_mode"])
         guard = str(self._game["guard"])
         protected_len = len(payload) + (4 if guard == "CRC32" else 0)
-        bytes_total = protected_len + 12 + 16 + (768 if key_mode == "PQC" else 0) + 4
+        setup_bytes, response_bytes = {
+            KeyMode.ECDH.value: (65, 65),
+            KeyMode.MLKEM.value: (800, 768),
+        }[key_mode]
+        data_bytes = protected_len + 12 + 16 + 4
+        bytes_total = setup_bytes + response_bytes + data_bytes
         profile = str(self._game["profile"])
         return {
             "game_id": self._game["id"],
@@ -194,9 +206,14 @@ class FixtureSerialClient:
             "elapsed_us": max(1, int(elapsed_us)),
             "bytes_payload": len(payload),
             "bytes_total": bytes_total,
+            "experiment": "KEX_FAIR_V1",
+            "setup_bytes": setup_bytes,
+            "response_bytes": response_bytes,
+            "data_bytes": data_bytes,
             "heap": 201412,
             "min_heap": 197624,
             "fixture_source": "deterministic-offline-staged-v1",
+            "fixture_model": "historical_proxy_not_measurement",
         }
 
     def _build_response(self, command_line: str) -> tuple[str, dict[str, object]]:
@@ -234,6 +251,9 @@ class FixtureSerialClient:
                     "proto": "V1",
                     "uptime_ms": 0,
                     "game": "STAGED_V1",
+                    "kex": "FAIR_V1",
+                    "session_bench": "FAIR_SESSION_V1",
+                    "crypto_impl": "fixture-historical-proxy",
                     "fixture_source": self.fixture.get("source_path"),
                     "fixture_sha256": self.fixture.get("source_sha256"),
                 },
@@ -256,10 +276,12 @@ class FixtureSerialClient:
             )
             try:
                 payload = bytes.fromhex(payload_hex)
-                KeyMode(key_mode)
+                parsed_key_mode = KeyMode(key_mode)
                 GuardMode(guard)
                 IncidentScenario(incident)
                 if (
+                    parsed_key_mode not in FAIR_KEY_MODES
+                    or
                     not game_id
                     or len(game_id) > 31
                     or any(char in game_id for char in "|\r\n")
@@ -333,10 +355,25 @@ class FixtureSerialClient:
                 nonce_crc = zlib.crc32(f"{game_id}|nonce|1".encode()) & 0xFFFFFFFF
                 key_crc = zlib.crc32(f"{game_id}|key|1".encode()) & 0xFFFFFFFF
                 self._game.update(state="PROTECT", nonce_crc=nonce_crc, key_crc=key_crc)
+                setup_bytes, response_bytes = {
+                    KeyMode.ECDH.value: (65, 65),
+                    KeyMode.MLKEM.value: (800, 768),
+                }[key_mode]
+                if key_mode == KeyMode.MLKEM.value:
+                    setup_us = max(1, int(reference.get("keygen_us", 1)))
+                    initiator_us = max(1, int(reference.get("encap_us", 1)))
+                    responder_us = max(1, int(reference.get("decap_us", 1)))
+                else:
+                    proxy_total = max(3, int(reference.get("elapsed_us", 900)))
+                    setup_us = max(1, proxy_total * 35 // 100)
+                    initiator_us = max(1, proxy_total * 35 // 100)
+                    responder_us = max(1, proxy_total - setup_us - initiator_us)
+                kex_total_us = setup_us + initiator_us + responder_us
+                kdf_us = max(1, kex_total_us // 12)
                 response = self._game_common(
                     stage="PROTECT",
                     result="PROTECTED",
-                    elapsed_us=max(1, int(reference.get("elapsed_us", 1200))),
+                    elapsed_us=kex_total_us + kdf_us + max(1, int(reference.get("encrypt_us", 300))),
                 )
                 response.update(
                     {
@@ -344,10 +381,29 @@ class FixtureSerialClient:
                         "aead_ready": 1,
                         "nonce_crc32": f"0x{nonce_crc:08X}",
                         "session_key_crc32": f"0x{key_crc:08X}",
-                        "keygen_us": int(reference.get("keygen_us", 0)),
-                        "encap_us": int(reference.get("encap_us", 0)),
-                        "decap_us": int(reference.get("decap_us", 0)),
+                        "keygen_us": setup_us,
+                        "encap_us": initiator_us,
+                        "decap_us": responder_us,
+                        "setup_us": setup_us,
+                        "initiator_us": initiator_us,
+                        "responder_us": responder_us,
+                        "kex_total_us": kex_total_us,
+                        "kdf_us": kdf_us,
+                        "setup_bytes": setup_bytes,
+                        "response_bytes": response_bytes,
                         "encrypt_us": max(1, int(reference.get("encrypt_us", 300))),
+                        "experiment": "KEX_FAIR_V1",
+                        "kex": "ECDH-P256" if key_mode == KeyMode.ECDH.value else "ML-KEM-512",
+                        "crypto_impl": "wolfCrypt-fixture-proxy",
+                        "crypto_version": "fixture-only",
+                        "compiler": "8.4.0",
+                        "framework": "arduino-esp32-2.0.17",
+                        "build_profile": "robocore_wisdom_esp32_fair",
+                        "kdf": "HKDF-SHA256",
+                        "optimization": "portable-software",
+                        "target_asm": 0,
+                        "hw_crypto": 0,
+                        "authenticated_kex": 0,
                     }
                 )
                 return self._response(command_line, response)
@@ -470,10 +526,20 @@ class FixtureSerialClient:
             if payload_hex != self.config.payload_hex:
                 return self._error(command_line, "payload difere da campanha oficial")
             profile_data = self.fixture.get("profiles", {}).get(self.active_profile, {})
-            reference_scenario = "PQC" if scenario == "PQC_CRC32" else "CLASSIC" if scenario == "CLASSIC_CRC32" else scenario
+            reference_scenario = {
+                "ECDH": "CLASSIC",
+                "ECDH_CRC32": "CLASSIC",
+                "MLKEM": "PQC",
+                "MLKEM_CRC32": "PQC",
+                "PQC_CRC32": "PQC",
+                "CLASSIC_CRC32": "CLASSIC",
+            }.get(scenario, scenario)
             mission = profile_data.get("missions", {}).get(reference_scenario)
             if not mission:
-                mission = self._reference_mission(self.active_profile, "PQC" if scenario.startswith("PQC") else "CLASSIC")
+                mission = self._reference_mission(
+                    self.active_profile,
+                    "MLKEM" if scenario.startswith(("MLKEM", "PQC")) else "ECDH",
+                )
             if not mission:
                 return self._error(command_line, "cenário ausente na fixture")
             payload = {
@@ -486,6 +552,7 @@ class FixtureSerialClient:
                 "cpu_mhz": profile_data["cpu_mhz"],
                 "fixture_source": self.fixture.get("source_path"),
                 "fixture_sha256": self.fixture.get("source_sha256"),
+                "fixture_model": "historical_proxy_not_measurement",
             }
             return self._response(command_line, payload)
         if command == "INVESTIGATE" and len(parts) == 7:

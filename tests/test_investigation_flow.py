@@ -35,7 +35,12 @@ from tools.capture_stand_evidence import (
     prepare_investigation_capture_state,
 )
 from tools.investigation_metrics_battery import build_matrix
-from tools.validate_stand_logs import count_pot_activity, load_records, validate_physical_transition_causes
+from tools.validate_stand_logs import (
+    count_pot_activity,
+    load_records,
+    validate_cycle,
+    validate_physical_transition_causes,
+)
 
 
 class MemoryLogger:
@@ -74,6 +79,7 @@ def connect_panel_to_wisdom(panel, *, now=10.0, uptime_ms=100):
                 "board": "BlackBoard-Wisdom",
                 "proto": "V1",
                 "game": "STAGED_V1",
+                "kex": "FAIR_V1",
                 "uptime_ms": str(uptime_ms),
             },
         },
@@ -87,7 +93,7 @@ def connect_panel_to_wisdom(panel, *, now=10.0, uptime_ms=100):
 
 
 class StagedHarness:
-    def __init__(self, *, incident="RX_MEMORY", key_mode="PQC", guard="CRC32"):
+    def __init__(self, *, incident="RX_MEMORY", key_mode="MLKEM", guard="CRC32"):
         self.config = fast_config()
         self.client = FixtureSerialClient(DEFAULT_FIXTURE_PATH, self.config, latency_seconds=0)
         self.logger = MemoryLogger()
@@ -204,12 +210,12 @@ class StagedConfigurationTests(unittest.TestCase):
         self.assertEqual(len(combinations), 32)
         self.assertEqual(
             {scenario_for(key_mode, guard) for key_mode in KeyMode for guard in GuardMode},
-            {"CLASSIC", "CLASSIC_CRC32", "PQC", "PQC_CRC32"},
+            {"ECDH", "ECDH_CRC32", "MLKEM", "MLKEM_CRC32"},
         )
 
     def test_maximum_game_begin_fits_firmware_input_buffer(self):
         payload_hex = bytes(range(96)).hex().upper()
-        command = f"V1|999999|GAME_BEGIN|G999999|OBC-1U-LIMITED|PQC|CRC32|CHANNEL_BITFLIP|{payload_hex}\n"
+        command = f"V1|999999|GAME_BEGIN|G999999|OBC-1U-LIMITED|MLKEM|CRC32|CHANNEL_BITFLIP|{payload_hex}\n"
         self.assertLessEqual(len(command), 384)
 
 
@@ -291,12 +297,12 @@ class StagedTruthTableTests(unittest.TestCase):
             game_id=game_id,
             profile=config.baseline_name,
             profile_mhz=config.baseline_mhz,
-            key_mode=KeyMode.PQC,
+            key_mode=KeyMode.MLKEM,
             guard=GuardMode.CRC32,
             payload_len=len(mission.payload_bytes),
             source="test",
         )
-        begin = f"GAME_BEGIN {game_id} {config.baseline_name} PQC CRC32 CHANNEL_BITFLIP {mission.payload_hex}"
+        begin = f"GAME_BEGIN {game_id} {config.baseline_name} MLKEM CRC32 CHANNEL_BITFLIP {mission.payload_hex}"
         prepare = dict(fixture._build_response(begin)[1]["payload"])
         prepare["payload_crc32"] = "0x00000000"
         with self.assertRaisesRegex(StandProtocolError, "CRC do payload"):
@@ -332,7 +338,7 @@ class StagedTruthTableTests(unittest.TestCase):
     def test_a39_read_during_protect_preserves_transactional_game(self):
         fixture = FixtureSerialClient(DEFAULT_FIXTURE_PATH, fast_config(), latency_seconds=0)
         fixture.set_pot(1469)
-        begin = "GAME_BEGIN G-A39 BASELINE PQC CRC32 TAMPER 54454D503D383443"
+        begin = "GAME_BEGIN G-A39 BASELINE MLKEM CRC32 TAMPER 54454D503D383443"
 
         self.assertEqual(fixture._build_response(begin)[1]["status"], "OK")
         self.assertEqual(fixture._build_response("GAME_PROTECT G-A39")[1]["status"], "OK")
@@ -455,7 +461,7 @@ class StagedControllerTests(unittest.TestCase):
         confirm()  # ATTRACT
         select("mission:TELEMETRY")
         select("profile:240")
-        select("key:PQC")
+        select("key:MLKEM")
         select("guard:CRC32")
         finish_stage()  # PREPARE
         harness.controller.set_simulated_pot(3072)
@@ -565,6 +571,24 @@ class StagedControllerTests(unittest.TestCase):
         operational = [record["decision"] for record in harness.logger.records if record["event"] == "operational_decision"]
         self.assertEqual(operational, ["RETRY"])
 
+    def test_hardware_log_validator_requires_fair_key_mode(self):
+        harness = StagedHarness(key_mode="MLKEM")
+        harness.finish("RETRY")
+        completion = next(
+            record
+            for record in reversed(harness.logger.records)
+            if record["event"] == "cycle_complete"
+        )
+        persisted = json.loads(json.dumps(completion))
+        persisted["result"]["source"] = "hardware-live"
+
+        self.assertEqual(validate_cycle(persisted), [])
+        persisted["result"]["key_mode"] = "PQC"
+        self.assertIn(
+            "partida STAGED_V1 não usou ECDH/MLKEM FAIR",
+            validate_cycle(persisted),
+        )
+
     def test_every_real_stage_logs_start_and_completion(self):
         harness = StagedHarness()
         harness.finish("RETRY")
@@ -622,7 +646,14 @@ class StagedControllerTests(unittest.TestCase):
         hello = {
             "command": "HELLO",
             "status": "OK",
-            "payload": {"node": "PQC-SAT-WISDOM", "board": "BlackBoard-Wisdom", "proto": "V1", "game": "STAGED_V1", "uptime_ms": "100"},
+            "payload": {
+                "node": "PQC-SAT-WISDOM",
+                "board": "BlackBoard-Wisdom",
+                "proto": "V1",
+                "game": "STAGED_V1",
+                "kex": "FAIR_V1",
+                "uptime_ms": "100",
+            },
         }
         controller.handle_serial_event("response", hello, now=0)
         controller.update(now=0.1)
@@ -924,7 +955,7 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
     def test_f12_diagnostic_redacts_the_hidden_incident(self):
         harness = StagedHarness()
         harness.controller.pending = PendingCommand(
-            "GAME_BEGIN G1 BASELINE PQC CRC32 RX_MEMORY DEADBEEF",
+            "GAME_BEGIN G1 BASELINE MLKEM CRC32 RX_MEMORY DEADBEEF",
             "game_begin",
             10,
             {},

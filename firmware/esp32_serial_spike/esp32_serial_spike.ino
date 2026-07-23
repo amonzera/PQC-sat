@@ -6,12 +6,17 @@
   - expose a reproducible inventory of the Wisdom board;
   - test every onboard feature;
   - run a small payload fault/CRC32 experiment;
-  - deliver a small mission message in CLASSIC, CLASSIC_CRC32, PQC and PQC_CRC32 modes;
+  - preserve the historical CLASSIC/PQC mission modes;
+  - compare ECDH P-256 and ML-KEM-512 through the same portable wolfCrypt stack;
   - run ML-KEM-512 through a vendored C-only mlkem-native backend.
 */
 
 #include <Arduino.h>
+#include <esp_arduino_version.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <string.h>
@@ -20,6 +25,8 @@
 #include "mbedtls/gcm.h"
 
 #include <mlkem_native.h>
+
+#include "pqc_sat_fair_crypto.h"
 
 #if defined(CONFIG_BT_ENABLED)
 #include "esp_bt.h"
@@ -30,7 +37,8 @@ SET_LOOP_TASK_STACK_SIZE(32768);
 // ---- Protocol ---------------------------------------------------------------
 static constexpr uint32_t SERIAL_BAUD = 115200;
 // INVESTIGATE carries up to 96 payload bytes as hex plus the reproducible
-// incident vector. Keep this below the host's 1024-char response limit.
+// incident vector. Commands remain short; FAIR responses may use up to the
+// independent 4096-character host response limit.
 static constexpr size_t MAX_FRAME_LEN = 384;
 static constexpr size_t MAX_FIELDS = 14;
 static constexpr size_t MAX_EXPERIMENT_PAYLOAD = 96;
@@ -51,6 +59,18 @@ static constexpr size_t AES_GCM_TAG_BYTES = 16;
 static constexpr size_t MISSION_CRC_BYTES = 4;
 static constexpr const char *CLASSIC_TARGET = AEAD_CIPHER;
 static constexpr const char *MISSION_DEFAULT_PAYLOAD = "PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK";
+static constexpr const char *FAIR_EXPERIMENT = "KEX_FAIR_V1";
+static constexpr const char *FAIR_KDF = "HKDF-SHA256";
+static constexpr const char *FAIR_OPTIMIZATION = "portable-software";
+static constexpr const char *FAIR_BUILD_PROFILE = "robocore_wisdom_esp32_fair";
+static constexpr const char *FAIR_SESSION_BENCH = "FAIR_SESSION_V1";
+#define PQC_SAT_STRINGIFY_INNER(value) #value
+#define PQC_SAT_STRINGIFY(value) PQC_SAT_STRINGIFY_INNER(value)
+static constexpr const char *FAIR_FRAMEWORK =
+    "arduino-esp32-"
+    PQC_SAT_STRINGIFY(ESP_ARDUINO_VERSION_MAJOR) "."
+    PQC_SAT_STRINGIFY(ESP_ARDUINO_VERSION_MINOR) "."
+    PQC_SAT_STRINGIFY(ESP_ARDUINO_VERSION_PATCH);
 
 static_assert(CRYPTO_PUBLICKEYBYTES == 800, "unexpected ML-KEM-512 public key size");
 static_assert(CRYPTO_SECRETKEYBYTES == 1632, "unexpected ML-KEM-512 secret key size");
@@ -151,6 +171,13 @@ static bool pqc_keypair_ready = false;
 static bool pqc_ciphertext_ready = false;
 static bool pqc_shared_secret_ready = false;
 
+static uint8_t fair_sender_secret[FAIR_SHARED_SECRET_BYTES];
+static uint8_t fair_receiver_secret[FAIR_SHARED_SECRET_BYTES];
+static uint8_t fair_setup_material[FAIR_MAX_SETUP_BYTES];
+static uint8_t fair_response_material[FAIR_MAX_RESPONSE_BYTES];
+static size_t fair_setup_len = 0;
+static size_t fair_response_len = 0;
+
 enum StagedGameState : uint8_t {
   GAME_IDLE = 0,
   GAME_PREPARED,
@@ -169,6 +196,8 @@ struct StagedGameSession {
   char guard[8];
   char incident[20];
   bool use_pqc;
+  bool use_fair;
+  FairKexAlgorithm fair_algorithm;
   bool use_app_crc;
   uint8_t payload[MAX_EXPERIMENT_PAYLOAD];
   size_t payload_len;
@@ -198,6 +227,12 @@ struct StagedGameSession {
   uint32_t keygen_us;
   uint32_t encap_us;
   uint32_t decap_us;
+  uint32_t setup_us;
+  uint32_t initiator_us;
+  uint32_t responder_us;
+  uint32_t kex_total_us;
+  uint32_t setup_bytes;
+  uint32_t response_bytes;
   uint32_t kdf_us;
   uint32_t rng_us;
   uint32_t encrypt_us;
@@ -208,6 +243,15 @@ struct StagedGameSession {
 };
 
 static StagedGameSession staged_game = {};
+
+struct FairBenchTotals {
+  uint64_t setup_us;
+  uint64_t initiator_us;
+  uint64_t responder_us;
+  uint64_t total_us;
+  uint16_t ok;
+  int failure_rc;
+};
 
 static void clear_staged_game(bool restore_profile);
 
@@ -1108,8 +1152,17 @@ static void send_hello(const char *request_id) {
   print_kv("pqc", PQC_STATUS);
   print_kv("pqc_target", PQC_TARGET);
   print_kv("fault", "payload_crc32");
-  print_kv("mission", "CLASSIC,CLASSIC_CRC32,PQC,PQC_CRC32");
+  print_kv(
+      "mission",
+      fair_crypto_available()
+          ? "CLASSIC,CLASSIC_CRC32,PQC,PQC_CRC32,ECDH,ECDH_CRC32,MLKEM,MLKEM_CRC32"
+          : "CLASSIC,CLASSIC_CRC32,PQC,PQC_CRC32");
   print_kv("game", "STAGED_V1");
+  print_kv("kex", fair_crypto_available() ? "FAIR_V1" : "LEGACY_ONLY");
+  print_kv("key_modes", fair_crypto_available() ? "ECDH,MLKEM" : "CLASSIC,PQC");
+  print_kv("fair_backend", fair_crypto_backend());
+  print_kv("fair_version", fair_crypto_version());
+  print_kv("session_bench", fair_crypto_available() ? FAIR_SESSION_BENCH : "unavailable");
   end_result();
 }
 
@@ -1134,7 +1187,48 @@ static void send_status(const char *request_id) {
   print_kv("pqc", PQC_STATUS);
   print_kv("pqc_target", PQC_TARGET);
   print_kv("pqc_backend", PQC_BACKEND);
-  print_kv("mission", "CLASSIC,CLASSIC_CRC32,PQC,PQC_CRC32");
+  print_kv(
+      "mission",
+      fair_crypto_available()
+          ? "CLASSIC,CLASSIC_CRC32,PQC,PQC_CRC32,ECDH,ECDH_CRC32,MLKEM,MLKEM_CRC32"
+          : "CLASSIC,CLASSIC_CRC32,PQC,PQC_CRC32");
+  print_kv("kex", fair_crypto_available() ? "FAIR_V1" : "LEGACY_ONLY");
+  print_kv("fair_backend", fair_crypto_backend());
+  print_kv("session_bench", fair_crypto_available() ? FAIR_SESSION_BENCH : "unavailable");
+  end_result();
+}
+
+static void send_kex_info(const char *request_id) {
+  if (!fair_crypto_available()) {
+    print_error(request_id, "KEX_UNAVAILABLE", "build_robocore_wisdom_esp32_fair");
+    return;
+  }
+  begin_result(request_id, "OK");
+  print_kv("experiment", FAIR_EXPERIMENT);
+  print_kv("algorithms", "ECDH-P256,ML-KEM-512");
+  print_kv("security_target", "approximately_128-bit_classical_vs_NIST_level_1");
+  print_kv("backend", fair_crypto_backend());
+  print_kv("version", fair_crypto_version());
+  print_kv("crypto_impl", fair_crypto_backend());
+  print_kv("crypto_version", fair_crypto_version());
+  print_kv("compiler", __VERSION__);
+  print_kv("framework", FAIR_FRAMEWORK);
+  print_kv("build_profile", FAIR_BUILD_PROFILE);
+  print_kv("kdf", FAIR_KDF);
+  print_kv("cipher", AEAD_CIPHER);
+  print_kv("optimization", FAIR_OPTIMIZATION);
+  print_kv_bool("target_asm", false);
+  print_kv_bool("hw_crypto", false);
+  print_kv_bool("authenticated_kex", false);
+  print_kv("session_bench", FAIR_SESSION_BENCH);
+  print_kv_u32("ecdh_setup_bytes", FAIR_ECDH_PUBLIC_BYTES);
+  print_kv_u32("ecdh_response_bytes", FAIR_ECDH_PUBLIC_BYTES);
+  print_kv_u32("mlkem_setup_bytes", FAIR_MLKEM_PUBLIC_BYTES);
+  print_kv_u32("mlkem_response_bytes", FAIR_MLKEM_CIPHERTEXT_BYTES);
+  print_kv("profile", active_profile);
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
   end_result();
 }
 
@@ -1218,6 +1312,12 @@ static void clear_staged_game(bool restore_profile) {
   secure_wipe(pqc_fault_ct, sizeof(pqc_fault_ct));
   secure_wipe(pqc_fault_tag_enc, sizeof(pqc_fault_tag_enc));
   secure_wipe(pqc_fault_tag_dec, sizeof(pqc_fault_tag_dec));
+  secure_wipe(fair_sender_secret, sizeof(fair_sender_secret));
+  secure_wipe(fair_receiver_secret, sizeof(fair_receiver_secret));
+  secure_wipe(fair_setup_material, sizeof(fair_setup_material));
+  secure_wipe(fair_response_material, sizeof(fair_response_material));
+  fair_setup_len = 0;
+  fair_response_len = 0;
   pqc_keypair_ready = false;
   pqc_ciphertext_ready = false;
   pqc_shared_secret_ready = false;
@@ -1327,6 +1427,107 @@ static bool aes128_gcm_decrypt(
   return rc == 0;
 }
 
+static bool fair_aes128_gcm_encrypt_message(
+    const uint8_t *key,
+    const uint8_t *nonce,
+    const uint8_t *aad,
+    size_t aad_len,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *ciphertext,
+    uint8_t *tag) {
+  return fair_aes128_gcm_encrypt(
+             key,
+             nonce,
+             AES_GCM_NONCE_BYTES,
+             aad,
+             aad_len,
+             plaintext,
+             plaintext_len,
+             ciphertext,
+             tag,
+             AES_GCM_TAG_BYTES) == 0;
+}
+
+static bool fair_aes128_gcm_decrypt_message(
+    const uint8_t *key,
+    const uint8_t *nonce,
+    const uint8_t *aad,
+    size_t aad_len,
+    const uint8_t *ciphertext,
+    size_t ciphertext_len,
+    const uint8_t *tag,
+    uint8_t *plaintext) {
+  return fair_aes128_gcm_decrypt(
+             key,
+             nonce,
+             AES_GCM_NONCE_BYTES,
+             aad,
+             aad_len,
+             ciphertext,
+             ciphertext_len,
+             tag,
+             AES_GCM_TAG_BYTES,
+             plaintext) == 0;
+}
+
+static bool establish_fair_session(
+    FairKexAlgorithm algorithm,
+    const char *context,
+    uint8_t *sender_key,
+    uint8_t *receiver_key,
+    FairKexMetrics *metrics,
+    uint32_t *kdf_us) {
+  if (!fair_crypto_available()) {
+    return false;
+  }
+  const int rc = fair_kex_establish(
+      algorithm,
+      fair_sender_secret,
+      fair_receiver_secret,
+      fair_setup_material,
+      &fair_setup_len,
+      fair_response_material,
+      &fair_response_len,
+      metrics);
+  if (rc != 0 || !metrics->key_match) {
+    return false;
+  }
+  const uint32_t started = micros();
+  const int sender_rc = fair_hkdf_aes128(
+      fair_sender_secret,
+      FAIR_SHARED_SECRET_BYTES,
+      context,
+      sender_key);
+  const int receiver_rc = fair_hkdf_aes128(
+      fair_receiver_secret,
+      FAIR_SHARED_SECRET_BYTES,
+      context,
+      receiver_key);
+  *kdf_us = micros() - started;
+  return sender_rc == 0 && receiver_rc == 0 &&
+         bytes_equal_constant_time(sender_key, receiver_key, AES128_KEY_BYTES);
+}
+
+static void print_fair_metadata(
+    FairKexAlgorithm algorithm,
+    bool include_experiment = true) {
+  if (include_experiment) {
+    print_kv("experiment", FAIR_EXPERIMENT);
+  }
+  print_kv("kex", fair_kex_name(algorithm));
+  print_kv("crypto_impl", fair_crypto_backend());
+  print_kv("crypto_version", fair_crypto_version());
+  print_kv("compiler", __VERSION__);
+  print_kv("framework", FAIR_FRAMEWORK);
+  print_kv("build_profile", FAIR_BUILD_PROFILE);
+  print_kv("kdf", FAIR_KDF);
+  print_kv("optimization", FAIR_OPTIMIZATION);
+  print_kv_bool("target_asm", false);
+  print_kv_bool("hw_crypto", false);
+  print_kv_bool("authenticated_kex", false);
+}
+
 static bool mission_payload_from_fields(size_t field_count, char *fields[], uint8_t *payload, size_t max_len, size_t *payload_len) {
   if (field_count >= 5) {
     return parse_hex_payload(fields[4], payload, max_len, payload_len);
@@ -1375,6 +1576,12 @@ static bool is_staged_game_safe_read_command(
 }
 
 static const char *staged_game_scenario() {
+  if (staged_game.use_fair) {
+    if (strcmp(staged_game.key_mode, "ECDH") == 0) {
+      return staged_game.use_app_crc ? "ECDH_CRC32" : "ECDH";
+    }
+    return staged_game.use_app_crc ? "MLKEM_CRC32" : "MLKEM";
+  }
   if (staged_game.use_pqc) {
     return staged_game.use_app_crc ? "PQC_CRC32" : "PQC";
   }
@@ -1383,7 +1590,8 @@ static const char *staged_game_scenario() {
 
 static uint32_t staged_game_bytes_total() {
   return static_cast<uint32_t>(staged_game.protected_len) + AES_GCM_NONCE_BYTES + AES_GCM_TAG_BYTES +
-         (staged_game.use_pqc ? CRYPTO_CIPHERTEXTBYTES : 0U) + 4U;
+         (staged_game.use_pqc ? CRYPTO_CIPHERTEXTBYTES : 0U) +
+         staged_game.setup_bytes + staged_game.response_bytes + 4U;
 }
 
 static void staged_game_aad(char *out, size_t out_len) {
@@ -1407,6 +1615,17 @@ static void print_staged_game_common(const char *stage, const char *result, uint
   print_kv_u32("elapsed_us", elapsed_us > 0 ? elapsed_us : 1U);
   print_kv_u32("bytes_payload", staged_game.payload_len);
   print_kv_u32("bytes_total", staged_game_bytes_total());
+  if (staged_game.use_fair) {
+    print_kv("experiment", FAIR_EXPERIMENT);
+    print_kv_u32("setup_bytes", staged_game.setup_bytes);
+    print_kv_u32("response_bytes", staged_game.response_bytes);
+    print_kv_u32(
+        "data_bytes",
+        static_cast<uint32_t>(staged_game.protected_len) +
+            AES_GCM_NONCE_BYTES + AES_GCM_TAG_BYTES + 4U);
+  } else {
+    print_kv("experiment", "LEGACY_V1");
+  }
   print_kv_u32("heap", ESP.getFreeHeap());
   print_kv_u32("min_heap", ESP.getMinFreeHeap());
 }
@@ -1417,6 +1636,8 @@ static void wipe_staged_game_secrets() {
   secure_wipe(pqc_sk, sizeof(pqc_sk));
   secure_wipe(pqc_ss_enc, sizeof(pqc_ss_enc));
   secure_wipe(pqc_ss_dec, sizeof(pqc_ss_dec));
+  secure_wipe(fair_sender_secret, sizeof(fair_sender_secret));
+  secure_wipe(fair_receiver_secret, sizeof(fair_receiver_secret));
   pqc_keypair_ready = false;
   pqc_shared_secret_ready = false;
 }
@@ -1431,6 +1652,12 @@ static bool build_staged_game_protection() {
   staged_game.keygen_us = 0;
   staged_game.encap_us = 0;
   staged_game.decap_us = 0;
+  staged_game.setup_us = 0;
+  staged_game.initiator_us = 0;
+  staged_game.responder_us = 0;
+  staged_game.kex_total_us = 0;
+  staged_game.setup_bytes = 0;
+  staged_game.response_bytes = 0;
   staged_game.kdf_us = 0;
   staged_game.rng_us = 0;
   staged_game.encrypt_us = 0;
@@ -1438,7 +1665,36 @@ static bool build_staged_game_protection() {
   staged_game.key_match = true;
   const uint32_t started = micros();
 
-  if (staged_game.use_pqc) {
+  if (staged_game.use_fair) {
+    FairKexMetrics fair_metrics = {};
+    char kdf_context[128];
+    snprintf(
+        kdf_context,
+        sizeof(kdf_context),
+        "PQC-SAT|GAME|%s|%s|%s|KEX_FAIR_V1",
+        staged_game.id,
+        staged_game.key_mode,
+        staged_game.guard);
+    if (!establish_fair_session(
+            staged_game.fair_algorithm,
+            kdf_context,
+            staged_game.aes_key_enc,
+            staged_game.aes_key_dec,
+            &fair_metrics,
+            &staged_game.kdf_us)) {
+      return false;
+    }
+    staged_game.key_match = fair_metrics.key_match;
+    staged_game.setup_us = fair_metrics.setup_us;
+    staged_game.initiator_us = fair_metrics.initiator_us;
+    staged_game.responder_us = fair_metrics.responder_us;
+    staged_game.kex_total_us = fair_metrics.kex_total_us;
+    staged_game.setup_bytes = fair_metrics.setup_bytes;
+    staged_game.response_bytes = fair_metrics.response_bytes;
+    staged_game.keygen_us = staged_game.setup_us;
+    staged_game.encap_us = staged_game.initiator_us;
+    staged_game.decap_us = staged_game.responder_us;
+  } else if (staged_game.use_pqc) {
     uint32_t op_started = micros();
     int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
     staged_game.keygen_us = micros() - op_started;
@@ -1479,7 +1735,11 @@ static bool build_staged_game_protection() {
   }
 
   const uint32_t nonce_started = micros();
-  if (!fill_random_bytes(staged_game.nonce, sizeof(staged_game.nonce))) {
+  const bool nonce_ok =
+      staged_game.use_fair
+          ? fair_random_bytes(staged_game.nonce, sizeof(staged_game.nonce)) == 0
+          : fill_random_bytes(staged_game.nonce, sizeof(staged_game.nonce));
+  if (!nonce_ok) {
     return false;
   }
   staged_game.rng_us += micros() - nonce_started;
@@ -1489,15 +1749,26 @@ static bool build_staged_game_protection() {
   char aad[112];
   staged_game_aad(aad, sizeof(aad));
   const uint32_t encrypt_started = micros();
-  const bool encrypt_ok = aes128_gcm_encrypt(
-      staged_game.aes_key_enc,
-      staged_game.nonce,
-      reinterpret_cast<const uint8_t *>(aad),
-      strlen(aad),
-      staged_game.protected_payload,
-      staged_game.protected_len,
-      staged_game.ciphertext,
-      staged_game.gcm_tag);
+  const bool encrypt_ok =
+      staged_game.use_fair
+          ? fair_aes128_gcm_encrypt_message(
+                staged_game.aes_key_enc,
+                staged_game.nonce,
+                reinterpret_cast<const uint8_t *>(aad),
+                strlen(aad),
+                staged_game.protected_payload,
+                staged_game.protected_len,
+                staged_game.ciphertext,
+                staged_game.gcm_tag)
+          : aes128_gcm_encrypt(
+                staged_game.aes_key_enc,
+                staged_game.nonce,
+                reinterpret_cast<const uint8_t *>(aad),
+                strlen(aad),
+                staged_game.protected_payload,
+                staged_game.protected_len,
+                staged_game.ciphertext,
+                staged_game.gcm_tag);
   staged_game.encrypt_us = micros() - encrypt_started;
   staged_game.protect_elapsed_us = micros() - started;
   return encrypt_ok;
@@ -1506,11 +1777,19 @@ static bool build_staged_game_protection() {
 static bool transmit_staged_game_incident(const char *incident) {
   char aad[112];
   staged_game_aad(aad, sizeof(aad));
-  uint8_t frame[112 + CRYPTO_CIPHERTEXTBYTES + AES_GCM_NONCE_BYTES + MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES + AES_GCM_TAG_BYTES];
+  uint8_t frame[
+      112 + FAIR_MAX_SETUP_BYTES + FAIR_MAX_RESPONSE_BYTES +
+      AES_GCM_NONCE_BYTES + MAX_EXPERIMENT_PAYLOAD +
+      MISSION_CRC_BYTES + AES_GCM_TAG_BYTES];
   size_t frame_len = 0;
   memcpy(&frame[frame_len], aad, strlen(aad));
   frame_len += strlen(aad);
-  if (staged_game.use_pqc) {
+  if (staged_game.use_fair) {
+    memcpy(&frame[frame_len], fair_setup_material, fair_setup_len);
+    frame_len += fair_setup_len;
+    memcpy(&frame[frame_len], fair_response_material, fair_response_len);
+    frame_len += fair_response_len;
+  } else if (staged_game.use_pqc) {
     memcpy(&frame[frame_len], pqc_ct, CRYPTO_CIPHERTEXTBYTES);
     frame_len += CRYPTO_CIPHERTEXTBYTES;
   }
@@ -1545,15 +1824,26 @@ static bool verify_staged_game_incident(const char *incident) {
   staged_game_aad(aad, sizeof(aad));
   memset(staged_game.decrypted, 0, sizeof(staged_game.decrypted));
   const uint32_t decrypt_started = micros();
-  const bool decrypt_ok = aes128_gcm_decrypt(
-      staged_game.aes_key_dec,
-      staged_game.nonce,
-      reinterpret_cast<const uint8_t *>(aad),
-      strlen(aad),
-      staged_game.ciphertext,
-      staged_game.protected_len,
-      staged_game.gcm_tag,
-      staged_game.decrypted);
+  const bool decrypt_ok =
+      staged_game.use_fair
+          ? fair_aes128_gcm_decrypt_message(
+                staged_game.aes_key_dec,
+                staged_game.nonce,
+                reinterpret_cast<const uint8_t *>(aad),
+                strlen(aad),
+                staged_game.ciphertext,
+                staged_game.protected_len,
+                staged_game.gcm_tag,
+                staged_game.decrypted)
+          : aes128_gcm_decrypt(
+                staged_game.aes_key_dec,
+                staged_game.nonce,
+                reinterpret_cast<const uint8_t *>(aad),
+                strlen(aad),
+                staged_game.ciphertext,
+                staged_game.protected_len,
+                staged_game.gcm_tag,
+                staged_game.decrypted);
   staged_game.decrypt_us = micros() - decrypt_started;
   staged_game.aead_checked = true;
   staged_game.aead_match = decrypt_ok;
@@ -1592,6 +1882,15 @@ static bool verify_staged_game_incident(const char *incident) {
 
 static void print_staged_game_verification(const char *stage, uint32_t elapsed_us) {
   print_staged_game_common(stage, staged_game.final_result, elapsed_us);
+  if (strcmp(stage, "RETRY") == 0) {
+    print_kv_u32("setup_us", staged_game.setup_us);
+    print_kv_u32("initiator_us", staged_game.initiator_us);
+    print_kv_u32("responder_us", staged_game.responder_us);
+    print_kv_u32("kex_total_us", staged_game.kex_total_us);
+    print_kv_u32("kdf_us", staged_game.kdf_us);
+    print_kv_u32("rng_us", staged_game.rng_us);
+    print_kv_u32("encrypt_us", staged_game.encrypt_us);
+  }
   print_kv_u32("byte_index", staged_game.byte_index);
   print_kv_hex_u8("bit_mask", staged_game.bit_mask);
   print_kv_bool("frame_crc_match", staged_game.frame_crc_match);
@@ -1940,6 +2239,313 @@ static void handle_pqc_bench(const char *request_id, size_t field_count, char *f
   end_result();
 }
 
+static bool run_fair_bench_round(
+    FairKexAlgorithm algorithm,
+    FairBenchTotals *totals) {
+  FairKexMetrics metrics = {};
+  const int rc = fair_kex_establish(
+      algorithm,
+      fair_sender_secret,
+      fair_receiver_secret,
+      fair_setup_material,
+      &fair_setup_len,
+      fair_response_material,
+      &fair_response_len,
+      &metrics);
+  totals->setup_us += metrics.setup_us;
+  totals->initiator_us += metrics.initiator_us;
+  totals->responder_us += metrics.responder_us;
+  totals->total_us += metrics.kex_total_us;
+  if (rc == 0 && metrics.key_match) {
+    totals->ok++;
+    return true;
+  }
+  if (totals->failure_rc == 0) {
+    totals->failure_rc = rc;
+  }
+  return false;
+}
+
+static void handle_kex_bench(const char *request_id, size_t field_count, char *fields[]) {
+  if (!fair_crypto_available()) {
+    print_error(request_id, "KEX_UNAVAILABLE", "build_robocore_wisdom_esp32_fair");
+    return;
+  }
+  uint16_t rounds = 3;
+  if (field_count >= 4) {
+    int parsed = 0;
+    if (!parse_int_range(fields[3], 1, 100, &parsed)) {
+      print_error(request_id, "BAD_ARGS", "expected_1_to_100");
+      return;
+    }
+    rounds = static_cast<uint16_t>(parsed);
+  }
+
+  FairBenchTotals ecdh = {};
+  FairBenchTotals mlkem = {};
+  const uint32_t started = micros();
+  for (uint16_t i = 0; i < rounds; ++i) {
+    if ((i & 1U) == 0U) {
+      run_fair_bench_round(FAIR_KEX_ECDH_P256, &ecdh);
+      run_fair_bench_round(FAIR_KEX_MLKEM512, &mlkem);
+    } else {
+      run_fair_bench_round(FAIR_KEX_MLKEM512, &mlkem);
+      run_fair_bench_round(FAIR_KEX_ECDH_P256, &ecdh);
+    }
+    delay(0);
+  }
+
+  const bool all_ok = ecdh.ok == rounds && mlkem.ok == rounds;
+  begin_result(request_id, all_ok ? "OK" : "ERROR");
+  print_kv("op", "paired_kex_benchmark");
+  print_kv("experiment", FAIR_EXPERIMENT);
+  print_kv("order", "alternating_paired");
+  print_kv("paired_order", "alternating");
+  print_kv_u32("warmup_rounds", 0);
+  print_kv_u32("n", rounds);
+  print_kv_u32("pairs", rounds);
+  print_kv_u32("ok", static_cast<uint32_t>(ecdh.ok) + mlkem.ok);
+  print_kv_u32("ecdh_ok", ecdh.ok);
+  print_kv_i32("ecdh_rc", ecdh.failure_rc);
+  print_kv_u32("ecdh_setup_avg_us", static_cast<uint32_t>(ecdh.setup_us / rounds));
+  print_kv_u32("ecdh_initiator_avg_us", static_cast<uint32_t>(ecdh.initiator_us / rounds));
+  print_kv_u32("ecdh_responder_avg_us", static_cast<uint32_t>(ecdh.responder_us / rounds));
+  print_kv_u32("ecdh_total_avg_us", static_cast<uint32_t>(ecdh.total_us / rounds));
+  print_kv_u32("ecdh_setup_bytes", FAIR_ECDH_PUBLIC_BYTES);
+  print_kv_u32("ecdh_response_bytes", FAIR_ECDH_PUBLIC_BYTES);
+  print_kv_u32("mlkem_ok", mlkem.ok);
+  print_kv_i32("mlkem_rc", mlkem.failure_rc);
+  print_kv_u32("mlkem_setup_avg_us", static_cast<uint32_t>(mlkem.setup_us / rounds));
+  print_kv_u32("mlkem_initiator_avg_us", static_cast<uint32_t>(mlkem.initiator_us / rounds));
+  print_kv_u32("mlkem_responder_avg_us", static_cast<uint32_t>(mlkem.responder_us / rounds));
+  print_kv_u32("mlkem_total_avg_us", static_cast<uint32_t>(mlkem.total_us / rounds));
+  print_kv_u32("mlkem_setup_bytes", FAIR_MLKEM_PUBLIC_BYTES);
+  print_kv_u32("mlkem_response_bytes", FAIR_MLKEM_CIPHERTEXT_BYTES);
+  print_kv("backend", fair_crypto_backend());
+  print_kv("version", fair_crypto_version());
+  print_kv("crypto_impl", fair_crypto_backend());
+  print_kv("crypto_version", fair_crypto_version());
+  print_kv("compiler", __VERSION__);
+  print_kv("framework", FAIR_FRAMEWORK);
+  print_kv("build_profile", FAIR_BUILD_PROFILE);
+  print_kv("kdf", FAIR_KDF);
+  print_kv("cipher", AEAD_CIPHER);
+  print_kv("optimization", FAIR_OPTIMIZATION);
+  print_kv_bool("target_asm", false);
+  print_kv_bool("hw_crypto", false);
+  print_kv_bool("authenticated_kex", false);
+  print_kv("profile", active_profile);
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  print_kv_u32("elapsed_us", micros() - started);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+  end_result();
+  secure_wipe(fair_sender_secret, sizeof(fair_sender_secret));
+  secure_wipe(fair_receiver_secret, sizeof(fair_receiver_secret));
+}
+
+static bool valid_session_message_count(int value) {
+  return value == 1 || value == 100 || value == 500 || value == 1000;
+}
+
+static void handle_session_bench(const char *request_id, size_t field_count, char *fields[]) {
+  if (!fair_crypto_available()) {
+    print_error(request_id, "KEX_UNAVAILABLE", "build_robocore_wisdom_esp32_fair");
+    return;
+  }
+  if (field_count != 6) {
+    print_error(request_id, "BAD_ARGS", "expected_ECDH_or_MLKEM_messages_payloadhex");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  FairKexAlgorithm algorithm = FAIR_KEX_ECDH_P256;
+  if (strcmp(fields[3], "ECDH") == 0) {
+    algorithm = FAIR_KEX_ECDH_P256;
+  } else if (strcmp(fields[3], "MLKEM") == 0) {
+    algorithm = FAIR_KEX_MLKEM512;
+  } else {
+    print_error(request_id, "BAD_ALGORITHM", "expected_ECDH_or_MLKEM");
+    return;
+  }
+
+  int parsed_messages = 0;
+  if (!parse_int_range(fields[4], 1, 1000, &parsed_messages) ||
+      !valid_session_message_count(parsed_messages)) {
+    print_error(request_id, "BAD_MESSAGES", "expected_1_100_500_or_1000");
+    return;
+  }
+  const uint32_t messages = static_cast<uint32_t>(parsed_messages);
+
+  uint8_t payload[MAX_EXPERIMENT_PAYLOAD] = {0};
+  size_t payload_len = 0;
+  if (!parse_hex_payload(fields[5], payload, sizeof(payload), &payload_len)) {
+    print_error(request_id, "BAD_PAYLOAD", "expected_even_hex_payload");
+    return;
+  }
+
+  uint8_t sender_key[AES128_KEY_BYTES] = {0};
+  uint8_t receiver_key[AES128_KEY_BYTES] = {0};
+  uint8_t nonce[AES_GCM_NONCE_BYTES] = {0};
+  uint8_t ciphertext[MAX_EXPERIMENT_PAYLOAD] = {0};
+  uint8_t decrypted[MAX_EXPERIMENT_PAYLOAD] = {0};
+  uint8_t tag[AES_GCM_TAG_BYTES] = {0};
+  FairKexMetrics kex_metrics = {};
+  uint32_t kdf_us = 0;
+  uint32_t rng_total_us = 0;
+  uint32_t encrypt_total_us = 0;
+  uint32_t decrypt_total_us = 0;
+  uint32_t messages_ok = 0;
+
+  const uint32_t heap_before = ESP.getFreeHeap();
+  const uint32_t min_heap_before = ESP.getMinFreeHeap();
+  const uint32_t largest_block_before =
+      static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+  const uint32_t stack_hwm_before =
+      static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
+  const uint32_t started = micros();
+
+  char context[72];
+  snprintf(
+      context,
+      sizeof(context),
+      "PQC-SAT|SESSION_BENCH|%s|v1",
+      fair_kex_name(algorithm));
+  bool session_ok = establish_fair_session(
+      algorithm,
+      context,
+      sender_key,
+      receiver_key,
+      &kex_metrics,
+      &kdf_us);
+
+  const uint32_t data_started = micros();
+  if (session_ok) {
+    const uint32_t rng_started = micros();
+    session_ok = fair_random_bytes(nonce, AES_GCM_NONCE_BYTES - sizeof(uint32_t)) == 0;
+    rng_total_us = micros() - rng_started;
+  }
+
+  char aad[80];
+  snprintf(
+      aad,
+      sizeof(aad),
+      "PQC-SAT|SESSION_BENCH|%s|%lu|v1",
+      fields[3],
+      static_cast<unsigned long>(messages));
+  for (uint32_t index = 0; session_ok && index < messages; ++index) {
+    write_u32_be(
+        &nonce[AES_GCM_NONCE_BYTES - sizeof(uint32_t)],
+        index + 1U);
+    uint32_t operation_started = micros();
+    const bool encrypted = fair_aes128_gcm_encrypt_message(
+        sender_key,
+        nonce,
+        reinterpret_cast<const uint8_t *>(aad),
+        strlen(aad),
+        payload,
+        payload_len,
+        ciphertext,
+        tag);
+    encrypt_total_us += micros() - operation_started;
+
+    operation_started = micros();
+    const bool decrypted_ok = encrypted && fair_aes128_gcm_decrypt_message(
+        receiver_key,
+        nonce,
+        reinterpret_cast<const uint8_t *>(aad),
+        strlen(aad),
+        ciphertext,
+        payload_len,
+        tag,
+        decrypted);
+    decrypt_total_us += micros() - operation_started;
+    const bool matched =
+        decrypted_ok && bytes_equal_constant_time(payload, decrypted, payload_len);
+    if (!matched) {
+      session_ok = false;
+      break;
+    }
+    messages_ok++;
+    if ((index & 31U) == 31U) {
+      delay(0);
+    }
+  }
+  const uint32_t data_total_us = micros() - data_started;
+  const uint32_t end_to_end_us = micros() - started;
+  const uint32_t heap_after = ESP.getFreeHeap();
+  const uint32_t min_heap_global = ESP.getMinFreeHeap();
+  const uint32_t largest_block_after =
+      static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+  const uint32_t stack_hwm_after =
+      static_cast<uint32_t>(uxTaskGetStackHighWaterMark(nullptr));
+  const uint32_t stack_hwm_words =
+      stack_hwm_after < stack_hwm_before ? stack_hwm_after : stack_hwm_before;
+
+  const uint32_t setup_bytes = kex_metrics.setup_bytes;
+  const uint32_t response_bytes = kex_metrics.response_bytes;
+  const uint32_t handshake_bytes = setup_bytes + response_bytes;
+  const uint32_t data_bytes_per_message =
+      static_cast<uint32_t>(payload_len) + AES_GCM_NONCE_BYTES + AES_GCM_TAG_BYTES;
+  const uint32_t data_total_bytes = data_bytes_per_message * messages;
+  const uint32_t wire_total_bytes = handshake_bytes + data_total_bytes;
+  const bool all_ok =
+      session_ok && kex_metrics.key_match && messages_ok == messages;
+
+  begin_result(request_id, all_ok ? "OK" : "ERROR");
+  print_kv("op", "session_benchmark");
+  print_kv("session_bench", FAIR_SESSION_BENCH);
+  print_fair_metadata(algorithm);
+  print_kv("cipher", AEAD_CIPHER);
+  print_kv("scenario", fields[3]);
+  print_kv("profile", active_profile);
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  print_kv_u32("messages", messages);
+  print_kv_u32("messages_ok", messages_ok);
+  print_kv_bool("key_match", kex_metrics.key_match);
+  print_kv_bool("aead_match", all_ok);
+  print_kv_u32("setup_us", kex_metrics.setup_us);
+  print_kv_u32("initiator_us", kex_metrics.initiator_us);
+  print_kv_u32("responder_us", kex_metrics.responder_us);
+  print_kv_u32("kex_total_us", kex_metrics.kex_total_us);
+  print_kv_u32("kdf_us", kdf_us);
+  print_kv_u32("session_setup_us", kex_metrics.kex_total_us + kdf_us);
+  print_kv_u32("rng_total_us", rng_total_us);
+  print_kv_u32("encrypt_total_us", encrypt_total_us);
+  print_kv_u32("decrypt_total_us", decrypt_total_us);
+  print_kv_u32("data_total_us", data_total_us);
+  print_kv_u32("end_to_end_us", end_to_end_us);
+  print_kv_u32("amortized_us_per_message", end_to_end_us / messages);
+  print_kv_u32("bytes_payload", static_cast<uint32_t>(payload_len));
+  print_kv_u32("setup_bytes", setup_bytes);
+  print_kv_u32("response_bytes", response_bytes);
+  print_kv_u32("handshake_bytes", handshake_bytes);
+  print_kv_u32("data_bytes_per_message", data_bytes_per_message);
+  print_kv_u32("data_total_bytes", data_total_bytes);
+  print_kv_u32("wire_total_bytes", wire_total_bytes);
+  print_kv_u32("amortized_bytes_per_message", wire_total_bytes / messages);
+  print_kv_u32("heap_before", heap_before);
+  print_kv_u32("heap_after", heap_after);
+  print_kv_i32(
+      "heap_delta",
+      static_cast<int32_t>(heap_before) - static_cast<int32_t>(heap_after));
+  print_kv_u32("min_heap_before", min_heap_before);
+  print_kv_u32("min_heap_global", min_heap_global);
+  print_kv_u32("largest_block_before", largest_block_before);
+  print_kv_u32("largest_block_after", largest_block_after);
+  print_kv_u32("stack_hwm_words", stack_hwm_words);
+  end_result();
+
+  secure_wipe(sender_key, sizeof(sender_key));
+  secure_wipe(receiver_key, sizeof(receiver_key));
+  secure_wipe(nonce, sizeof(nonce));
+  secure_wipe(ciphertext, sizeof(ciphertext));
+  secure_wipe(decrypted, sizeof(decrypted));
+  secure_wipe(tag, sizeof(tag));
+  secure_wipe(fair_sender_secret, sizeof(fair_sender_secret));
+  secure_wipe(fair_receiver_secret, sizeof(fair_receiver_secret));
+}
+
 static void handle_stress(const char *request_id, size_t field_count, char *fields[]) {
   if (field_count != 6) {
     print_error(request_id, "BAD_ARGS", "expected_PQC_LOOP_n_CONFIRM");
@@ -2019,7 +2625,7 @@ static void handle_stress(const char *request_id, size_t field_count, char *fiel
 
 static void handle_mission(const char *request_id, size_t field_count, char *fields[]) {
   if (field_count < 4 || field_count > 5) {
-    print_error(request_id, "BAD_ARGS", "expected_CLASSIC_CLASSIC_CRC32_PQC_PQC_CRC32_payloadhex");
+    print_error(request_id, "BAD_ARGS", "expected_legacy_or_ECDH_MLKEM_scenario_payloadhex");
     return;
   }
 
@@ -2028,8 +2634,17 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   const bool scenario_classic_crc = strcmp(fields[3], "CLASSIC_CRC32") == 0;
   const bool scenario_pqc = strcmp(fields[3], "PQC") == 0;
   const bool scenario_pqc_crc = strcmp(fields[3], "PQC_CRC32") == 0 || strcmp(fields[3], "PQC+CRC32") == 0;
-  if (!scenario_classic && !scenario_classic_crc && !scenario_pqc && !scenario_pqc_crc) {
-    print_error(request_id, "BAD_SCENARIO", "expected_CLASSIC_CLASSIC_CRC32_PQC_PQC_CRC32");
+  const bool scenario_ecdh = strcmp(fields[3], "ECDH") == 0;
+  const bool scenario_ecdh_crc = strcmp(fields[3], "ECDH_CRC32") == 0;
+  const bool scenario_mlkem = strcmp(fields[3], "MLKEM") == 0;
+  const bool scenario_mlkem_crc = strcmp(fields[3], "MLKEM_CRC32") == 0;
+  const bool use_fair = scenario_ecdh || scenario_ecdh_crc || scenario_mlkem || scenario_mlkem_crc;
+  if (!scenario_classic && !scenario_classic_crc && !scenario_pqc && !scenario_pqc_crc && !use_fair) {
+    print_error(request_id, "BAD_SCENARIO", "expected_CLASSIC_PQC_ECDH_or_MLKEM_with_optional_CRC32");
+    return;
+  }
+  if (use_fair && !fair_crypto_available()) {
+    print_error(request_id, "KEX_UNAVAILABLE", "build_robocore_wisdom_esp32_fair");
     return;
   }
 
@@ -2041,8 +2656,17 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   }
 
   const bool use_pqc = scenario_pqc || scenario_pqc_crc;
-  const bool use_crc = scenario_classic_crc || scenario_pqc_crc;
-  const char *scenario = scenario_pqc_crc ? "PQC_CRC32" : (scenario_pqc ? "PQC" : (scenario_classic_crc ? "CLASSIC_CRC32" : "CLASSIC"));
+  const bool use_crc = scenario_classic_crc || scenario_pqc_crc || scenario_ecdh_crc || scenario_mlkem_crc;
+  const FairKexAlgorithm fair_algorithm =
+      (scenario_ecdh || scenario_ecdh_crc) ? FAIR_KEX_ECDH_P256 : FAIR_KEX_MLKEM512;
+  const char *scenario =
+      scenario_mlkem_crc ? "MLKEM_CRC32" :
+      scenario_mlkem ? "MLKEM" :
+      scenario_ecdh_crc ? "ECDH_CRC32" :
+      scenario_ecdh ? "ECDH" :
+      scenario_pqc_crc ? "PQC_CRC32" :
+      scenario_pqc ? "PQC" :
+      scenario_classic_crc ? "CLASSIC_CRC32" : "CLASSIC";
 
   bool key_match = true;
   bool tag_ready = false;
@@ -2053,6 +2677,12 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   uint32_t keygen_us = 0;
   uint32_t encap_us = 0;
   uint32_t decap_us = 0;
+  uint32_t setup_us = 0;
+  uint32_t initiator_us = 0;
+  uint32_t responder_us = 0;
+  uint32_t kex_total_us = 0;
+  uint32_t setup_bytes = 0;
+  uint32_t response_bytes = 0;
   uint32_t rng_us = 0;
   uint32_t kdf_us = 0;
   uint32_t encrypt_us = 0;
@@ -2062,11 +2692,12 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   uint32_t crc_us = 0;
   uint32_t crc_tx = 0;
   uint32_t crc_rx = 0;
-  const uint32_t bytes_mlkem = use_pqc ? CRYPTO_CIPHERTEXTBYTES : 0U;
+  const uint32_t bytes_mlkem =
+      use_pqc ? CRYPTO_CIPHERTEXTBYTES :
+      (scenario_mlkem || scenario_mlkem_crc) ? FAIR_MLKEM_CIPHERTEXT_BYTES : 0U;
   const uint32_t bytes_nonce = AES_GCM_NONCE_BYTES;
   const uint32_t bytes_gcm_tag = AES_GCM_TAG_BYTES;
   const uint32_t checksum_bytes = use_crc ? MISSION_CRC_BYTES : 0U;
-  const uint32_t bytes_crypto = bytes_mlkem + bytes_nonce + bytes_gcm_tag;
   const size_t ciphertext_len = payload_len + checksum_bytes;
   const uint32_t payload_crc = crc32_bytes(payload, payload_len);
   uint8_t protected_payload[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
@@ -2092,7 +2723,37 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
     crc_us = micros() - crc_started;
   }
 
-  if (use_pqc) {
+  if (use_fair) {
+    FairKexMetrics fair_metrics = {};
+    char kdf_context[96];
+    snprintf(
+        kdf_context,
+        sizeof(kdf_context),
+        "PQC-SAT|MISSION|%s|AES-128-GCM|KEX_FAIR_V1",
+        scenario);
+    if (!establish_fair_session(
+            fair_algorithm,
+            kdf_context,
+            aes_key_enc,
+            aes_key_dec,
+            &fair_metrics,
+            &kdf_us)) {
+      secure_wipe(aes_key_enc, sizeof(aes_key_enc));
+      secure_wipe(aes_key_dec, sizeof(aes_key_dec));
+      print_error(request_id, "KEX_FAILED", fair_kex_name(fair_algorithm));
+      return;
+    }
+    key_match = fair_metrics.key_match;
+    setup_us = fair_metrics.setup_us;
+    initiator_us = fair_metrics.initiator_us;
+    responder_us = fair_metrics.responder_us;
+    kex_total_us = fair_metrics.kex_total_us;
+    setup_bytes = fair_metrics.setup_bytes;
+    response_bytes = fair_metrics.response_bytes;
+    keygen_us = setup_us;
+    encap_us = initiator_us;
+    decap_us = responder_us;
+  } else if (use_pqc) {
     uint32_t op_started = micros();
     int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
     keygen_us = micros() - op_started;
@@ -2143,7 +2804,10 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   }
 
   uint32_t op_started = micros();
-  if (!fill_random_bytes(nonce, sizeof(nonce))) {
+  const bool nonce_ok = use_fair
+                            ? fair_random_bytes(nonce, sizeof(nonce)) == 0
+                            : fill_random_bytes(nonce, sizeof(nonce));
+  if (!nonce_ok) {
     secure_wipe(aes_key_enc, sizeof(aes_key_enc));
     secure_wipe(aes_key_dec, sizeof(aes_key_dec));
     print_error(request_id, "RNG_FAILED", "gcm_nonce");
@@ -2155,27 +2819,49 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   snprintf(aad, sizeof(aad), "PQC-SAT|MISSION|%s|v1", scenario);
 
   op_started = micros();
-  const bool encrypt_ok = aes128_gcm_encrypt(
-      aes_key_enc,
-      nonce,
-      reinterpret_cast<const uint8_t *>(aad),
-      strlen(aad),
-      protected_payload,
-      ciphertext_len,
-      ciphertext,
-      gcm_tag);
+  const bool encrypt_ok =
+      use_fair
+          ? fair_aes128_gcm_encrypt_message(
+                aes_key_enc,
+                nonce,
+                reinterpret_cast<const uint8_t *>(aad),
+                strlen(aad),
+                protected_payload,
+                ciphertext_len,
+                ciphertext,
+                gcm_tag)
+          : aes128_gcm_encrypt(
+                aes_key_enc,
+                nonce,
+                reinterpret_cast<const uint8_t *>(aad),
+                strlen(aad),
+                protected_payload,
+                ciphertext_len,
+                ciphertext,
+                gcm_tag);
   encrypt_us = micros() - op_started;
 
   op_started = micros();
-  decrypt_ok = aes128_gcm_decrypt(
-      aes_key_dec,
-      nonce,
-      reinterpret_cast<const uint8_t *>(aad),
-      strlen(aad),
-      ciphertext,
-      ciphertext_len,
-      gcm_tag,
-      decrypted);
+  decrypt_ok =
+      use_fair
+          ? fair_aes128_gcm_decrypt_message(
+                aes_key_dec,
+                nonce,
+                reinterpret_cast<const uint8_t *>(aad),
+                strlen(aad),
+                ciphertext,
+                ciphertext_len,
+                gcm_tag,
+                decrypted)
+          : aes128_gcm_decrypt(
+                aes_key_dec,
+                nonce,
+                reinterpret_cast<const uint8_t *>(aad),
+                strlen(aad),
+                ciphertext,
+                ciphertext_len,
+                gcm_tag,
+                decrypted);
   decrypt_us = micros() - op_started;
 
   tag_us = encrypt_us;
@@ -2201,19 +2887,38 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
 
   const bool delivered = key_match && tag_match && (!use_crc || crc_match);
   const uint32_t elapsed_us = micros() - started;
+  if (!use_fair && use_pqc) {
+    response_bytes = CRYPTO_CIPHERTEXTBYTES;
+  }
+  const uint32_t data_bytes =
+      static_cast<uint32_t>(ciphertext_len) + bytes_nonce + bytes_gcm_tag;
+  const uint32_t bytes_crypto =
+      setup_bytes + response_bytes + bytes_nonce + bytes_gcm_tag;
   const uint32_t bytes_total = static_cast<uint32_t>(ciphertext_len) + bytes_crypto;
+  const uint32_t bytes_preprovisioned = response_bytes + data_bytes;
 
   begin_result(request_id, "OK");
   print_kv("scenario", scenario);
   print_kv("op", "mission_message");
   print_kv("message", "HELLO_UFF");
   print_kv("result", delivered ? "DELIVERED" : "REJECTED");
-  print_kv("crypto", use_pqc ? PQC_TARGET : CLASSIC_TARGET);
+  print_kv(
+      "crypto",
+      use_fair ? fair_kex_name(fair_algorithm) :
+      use_pqc ? PQC_TARGET : CLASSIC_TARGET);
   print_kv("cipher", AEAD_CIPHER);
   print_kv("checksum", use_crc ? "CRC32" : "NONE");
   print_kv("confirmation", AEAD_CIPHER);
-  print_kv("key_source", use_pqc ? PQC_TARGET : "RANDOM_SESSION");
+  print_kv(
+      "key_source",
+      use_fair ? fair_kex_name(fair_algorithm) :
+      use_pqc ? PQC_TARGET : "RANDOM_SESSION");
   print_kv("key_policy", "ephemeral_per_message");
+  if (use_fair) {
+    print_fair_metadata(fair_algorithm);
+  } else {
+    print_kv("experiment", "LEGACY_V1");
+  }
   print_kv_bool("key_match", key_match);
   print_kv_bool("tag_ready", tag_ready);
   print_kv_bool("tag_match", tag_match);
@@ -2234,6 +2939,11 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   print_kv_u32("bytes_crypto", bytes_crypto);
   print_kv_u32("bytes_checksum", checksum_bytes);
   print_kv_u32("bytes_total", bytes_total);
+  print_kv_u32("setup_bytes", setup_bytes);
+  print_kv_u32("response_bytes", response_bytes);
+  print_kv_u32("data_bytes", data_bytes);
+  print_kv_u32("wire_total_fresh", bytes_total);
+  print_kv_u32("wire_total_preprovisioned", bytes_preprovisioned);
   print_kv_u32("nonce_bytes", bytes_nonce);
   print_kv_u32("gcm_tag_bytes", bytes_gcm_tag);
   print_kv_u32("ciphertext_bytes", ciphertext_len);
@@ -2243,6 +2953,12 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   print_kv_u32("keygen_us", keygen_us);
   print_kv_u32("encap_us", encap_us);
   print_kv_u32("decap_us", decap_us);
+  print_kv_u32("setup_us", setup_us);
+  print_kv_u32("initiator_us", initiator_us);
+  print_kv_u32("responder_us", responder_us);
+  print_kv_u32("kex_total_us", kex_total_us);
+  print_kv_u32("online_us", elapsed_us >= setup_us ? elapsed_us - setup_us : elapsed_us);
+  print_kv_u32("end_to_end_us", elapsed_us);
   print_kv_u32("rng_us", rng_us);
   print_kv_u32("kdf_us", kdf_us);
   print_kv_u32("encrypt_us", encrypt_us);
@@ -2256,6 +2972,8 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   print_kv("profile", active_profile);
   print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
   end_result();
+  secure_wipe(fair_sender_secret, sizeof(fair_sender_secret));
+  secure_wipe(fair_receiver_secret, sizeof(fair_receiver_secret));
 }
 
 static void handle_game_begin(const char *request_id, size_t field_count, char *fields[]) {
@@ -2274,14 +2992,21 @@ static void handle_game_begin(const char *request_id, size_t field_count, char *
   }
   const bool key_classic = strcmp(fields[5], "CLASSIC") == 0;
   const bool key_pqc = strcmp(fields[5], "PQC") == 0;
+  const bool key_ecdh = strcmp(fields[5], "ECDH") == 0;
+  const bool key_mlkem = strcmp(fields[5], "MLKEM") == 0;
+  const bool key_fair = key_ecdh || key_mlkem;
   const bool guard_none = strcmp(fields[6], "NONE") == 0;
   const bool guard_crc = strcmp(fields[6], "CRC32") == 0;
   const bool incident_valid = strcmp(fields[7], "NORMAL") == 0 ||
                               strcmp(fields[7], "CHANNEL_BITFLIP") == 0 ||
                               strcmp(fields[7], "TAMPER") == 0 ||
                               strcmp(fields[7], "RX_MEMORY") == 0;
-  if ((!key_classic && !key_pqc) || (!guard_none && !guard_crc) || !incident_valid) {
-    staged_game_error(request_id, "BAD_ARGS", "expected_CLASSIC_or_PQC_NONE_or_CRC32_valid_incident");
+  if ((!key_classic && !key_pqc && !key_fair) || (!guard_none && !guard_crc) || !incident_valid) {
+    staged_game_error(request_id, "BAD_ARGS", "expected_CLASSIC_PQC_ECDH_or_MLKEM_NONE_or_CRC32_valid_incident");
+    return;
+  }
+  if (key_fair && !fair_crypto_available()) {
+    staged_game_error(request_id, "KEX_UNAVAILABLE", "build_robocore_wisdom_esp32_fair");
     return;
   }
   if (!apply_profile(fields[4])) {
@@ -2303,6 +3028,8 @@ static void handle_game_begin(const char *request_id, size_t field_count, char *
   snprintf(staged_game.guard, sizeof(staged_game.guard), "%s", fields[6]);
   snprintf(staged_game.incident, sizeof(staged_game.incident), "%s", fields[7]);
   staged_game.use_pqc = key_pqc;
+  staged_game.use_fair = key_fair;
+  staged_game.fair_algorithm = key_ecdh ? FAIR_KEX_ECDH_P256 : FAIR_KEX_MLKEM512;
   staged_game.use_app_crc = guard_crc;
   staged_game.protected_len = staged_game.payload_len + (guard_crc ? MISSION_CRC_BYTES : 0U);
   memcpy(staged_game.protected_payload, staged_game.payload, staged_game.payload_len);
@@ -2330,7 +3057,8 @@ static void handle_game_protect(const char *request_id, size_t field_count, char
     staged_game_error(request_id, "BAD_GAME_STATE", "GAME_PROTECT_requires_matching_PREPARE");
     return;
   }
-  set_main_led_rgb(staged_game.use_pqc ? 180 : 0, 0, staged_game.use_pqc ? 255 : 220);
+  const bool public_key_kex = staged_game.use_pqc || staged_game.use_fair;
+  set_main_led_rgb(public_key_kex ? 180 : 0, 0, public_key_kex ? 255 : 220);
   set_bar_percent(45);
   if (!build_staged_game_protection()) {
     staged_game_error(request_id, "GAME_PROTECT_FAILED", "key_or_aes_gcm_setup");
@@ -2348,9 +3076,17 @@ static void handle_game_protect(const char *request_id, size_t field_count, char
   print_kv_u32("keygen_us", staged_game.keygen_us);
   print_kv_u32("encap_us", staged_game.encap_us);
   print_kv_u32("decap_us", staged_game.decap_us);
+  print_kv_u32("setup_us", staged_game.setup_us);
+  print_kv_u32("initiator_us", staged_game.initiator_us);
+  print_kv_u32("responder_us", staged_game.responder_us);
+  print_kv_u32("kex_total_us", staged_game.kex_total_us);
   print_kv_u32("kdf_us", staged_game.kdf_us);
   print_kv_u32("rng_us", staged_game.rng_us);
   print_kv_u32("encrypt_us", staged_game.encrypt_us);
+  if (staged_game.use_fair) {
+    // print_staged_game_common already emitted experiment=KEX_FAIR_V1.
+    print_fair_metadata(staged_game.fair_algorithm, false);
+  }
   end_result();
 }
 
@@ -3340,17 +4076,26 @@ static void send_help_detail(const char *request_id, const char *command) {
   } else if (strcmp(command, "PQC_BENCH") == 0) {
     print_kv("usage", "PQC_BENCH n");
     print_kv("does", "benchmark keygen encap decap");
+  } else if (strcmp(command, "KEX_INFO") == 0) {
+    print_kv("usage", "KEX_INFO");
+    print_kv("does", "reporta configuração portátil ECDH/MLKEM FAIR_V1");
+  } else if (strcmp(command, "KEX_BENCH") == 0) {
+    print_kv("usage", "KEX_BENCH n");
+    print_kv("does", "benchmark pareado ECDH P-256 e ML-KEM-512");
+  } else if (strcmp(command, "SESSION_BENCH") == 0) {
+    print_kv("usage", "SESSION_BENCH ECDH|MLKEM 1|100|500|1000 payload_hex");
+    print_kv("does", "mede uma sessao e amortiza AES-GCM em varias mensagens");
   } else if (strcmp(command, "STRESS") == 0) {
     print_kv("usage", "STRESS PQC_LOOP n CONFIRM");
     print_kv("does", "executa ML-KEM em loop extremo");
   } else if (strcmp(command, "MISSION") == 0) {
-    print_kv("usage", "MISSION CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32 [payload_hex]");
+    print_kv("usage", "MISSION CLASSIC|PQC|ECDH|MLKEM [_CRC32] [payload_hex]");
     print_kv("does", "cifra com AES-GCM e mede custo por cenario");
   } else if (strcmp(command, "INVESTIGATE") == 0) {
     print_kv("usage", "INVESTIGATE scenario incident payload_hex index mask incident_id");
     print_kv("does", "instrumenta CRC de quadro GCM e CRC de aplicacao");
   } else if (strcmp(command, "GAME_BEGIN") == 0) {
-    print_kv("usage", "GAME_BEGIN id profile CLASSIC|PQC NONE|CRC32 incident payload_hex");
+    print_kv("usage", "GAME_BEGIN id profile CLASSIC|PQC|ECDH|MLKEM NONE|CRC32 incident payload_hex");
     print_kv("does", "inicia sessao STAGED_V1 e prepara payload");
   } else if (strcmp(command, "GAME_PROTECT") == 0) {
     print_kv("usage", "GAME_PROTECT id");
@@ -3435,10 +4180,10 @@ static void send_help(const char *request_id, size_t field_count, char *fields[]
   begin_result(request_id, "OK");
   print_kv("usage", "HELP [COMMAND]");
   print_kv("cmd1", "HELLO,PING,STATUS,TELEMETRY,FAULT,PERIPHERALS");
-  print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_FAULT,PQC_BENCH,STRESS");
-  print_kv("cmd3", "MISSION,INVESTIGATE,GAME_BEGIN,GAME_PROTECT,GAME_TRANSMIT,GAME_VERIFY");
-  print_kv("cmd4", "GAME_RETRY,GAME_END,GAME_ABORT,I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ");
-  print_kv("cmd5", "ANALOG,DIGITAL,RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS,HELP");
+  print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_FAULT,PQC_BENCH,KEX_INFO");
+  print_kv("cmd3", "KEX_BENCH,SESSION_BENCH,MISSION,INVESTIGATE,GAME_BEGIN,GAME_PROTECT,GAME_TRANSMIT");
+  print_kv("cmd4", "GAME_VERIFY,GAME_RETRY,GAME_END,GAME_ABORT,I2C_SCAN,FEATURES,BOARDMAP");
+  print_kv("cmd5", "SENSOR_READ,ANALOG,DIGITAL,RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS,HELP");
   end_result();
 }
 
@@ -3462,7 +4207,7 @@ static void process_frame(char *line) {
   command_count++;
 
   // A GAME_* session has exclusive ownership of the profile, LEDs and the
-  // global ML-KEM work buffers. HELLO is the reconnect/reset primitive and a
+  // global key-establishment work buffers. HELLO is the reconnect/reset primitive and a
   // new GAME_BEGIN intentionally replaces the previous session. ANALOG POT is
   // the sole read-only exception because it captures A39 for GAME_TRANSMIT.
   if (staged_game.active && strcmp(command, "HELLO") != 0 &&
@@ -3499,6 +4244,12 @@ static void process_frame(char *line) {
     handle_pqc_fault(request_id, field_count, fields);
   } else if (strcmp(command, "PQC_BENCH") == 0) {
     handle_pqc_bench(request_id, field_count, fields);
+  } else if (strcmp(command, "KEX_INFO") == 0) {
+    send_kex_info(request_id);
+  } else if (strcmp(command, "KEX_BENCH") == 0) {
+    handle_kex_bench(request_id, field_count, fields);
+  } else if (strcmp(command, "SESSION_BENCH") == 0) {
+    handle_session_bench(request_id, field_count, fields);
   } else if (strcmp(command, "STRESS") == 0) {
     handle_stress(request_id, field_count, fields);
   } else if (strcmp(command, "MISSION") == 0) {

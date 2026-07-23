@@ -10,7 +10,8 @@ PQC-SAT é uma demonstração didática sobre:
 - diferença entre corrupção silenciosa e erro detectado;
 - uso de mecanismos leves de integridade;
 - custo de implementação de PQC em hardware limitado;
-- comparação de entrega de mensagem em `CLASSIC`, `PQC` e `PQC_CRC32`;
+- comparação justa de estabelecimento de sessão em `ECDH` e `MLKEM`, com
+  guardião `NONE` ou `CRC32`;
 - integração com uma sessão ML-KEM-512 em ESP32.
 
 O programa público tem uma única camada operacional: jogo Pygame conectado à
@@ -44,12 +45,30 @@ implementar.
 - bridge serial Python e console `tools/serial_console.py`;
 - `dashboard.py` abre o standby e sonda todas as portas em worker por `HELLO`; exige
   `node=PQC-SAT-WISDOM`, `board=BlackBoard-Wisdom`, `proto=V1`,
-  `game=STAGED_V1` e `uptime_ms` válido antes de mostrar a abertura narrativa;
+  `game=STAGED_V1`, `kex=FAIR_V1`, `session_bench=FAIR_SESSION_V1` e
+  `uptime_ms` válido antes de mostrar a abertura narrativa;
 - seed determinística exclusiva para incidentes de teste (`42`);
 - mutação real de payload com CRC32 no dashboard e no firmware via
   `FAULT NONE|CRC32 payload_hex index mask`;
 - backend ML-KEM-512 real na Wisdom com `mlkem-native` v1.1.0, commit
   `d2cae2b`, vendorizado em `firmware/lib/mlkem_native`;
+- candidato `KEX_FAIR_V1` implementado em software com o mesmo wolfCrypt para
+  ECDH P-256, ML-KEM-512, HKDF-SHA256, RNG e AES-128-GCM; o perfil
+  `portable-software` desliga assembly do alvo e aceleração criptográfica;
+  `KEX_INFO`, `KEX_BENCH`, `MISSION ECDH|MLKEM`, `SESSION_BENCH` e o jogo
+  público `ECDH`/`MLKEM` estão integrados e compilam na revisão atual;
+- três smokes FAIR reais em 2026-07-23 fecharam incrementalmente o backend SP
+  ECC e o campo serial duplicado; a revisão final SHA-256 `9eba850f…32a18d`
+  concluiu 27 registros com `result=PASS`, incluindo `KEX_BENCH`, missões e
+  sessões ECDH/ML-KEM, `FAULT`, caminho `GAME_*`, A39 ativo, retry,
+  `INVESTIGATE` e `BUTTON_PING`;
+- `SESSION_BENCH ECDH|MLKEM` mede uma sessão nova mais 1, 100, 500 ou 1000
+  mensagens AES-128-GCM sob a mesma chave, separando setup, dados, total
+  ponta-a-ponta, custo amortizado, bytes e memória observável;
+- `tools/kex_metrics_battery.py` planeja a coleta FAIR pareada em ordem
+  alternada, valida equações e células experimentais e grava JSON autocontido;
+  uma coleta só recebe `official_candidate=true` com desenho oficial,
+  respostas válidas e manifesto do firmware realmente gravado;
 - comandos PQC de bancada: `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`,
   `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH`; validação real em placa teve
   `PQC_KAT kat=pass`, `PQC_FAULT CONFIRM result=PROTOCOL_REJECT` e
@@ -106,7 +125,7 @@ implementar.
   `stand_demo.py`, dashboard manual legado, launchers Bash e flags de simulação
   de produção foram removidos; limites estão em
   `docs/DASHBOARD_ARCHITECTURE.md`;
-- `Missão Bit Flip` oferece três missões, 240/80 MHz, chave CLASSIC/PQC,
+- `Missão Bit Flip` oferece três missões, 240/80 MHz, chave ECDH/MLKEM,
   guardião NONE/CRC32, incidente oculto, diagnóstico e resposta operacional;
 - comando `INVESTIGATE` implementado no firmware para instrumentar, na mesma
   execução, CRC do quadro, AES-GCM e CRC da aplicação em `NORMAL`,
@@ -119,10 +138,11 @@ implementar.
   zero eventos rejeitados e invariantes do log aprovados; o dashboard de
   produção conectado permaneceu oito segundos em `ATTRACT`, sem transição
   espontânea;
-- o diagnóstico real executou os quatro casos curtos de `INVESTIGATE`; duas
-  janelas assistidas de 30 s e 45 s não observaram `BUTTON_PING`, portanto o
-  acionamento/fiação de D27 continua pendente e o smoke administrativo não é
-  aceite físico longo.
+- o diagnóstico investigativo anterior executou os quatro casos curtos de
+  `INVESTIGATE`; duas janelas assistidas de 30 s e 45 s não observaram
+  `BUTTON_PING`. Essa lacuna histórica foi fechada no smoke FAIR curto de
+  2026-07-23, que observou `button=1`, `pot=1469` e uptime fresco; repouso D27,
+  partida integral e aceite físico longo continuam pendentes.
 - jogo didático `STAGED_V1` implementado em software com 14 estados: toque em
   cartão apenas seleciona, D27 ou faixa verde confirmam cada transição, A39 seleciona o bit, resposta
   serial e animação apenas liberam a confirmação, sem timeout ou reset público;
@@ -130,7 +150,7 @@ implementar.
   Terra/CubeSat, chamada única e botão `INICIAR MISSÃO`; clique ou D27 abrem
   diretamente as escolhas; depois do replay validado, a própria mensagem pode ser
   arrastada por estações explicadas sem alterar o controlador ou o gate de confirmação;
-- standby permanece até `HELLO STAGED_V1` e fecha automaticamente; a abertura
+- standby permanece até `HELLO STAGED_V1/FAIR_V1/FAIR_SESSION_V1` e fecha automaticamente; a abertura
   narrativa permanece até clique ou D27, e o controle de tela usa `ANALOG POT` antes
   de confirmar `PROTECT`;
 - cartões de escolha são quadrados, sem subtítulos internos, com títulos e
@@ -140,29 +160,38 @@ implementar.
   `GAME_VERIFY`, `GAME_RETRY`, `GAME_END` e `GAME_ABORT` implementado no
   firmware, preservando `INVESTIGATE` e o fluxo legado; `CLASSIC_CRC32` permite
   escolher modo de chave e CRC da aplicação independentemente;
-- validação host atual do jogo por etapas concluída com 97 testes, matriz de 32
-  casos, soak offline de 50 partidas, 66 capturas, vídeo rotulado e benchmark
-  abaixo de 16,667 ms em ambas as resoluções; o firmware candidato compila com
-  57.332 B de RAM e 932.173 B de flash, mas ainda não foi gravado nem executado
-  na Wisdom;
+- validação host atual passa 117 testes e preserva a matriz de 32 casos, soak offline
+  de 50 partidas, 66 capturas, vídeo rotulado e benchmark abaixo de 16,667 ms
+  em ambas as resoluções; após build FAIR, o candidato corrigido usa
+  59.020 B de RAM e 1.005.497 B de flash, com binário de 1.012.080 B e
+  SHA-256 `9eba850f…32a18d`; o perfil legado atual compila com 59.004 B de RAM,
+  940.421 B de flash e binário de 946.992 B; o candidato FAIR foi gravado e
+  verificado pelo manifesto `20260723T155737Z`;
 - corrigida no candidato a incompatibilidade observada em hardware na qual
   `ANALOG POT` retornava `BAD_GAME_STATE` durante `PROTECT` e apagava a sessão;
   a leitura A39 agora é a única consulta não `GAME_*` permitida e a regressão
-  exige que `GAME_TRANSMIT` continue válido depois dela; falta novo flash para
-  validar a correção na placa;
+  exige que `GAME_TRANSMIT` continue válido depois dela; a sequência foi
+  validada na placa no diagnóstico `20260723T160223Z`;
 - `tools/firmware_deploy.py` prepara build e upload sem Bash: a gravação só
-  ocorre com `--upload`, depois de provar a identidade da Wisdom por `HELLO`, e
-  o comando só termina com sucesso após validar `game=STAGED_V1`;
-- sondagem real em 2026-07-22 reconheceu a Wisdom pelo caminho estável
-  `/dev/serial/by-id`, mas confirmou que a revisão atualmente gravada ainda não
-  anuncia `game=STAGED_V1`; nenhum upload foi executado.
+  ocorre com `--upload`, depois de provar a identidade da Wisdom por `HELLO`;
+  o comando só termina com sucesso após validar
+  `game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` e então grava
+  manifesto JSON com hashes, ambiente, porta e handshakes pré/pós-upload;
+- a revisão SHA-256 `afa5724c…af0d47` foi gravada na Wisdom e confirmou
+  `STAGED_V1/FAIR_V1/FAIR_SESSION_V1`, `KEX_INFO`, `KEX_BENCH 1`, missões e
+  sessões ECDH/ML-KEM; o smoke parou antes de `GAME_PROTECT` ser decodificado
+  por uma chave `experiment` duplicada, agora corrigida localmente.
+- a revisão SHA-256 `9eba850f…32a18d` foi gravada na Wisdom e o diagnóstico
+  `20260723T160223Z` passou integralmente; `BUTTON_PING` físico foi finalmente
+  observado com `button=1`, `pot=1469` e uptime fresco.
 
 ### Não implementado
 Nenhuma etapa técnica permanece aberta para o MVP original do seminário. O
-jogo `STAGED_V1` ainda precisa de flash, handshake e smoke reais, `BUTTON_PING`
-observado, partida inteira por D27, ensaio no monitor definitivo, aceite físico
-longo e teste de compreensão com cinco pessoas; não declarar a extensão pronta
-antes de fechar esses gates em `docs/stand/FINAL_VALIDATION.md`.
+jogo `STAGED_V1/FAIR_V1` ainda precisa de bateria FAIR oficial, repouso D27
+confirmado, partida inteira por D27, ensaio no monitor definitivo,
+aceite físico longo e teste de compreensão com cinco pessoas; não declarar a
+extensão pronta antes de fechar esses gates em
+`docs/stand/FINAL_VALIDATION.md`.
 
 ## 4. Stack
 
@@ -176,7 +205,8 @@ antes de fechar esses gates em `docs/stand/FINAL_VALIDATION.md`.
 | Assets | desenho procedural, sem arquivos externos |
 | Serial | pyserial 3.5+ obrigatório em produção |
 | Firmware | Arduino/PlatformIO para BlackBoard Wisdom |
-| PQC | ML-KEM-512 com `mlkem-native` v1.1.0 vendorizado |
+| PQC comparativa | ECDH P-256 e ML-KEM-512 no wolfCrypt 5.9.2 local, mesma árvore GPLv3 oficial ou distribuição comercial equivalente, nunca versionada |
+| PQC legada | ML-KEM-512 com `mlkem-native` v1.1.0 vendorizado |
 
 ### Planejada
 
@@ -236,16 +266,22 @@ ML-KEM/FIPS 203.
   chamar o agente novamente, o agente deve analisar os logs/resultados gerados.
   Smoke tests curtos podem ser executados pelo agente apenas quando forem
   necessários e autorizados.
-  Para gerar uma nova coleta estatística final, indique ao operador:
+  Para reproduzir a coleta estatística legada, indique ao operador:
   `python3 tools/aes_gcm_metrics_battery.py --port /dev/ttyUSB0 --timeout 12 --cycles 100 --pause 0.25 --bench-repeats 3 --bench-rounds 100`.
   O resumo esperado inclui `official_candidate=true`, `failed=0`,
   `mission_runs=600`, `pqc_bench_runs=6`, `fault_runs=400`,
   `aead_failures=0` e `non_aes_gcm_records=0`.
   Para repetir o aceite longo deste projeto, indique ao operador:
   `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 tools/stage8_acceptance.py --port /dev/ttyUSB0 --timeout 12 --duration 1800 --interval 30`.
-  O resumo esperado é `ok=true`, `failed=0` e `pqc_bench_runs=2`; depois do
-  comando `MISSION`, também deve haver
-  `mission_runs>=6`.
+  O resumo esperado é `ok=true`, `failed=0`, `semantic_errors=[]`,
+  `kex_bench_runs=2`, `fresh_mission_runs>=4` e
+  `session_bench_runs>=4`.
+  Para a comparação FAIR atual, depois do upload validado, indique ao operador:
+  `python3 tools/kex_metrics_battery.py --port /dev/ttyUSB0 --deployment-manifest logs/firmware/<manifesto_deploy>.json --timeout 12 --fresh-cycles 100 --session-repeats 30 --message-counts 1 100 500 1000 --pause 0.25 --bench-repeats 3 --bench-rounds 100`.
+  O resumo esperado é `official_candidate=true`, `failed=0`,
+  `fresh_mission_runs=400`, `session_bench_runs=480`,
+  `kex_bench_runs=6`, `invalid_pairs=0`, `missing_cells=0` e
+  `profile_mismatches=0`.
 - Preserve alterações locais do usuário que não pertençam à tarefa.
 
 Os tamanhos atuais são:
@@ -282,6 +318,14 @@ Para ML-KEM:
 
 Para `MISSION`:
 
+- `ECDH` e `MLKEM` são os cenários `KEX_FAIR_V1`: mesmo wolfCrypt, RNG,
+  HKDF-SHA256, AES-128-GCM, flags, placa, frequência e metodologia;
+- meça separadamente `setup_us`, `initiator_us`, `responder_us`,
+  `kex_total_us`, `online_us`, `end_to_end_us`, `setup_bytes`,
+  `response_bytes`, `data_bytes`, `wire_total_fresh` e
+  `wire_total_preprovisioned`;
+- `CLASSIC`, `PQC` e suas variantes CRC32 são legados e nunca devem ser
+  apresentados como ECDH versus ML-KEM;
 - `CLASSIC` é baseline clássico simétrico com `AES-128-GCM`, chave efêmera e
   nonce aleatório gerados na Wisdom; não o apresente como ECDH nem como
   criptografia assimétrica clássica completa;
@@ -294,6 +338,16 @@ Para `MISSION`:
   tratados como históricos pré-AES até uma nova bateria oficial;
 - energia só pode ser proxy por tempo de CPU, exceto se houver medição elétrica
   externa.
+
+Para `SESSION_BENCH`:
+
+- estabeleça uma única sessão ECDH ou ML-KEM e use a mesma chave derivada para
+  1, 100, 500 ou 1000 mensagens AES-128-GCM;
+- compare setup, processamento de dados, total ponta-a-ponta, custo por
+  mensagem amortizado, bytes de handshake/dados/fio e memória observável;
+- `min_heap` do ESP32 é mínimo global desde o boot e não prova pico isolado do
+  algoritmo; registre também heap antes/depois, maior bloco e stack high-water
+  mark, descrevendo essa limitação.
 
 Para checksums:
 
@@ -325,11 +379,15 @@ compilação.
 
 ## 8. Próxima ordem de trabalho
 
-1. Flashar o firmware candidato e confirmar `HELLO game=STAGED_V1` na Wisdom.
-2. Executar diagnóstico curto, observar `BUTTON_PING` com A39 e validar ordem/ID.
-3. Percorrer uma partida física completa, inclusive retry, somente com D27.
-4. Provar permanência sem avanço em cada estado e ensaiar no monitor definitivo.
-5. Executar pelo operador o gate longo descrito em `docs/stand/RUNBOOK.md`.
-6. Testar compreensão com cinco visitantes e fechar a validação final.
+1. Registrar o D27 em repouso (`button=0`) e percorrer uma partida visual
+   completa, inclusive retry, somente com D27.
+2. Percorrer outra partida completa pela faixa verde, validar
+   `ANALOG POT` em `PROTECT` e exercitar `GAME_ABORT`.
+3. Variar o A39 e executar a matriz física curta de modos, guardiões,
+   incidentes e perfis.
+4. Executar pelo operador a bateria FAIR v2 e entregar o JSON para análise.
+5. Provar permanência sem avanço em cada estado e ensaiar no monitor definitivo.
+6. Executar pelo operador o gate longo descrito em `docs/stand/RUNBOOK.md`.
+7. Testar compreensão com cinco visitantes e fechar a validação final.
 
-Última revisão: 2026-07-22.
+Última revisão: 2026-07-23.

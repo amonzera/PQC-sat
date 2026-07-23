@@ -1,38 +1,46 @@
-# Validação final — jogo didático `STAGED_V1`
+# Validação final — jogo didático `STAGED_V1/FAIR_V1`
 
-Última revisão: 2026-07-22.
+Última revisão: 2026-07-23.
 
 ## Decisão atual
 
 Estado: **release candidate de software; não aprovado para uso público**.
 
 O jogo por etapas está implementado e validado no host/fixture. O firmware
-candidato compila, mas esta revisão `STAGED_V1` ainda não foi gravada nem
-executada na Wisdom. Evidências físicas anteriores de `INVESTIGATE` e do fluxo
-de nove estados continuam válidas como histórico, mas não validam os novos
-comandos `GAME_*`, as confirmações D27/tela por partida ou o novo debrief.
+FAIR atual, incluindo `SESSION_BENCH`, compila do zero com a árvore wolfSSL
+5.9.2 identificada. A revisão final `9eba850f…32a18d` foi gravada e o
+diagnóstico curto completo passou com 27 registros: ECDH/ML-KEM, sessões,
+falhas, caminho transacional, A39, retry, compatibilidade e `BUTTON_PING`.
+Evidências físicas anteriores de
+`INVESTIGATE` e do fluxo de nove estados continuam válidas como histórico, mas
+não validam o par ECDH/ML-KEM no wolfCrypt, os novos comandos `GAME_*`, as
+confirmações D27/tela por partida ou o novo debrief.
 
 ## Evidência de software desta revisão
 
 | Verificação | Resultado | Evidência |
 |---|---|---|
-| suíte integrada | PASS | 97 testes atuais; busca automática, narrativa direta, reconexão, controle de tela, A39 assíncrono, legado e jogo por etapas |
+| suíte integrada | PASS | 117 testes host; busca automática, narrativa direta, reconexão, controle de tela, A39 assíncrono, contrato FAIR, manifesto, códigos de retorno KEX, baterias v2, limites serial separados, legado e jogo por etapas |
 | matriz científica | PASS | 2 perfis × 2 modos de chave × 2 guardiões × 4 incidentes = 32 casos |
 | confirmação explícita | PASS no modelo | transições v2 exigem `button_confirmed` de origem `physical|screen`; resposta/animação não avançam |
-| busca automática | PASS no host/modelo | dashboard permanece aberto sem porta; somente `HELLO STAGED_V1` fecha o standby |
+| busca automática | PASS no host/modelo | dashboard permanece aberto sem porta; somente `HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` fecha o standby |
 | narrativa direta | PASS no modelo | Terra/CubeSat, chamada única e `INICIAR MISSÃO`; clique ou D27 abrem as escolhas sem tela intermediária |
 | reconexão | PASS no modelo | qualquer queda mostra busca; novo handshake apaga a partida e volta automaticamente à narrativa |
-| A39 pelo verde | PASS no código/fixture; FAIL no hardware pós-fix | `ANALOG POT` preserva a sessão em `PROTECT` e o `GAME_TRANSMIT` seguinte é aceito; valor inválido ou timeout não avança; candidato corrigido ainda não foi gravado |
+| A39 durante sessão | PASS no hardware curto | `GAME_PROTECT -> ANALOG POT -> GAME_TRANSMIT` preservou a sessão; `pot=1470` selecionou byte 13/máscara `0x04` |
 | ausência de timeout público | PASS | estados permanecem parados; flags públicas desabilitadas |
-| retransmissão | PASS no fixture | mesmo payload, chave e nonce novos, resultado `DELIVERED` |
+| retransmissão | PASS no hardware curto | `same_payload=1`, `fresh_key=1`, `fresh_nonce=1`, `result=DELIVERED` |
 | soak offline | PASS | 50/50 partidas, 625 confirmações lógicas, 100 mudanças A39, 275 `GAME_*`, 25 retries, zero erros e zero crescimento RSS |
 | renderização | PASS | por resolução: busca + 14 estados + 18 quadros dos replays; tela de tutorial ausente |
 | orçamento médio | PASS | interface completa: 7,280 ms e 10,204 ms; limite 16,667 ms no host headless |
 | vídeo offline | PASS | `staged_game_test_fixture.mp4`, permanentemente rotulado como fixture sem hardware |
-| firmware | PASS apenas na compilação | 57.332 B RAM (17,5%), 932.173 B flash (71,1%), binário 938.752 B, SHA-256 `288d5f49…e5d51e`; nenhum upload |
+| smoke FAIR anterior | FAIL parcial na placa | `logs/stand/diagnostics/20260723T152842Z_stand_diagnostic.json`: handshake, perfil, `KEX_INFO` e ML-KEM passaram; ECDH falhou no setup em 29 µs, antes de initiator/responder |
+| segundo smoke FAIR | PASS criptográfico; FAIL no protocolo | `logs/stand/diagnostics/20260723T155138Z_stand_diagnostic.json`: `KEX_BENCH`, `MISSION` e `SESSION_BENCH` passaram para ECDH/ML-KEM; `FAULT` passou; `GAME_BEGIN` passou; `GAME_PROTECT` tinha `experiment` duplicado |
+| firmware FAIR corrigido | PASS em build, flash e smoke curto | wolfSSL 5.9.2, 59.020 B RAM, 1.005.497 B flash, binário 1.012.080 B, SHA-256 `9eba850f…32a18d`; manifesto `20260723T155737Z`; diagnóstico `20260723T160223Z` com `result=PASS` |
+| firmware legado atual | PASS apenas na compilação | ambiente isolado de wolfSSL: 59.004 B RAM (18,0%), 940.421 B flash (71,7%), binário 946.992 B, SHA-256 `8cfd7746…d152188`; nenhum upload |
 
 O registro consolidado fica em
-`docs/stand/evidence/software_validation.json`. Capturas ficam em
+`docs/stand/evidence/software_validation.json`; esse artefato é anterior ao
+perfil FAIR e permanece como histórico da UI. Capturas ficam em
 `states_staged_game/`, `states_staged_game_1920x1080/` e nos diretórios
 `states_staged_game_replay*`; o soak fica em
 `staged_game_soak.json`.
@@ -73,23 +81,63 @@ Já foi verificado em 2026-07-21, com o firmware investigativo anterior:
 - duas janelas de 30 s e 45 s sem observar `BUTTON_PING`.
 
 Isso comprova a base AES-GCM/ML-KEM/CRC e o comando legado naquela revisão.
-Não comprova `game=STAGED_V1`, `GAME_BEGIN…GAME_END`, botão D27 atual, A39 em
-todas as combinações, material novo de retry ou ausência de avanço automático
-em cada um dos 14 estados.
+Em 2026-07-23, a revisão FAIR seguinte também comprovou na Wisdom:
+
+- `HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`;
+- `STATUS`, `ANALOG POT`, `PROFILE BASELINE` e `KEX_INFO`;
+- uma rodada ML-KEM-512 completa no wolfCrypt, com `mlkem_ok=1`;
+- falha ECDH no primeiro `wc_ecc_make_key_ex`, observada como
+  `ecdh_ok=0`, `setup_us=29` e demais estágios zerados.
+
+O código do wolfSSL confirmou a causa: `WOLFSSL_SP_MATH` sem
+`WOLFSSL_HAVE_SP_ECC` retorna `WC_KEY_SIZE_E (-234)` para P-256. A revisão
+seguinte, gravada pelo manifesto
+`logs/firmware/20260723T155122Z_firmware_deploy_dev-ttyUSB0.json`, comprovou
+na placa:
+
+- `KEX_BENCH 1` com `ecdh_ok=1`, `mlkem_ok=1` e ambos os códigos de retorno
+  zerados;
+- `MISSION ECDH`, `MISSION MLKEM` e ambos os `SESSION_BENCH ... 1`;
+- `FAULT NONE` como corrupção silenciosa e `FAULT CRC32` como detecção;
+- rejeição esperada de `GAME_VERIFY` fora de ordem e `GAME_BEGIN` válido.
+
+O comando seguinte, `GAME_PROTECT`, emitia `experiment` duas vezes: uma no
+bloco comum e outra nos metadados FAIR. A revisão final preservou o primeiro
+campo, omitiu apenas a duplicata e foi gravada pelo manifesto
+`logs/firmware/20260723T155737Z_firmware_deploy_dev-ttyUSB0.json`.
+O diagnóstico `logs/stand/diagnostics/20260723T160223Z_stand_diagnostic.json`
+comprovou:
+
+- `result=PASS` em 27 registros;
+- `KEX_BENCH`, missões e sessões ECDH/ML-KEM;
+- `GAME_BEGIN -> PROTECT -> ANALOG POT -> TRANSMIT -> VERIFY -> RETRY -> END`;
+- `RX_MEMORY/CRC32` classificado `APP_REJECT`;
+- retry com mesmo payload, chave e nonce novos e entrega final;
+- quatro casos `INVESTIGATE`;
+- `BUTTON_PING` físico com `button=1`, `pot=1469` e uptime fresco.
+
+Essa evidência ainda não comprova repouso `button=0`, uma partida visual
+integral por D27 ou faixa verde, `GAME_ABORT`, matriz física, permanência em
+todos os 14 estados, baterias longas ou compreensão de visitantes.
 
 ## Gates físicos obrigatórios
 
 | Gate | Estado | Critério de fechamento |
 |---|---|---|
-| flash do candidato | FAIL | gravar exatamente o firmware atual e registrar hash/build |
-| handshake novo | FAIL | observar `HELLO ... game=STAGED_V1` |
-| D27 físico | FAIL | repouso `button=0`, pressionado `button=1`, evento com `pot` e uptime novo |
-| protocolo transacional | FAIL | executar todos os `GAME_*`; rejeitar ordem e ID errados |
+| flash do candidato corrigido | PASS | binário SHA-256 `9eba850f…32a18d` gravado |
+| manifesto de deploy | PASS | `20260723T155737Z_firmware_deploy_dev-ttyUSB0.json`, hashes, porta e handshakes válidos |
+| handshake novo | PASS | `HELLO ... game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` |
+| backend comum | PASS | `KEX_INFO` confirmou wolfCrypt, HKDF-SHA256, AES-128-GCM, `target_asm=0` e `hw_crypto=0` |
+| benchmark pareado curto | PASS | `KEX_BENCH 1`, `MISSION ECDH|MLKEM` e `SESSION_BENCH ECDH|MLKEM 1` fecharam sem erro |
+| bateria FAIR oficial | FAIL | JSON v2 com 400 fresh, 480 session, 6 benches, pares/células/perfis válidos e `official_candidate=true` |
+| regressão serial longa FAIR | FAIL | JSON `pqc-sat-stage8-acceptance-v2` sem falhas semânticas, com ECDH/ML-KEM e sessão nos dois perfis |
+| D27 físico | PARCIAL | `BUTTON_PING button=1 pot=1469` e uptime novo observados; falta provar repouso `button=0` e partida integral |
+| protocolo transacional | PARCIAL | caminho principal, retry e ordem inválida passaram; falta `GAME_ABORT` e partida visual |
 | partida visível D27 | FAIL | uma partida completa com todos os avanços por D27 físico no JSONL v2 |
 | partida visível verde | FAIL | busca automática, abertura confirmada e uma partida completa pelo verde, inclusive `ANALOG POT` em `PROTECT` |
 | permanência dos estados | FAIL | deixar cada estado parado e provar ausência de avanço/reset |
-| A39 e matriz curta | FAIL | variar bit e testar quatro proteções e incidentes principais |
-| retransmissão real | FAIL | mesmo payload, chave/nonce novos e `DELIVERED` |
+| A39 e matriz curta | PARCIAL | A39 ativo selecionou byte 13/`0x04`; falta variar vetor e matriz |
+| retransmissão real | PASS | mesmo payload, chave/nonce novos e `DELIVERED` |
 | monitor definitivo | FAIL | confirmar legibilidade e controles na montagem final |
 | 30 partidas / 3 h | FAIL | >100 D27, >100 mudanças A39 com delta ADC ≥16, dez reconexões, zero invariantes violados |
 | cinco visitantes | FAIL | mediana 120–180 s e critérios 4/5 de compreensão |
@@ -114,6 +162,14 @@ smoke. Depois deve executar na interface uma partida completa por D27 e outra
 pelo botão verde, conferindo a leitura A39 sob demanda, e testar permanência
 dos estados conforme `RUNBOOK.md`.
 
+O comando de upload imprime um manifesto. Depois do smoke curto, a bateria FAIR
+oficial deve ser executada pelo operador exatamente como descrito na seção 8
+do `RUNBOOK.md`; o agente apenas analisa o JSON resultante.
+
+O aceite serial longo da seção 9 do `RUNBOOK.md` é separado da coleta
+estatística e deve produzir `pqc-sat-stage8-acceptance-v2`; ele também não é
+iniciado pelo agente.
+
 ## Gate longo do operador
 
 O agente não inicia o gate longo. O operador usa:
@@ -137,7 +193,8 @@ O relatório `hardware_acceptance_summary.json` precisa ter todos os gates em
 | código, configuração v3, parsers, fixture v2 e firmware | PASS em software |
 | testes, soak, benchmark, 66 capturas e vídeo offline | PASS |
 | documentação, guia do apresentador e catálogo técnico | PASS |
-| log de partida `STAGED_V1` em hardware | FAIL — ainda não produzido |
+| JSON FAIR v2 oficial ECDH/ML-KEM | FAIL — bateria do operador ainda não executada |
+| log de partida `STAGED_V1/FAIR_V1` em hardware | FAIL — ainda não produzido |
 | vídeo físico com D27 | FAIL — ainda não produzido |
 | aceite de três horas | FAIL — ainda não executado |
 | avaliação com cinco visitantes | FAIL — ainda não executada |

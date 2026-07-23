@@ -6,7 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 FRAME_VERSION = "V1"
-MAX_FRAME_CHARS = 1024
+MAX_COMMAND_CHARS = 384
+MAX_FRAME_CHARS = 4096
 
 
 class ProtocolError(ValueError):
@@ -48,10 +49,10 @@ def _normalize_token(token: object, *, name: str, uppercase: bool = False) -> st
     return value
 
 
-def _join_tokens(tokens: list[str]) -> str:
+def _join_tokens(tokens: list[str], *, max_chars: int, kind: str) -> str:
     frame = "|".join(tokens)
-    if len(frame) > MAX_FRAME_CHARS:
-        raise ProtocolError(f"frame exceeds {MAX_FRAME_CHARS} characters")
+    if len(frame) > max_chars:
+        raise ProtocolError(f"{kind} exceeds {max_chars} characters")
     return frame + "\n"
 
 
@@ -61,7 +62,11 @@ def build_command(request_id: int | str, command: str, *args: object) -> str:
     request = _normalize_token(request_id, name="request_id")
     command_token = _normalize_token(command, name="command", uppercase=True)
     arg_tokens = [_normalize_token(arg, name=f"arg_{idx}") for idx, arg in enumerate(args, 1)]
-    return _join_tokens([FRAME_VERSION, request, command_token, *arg_tokens])
+    return _join_tokens(
+        [FRAME_VERSION, request, command_token, *arg_tokens],
+        max_chars=MAX_COMMAND_CHARS,
+        kind="command",
+    )
 
 
 def build_response(request_id: int | str, status: str, *fields: object) -> str:
@@ -70,7 +75,11 @@ def build_response(request_id: int | str, status: str, *fields: object) -> str:
     request = _normalize_token(request_id, name="request_id")
     status_token = _normalize_token(status, name="status", uppercase=True)
     field_tokens = [_normalize_token(field, name=f"field_{idx}") for idx, field in enumerate(fields, 1)]
-    return _join_tokens([FRAME_VERSION, request, "RESULT", status_token, *field_tokens])
+    return _join_tokens(
+        [FRAME_VERSION, request, "RESULT", status_token, *field_tokens],
+        max_chars=MAX_FRAME_CHARS,
+        kind="frame",
+    )
 
 
 def parse_frame(line: bytes | str) -> ProtocolFrame:

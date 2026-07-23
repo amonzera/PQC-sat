@@ -1,6 +1,6 @@
 # Roadmap consolidado - PQC-SAT
 
-Versão revisada em 2026-06-25.
+Versão revisada em 2026-07-23.
 
 ## 1. Visão geral
 
@@ -9,11 +9,18 @@ que segurança embarcada depende tanto do algoritmo criptográfico quanto da
 integridade da implementação e do protocolo, e que a migração para PQC aumenta
 o custo em hardware limitado.
 
-A interface visual já existe e agora possui dois experimentos complementares.
-O fluxo principal de apresentação envia uma mensagem curta pela Wisdom nos
-cenários `CLASSIC`, `PQC` e `PQC_CRC32`, registrando tempo, bytes, heap,
-confirmação, cifra AES-GCM e checksum. Esse fluxo pode usar payload vivo: o dashboard coleta
-sensores reais da Wisdom, monta `payload_hex` e envia o dado para `MISSION`.
+A interface visual já existe e o fluxo público por etapas compara
+`ECDH P-256` e `ML-KEM-512` como dois mecanismos completos de estabelecimento
+de segredo. Ambos usam o mesmo backend wolfCrypt, RNG, `HKDF-SHA256` e
+`AES-128-GCM`, com a mesma política portátil sem assembly específico do alvo
+nem aceleração criptográfica do ESP32. O handshake obrigatório anuncia
+`game=STAGED_V1`, `kex=FAIR_V1` e `session_bench=FAIR_SESSION_V1`; o dashboard
+não abre a narrativa com um firmware que não comprove os três campos.
+
+Os cenários antigos `CLASSIC`, `CLASSIC_CRC32`, `PQC` e `PQC_CRC32` permanecem
+como protocolo legado de bancada e preservam os logs históricos. Eles não são
+mais a comparação pública clássica versus pós-quântica, pois `CLASSIC` gera
+uma chave AES local e não inclui ECDH.
 O fluxo de apoio muta um payload, registra eventos e compara `NONE` e `CRC32`
 para explicar falha silenciosa versus erro detectado; quando a placa está
 online, o potenciômetro pode selecionar fisicamente o bit-flip. O backend PQC
@@ -29,27 +36,42 @@ nem ao roteiro principal. A demonstração visual de falha usa payload com
 |---|---|
 | Dashboard Pygame | Funcional |
 | Modo fullscreen | Funcional |
-| Console | Funcional |
+| Ferramentas textuais de engenharia | Funcionais e separadas da UI pública |
 | Sorteio provisório de falhas | Removido do caminho de classificação |
 | Seed isolada do experimento | Funcional |
 | Mutação real de bytes | Funcional no dashboard |
-| ML-KEM real | Funcional na Wisdom com `mlkem-native` v1.1.0, commit `d2cae2b` |
-| AES-128-GCM em MISSION | Implementado no firmware; `CLASSIC` usa chave efêmera, `PQC` deriva chave de ML-KEM |
-| Mensagem CLASSIC/PQC/PQC+CRC | Implementada no firmware por `MISSION CLASSIC|PQC|PQC_CRC32` |
-| Jogo por etapas `STAGED_V1` | Implementado e compilado; ainda não gravado/validado na Wisdom |
+| Backend legado ML-KEM | Preservado com `mlkem-native` v1.1.0 para compatibilidade e reprodução histórica |
+| Comparação justa de KEX | Implementada em software com wolfCrypt para ECDH P-256 e ML-KEM-512, seguida do mesmo HKDF-SHA256 e AES-128-GCM |
+| Perfil `FAIR_V1` | Mesmas flags, placa, frequência, backend e política `portable-software`; assembly específico e aceleração de hardware desligados |
+| Comandos de experimento | `KEX_INFO`, `KEX_BENCH`, `MISSION ECDH|MLKEM` e `SESSION_BENCH ECDH|MLKEM` implementados; cenários com CRC e protocolos legados preservados |
+| Jogo por etapas `STAGED_V1` | Superfície pública `ECDH`/`MLKEM`; build, flash e smoke FAIR curto passam na Wisdom, com gates longos e visuais pendentes |
 | Interface serial PQC | `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH` funcionais |
 | Medição PQC na placa | `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`; `PQC_KAT` passou no hardware gravado |
 | Falha em ciphertext ML-KEM | `PQC_FAULT index mask [CONFIRM|NONE]` validado na placa e exportado no JSON |
 | CRC/checksum real | CRC32 funcional no dashboard e no firmware |
 | ESP32/serial | Funcional com `HELLO`, `STATUS`, sensores, OLED e `FAULT` |
-| Payload vivo | Dashboard coleta `SENSOR_READ`, `ANALOG POT` e `DIGITAL BUTTON`, monta `MISSION ... payload_hex` e exibe os sensores no popup |
+| Payload vivo | Removido da superfície pública; sensores permanecem nas ferramentas textuais |
 | Falha física didática | Potenciômetro da Wisdom seleciona byte/máscara do bit-flip quando o satélite está online |
-| JSON/timeline/demo | Timeline, JSON, bateria A/B e `DEMO` visual automatizado funcionais |
+| JSON/timeline/demo | JSONL público, replay didático e bateria FAIR v2 de terminal funcionais no host; não há demo visual automatizada em produção |
 
 ## 2.1 Histórico de implementação
 
 Este histórico deve ser usado para estudar a apresentação e para retomar o
 projeto sem reconstruir decisões antigas:
+
+- 2026-07-23: corrigido o desenho experimental da comparação clássica versus
+  pós-quântica. O firmware ganhou uma camada wolfCrypt comum para ECDH P-256,
+  ML-KEM-512, HKDF-SHA256, RNG e AES-128-GCM, os comandos `KEX_INFO` e
+  `KEX_BENCH`, contabilidade separada de setup/resposta/dados e o handshake
+  `kex=FAIR_V1`. A superfície pública passou a oferecer apenas `ECDH` e
+  `MLKEM`; `CLASSIC`/`PQC` continuam legados. A revisão seguinte acrescentou
+  `SESSION_BENCH`, manifesto de deploy e bateria v2 para sessões novas e
+  amortizadas com tempo, bytes e memória. O host, o build legado e o build
+  FAIR limpo passam. O primeiro smoke revelou ECDH sem o backend SP ECC; o
+  segundo confirmou ECDH/ML-KEM, missões e sessões, mas encontrou
+  `experiment` duplicado em `GAME_PROTECT`. A revisão final corrigiu a
+  duplicação, foi gravada e passou o smoke curto completo. Não existe coleta
+  FAIR_V1 oficial nem aceite longo na placa.
 
 - 2026-06-17: firmware Wisdom consolidado com transporte serial `V1`,
   inventário de placa, sensores, atuadores, OLED standby, perfis
@@ -282,12 +304,11 @@ projeto sem reconstruir decisões antigas:
   `/dev/serial/by-id/*`. A revisão atual abre primeiro o standby Pygame e faz
   essa validação no worker antes de liberar a abertura narrativa.
 
-O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
-`PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar
-`RUN_BATTERY` A/B, executar `DEMO` com overlay calculado e exportar sessões em
-JSON. A coleta técnica antiga, a campanha prolongada com `MISSION` e a
-validação de projetor/legibilidade já foram concluídas; novas baterias longas
-devem ser rodadas manualmente apenas se a montagem física mudar.
+O dashboard público atual demonstra `ECDH` ou `MLKEM` por `GAME_*`, com
+guardião `NONE` ou `CRC32`, incidente oculto e debrief. A antiga superfície
+`CLASSIC/PQC/PQC_CRC32`, `RUN_BATTERY`, `DEMO` e painel `RESULTADOS` foi
+removida da produção; os comandos e resultados legados continuam nas
+ferramentas textuais e documentos históricos.
 
 ## 3. Gate 0 - protocolo experimental
 
@@ -387,7 +408,7 @@ O perfil inicial será:
 | RAM | Sem PSRAM; pico medido e limite de 256 KiB para aplicação + criptografia |
 | Flash da aplicação | Máximo de 1 MiB |
 | Rádio integrado | Wi-Fi e Bluetooth desativados |
-| Comunicação | UART; comandos curtos no firmware e respostas host de até 1024 caracteres |
+| Comunicação | UART; comandos recebidos pelo firmware de até 384 caracteres e respostas host de até 4096 caracteres |
 | Telemetria | 1 Hz no modo nominal; eventos críticos imediatos |
 | Persistência local | Ring buffer de até 128 eventos; exportação completa no host |
 | Criptografia | Uma operação por vez; sem alocação dinâmica no caminho crítico |
@@ -409,31 +430,31 @@ linear rígida.
 
 ### Trilha PQC na placa
 
-1. Manter `mlkem-native` v1.1.0 vendorizado como backend ML-KEM-512 da
-   Wisdom. A antiga Etapa 04 foi consolidada neste roadmap.
+1. Manter `mlkem-native` v1.1.0 vendorizado apenas para reprodução do protocolo
+   legado. Usar wolfCrypt no experimento FAIR para os dois KEX.
 2. Manter `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP`,
    `PQC_FAULT` e `PQC_BENCH` como comandos de bancada, fora dos blocos
    clicáveis da demo.
    Eles podem ser digitados no terminal textual avançado quando a placa estiver
    conectada.
-3. Manter `MISSION CLASSIC|PQC|PQC_CRC32` como comando principal do dashboard
-   manual, `GAME_*` como protocolo do jogo público e `INVESTIGATE` como
-   compatibilidade de bancada/fluxo legado.
+3. Manter `GAME_*` como protocolo do jogo público; `MISSION
+   ECDH|MLKEM`, `KEX_*` e `SESSION_BENCH` são superfície de pesquisa;
+   `MISSION CLASSIC|PQC|PQC_CRC32` e `INVESTIGATE` são compatibilidade
+   de bancada/fluxo legado.
 4. Manter `PQC_INFO` como fonte de alvo, backend, fonte, commit, licença,
    perfil, tempo e memória.
 5. Medição inicial de tempo, heap, heap mínimo e flash nos perfis `BASELINE` e
    `OBC-1U-LIMITED` concluída em 2026-06-17.
-6. Integrar os resultados no dashboard/JSON sem exportar segredos completos.
+6. Mostrar recursos somente no debrief e consolidar resultados exclusivamente
+   no JSON da bateria, sem exportar segredos completos.
 
 ### Trilha software demonstrável
 
-1. Manter payload/CRC32 e ciphertext ML-KEM com confirmação de chave como
-   base de coleta. A antiga Etapa 06 foi consolidada neste roadmap.
-2. Manter `MISSION` como fluxo visual central da apresentação: `CLASSIC`,
-   `PQC` e `PQC_CRC32`, com console/overlay de mensagem e painel
-   `RESULTADOS` para a consolidação.
-3. Manter `DEMO` como campanha visual automatizada de apoio. A antiga Etapa 07 foi
-   consolidada neste roadmap.
+1. Manter payload/CRC32 e confirmação AES-GCM como base do jogo didático.
+2. Manter `GAME_*` como fluxo visual central com escolhas independentes de KEX
+   e guardião, métricas somente no debrief e sem painel comparativo.
+3. Manter campanhas exclusivamente nas ferramentas de terminal/offline; não
+   reintroduzir `DEMO` automatizada na produção.
 4. Etapa 08 consolidada neste roadmap: robustez de software, aceitação serial,
    campanha de 30 minutos e projetor concluídos.
 
@@ -444,8 +465,8 @@ dado medido, simulação e pendência.
 ### Trilha hardware
 
 1. Manter firmware, bridge serial e comandos de bancada estáveis.
-2. Usar `MISSION CLASSIC|PQC|PQC_CRC32` como coleta curta principal antes da
-   apresentação.
+2. Usar `KEX_INFO`, `KEX_BENCH 1`, `MISSION ECDH|MLKEM` e
+   `SESSION_BENCH ECDH|MLKEM 1` como diagnóstico curto antes da apresentação.
 3. Usar `FAULT NONE|CRC32 payload_hex index mask` apenas como validação real
    do experimento de payload na Wisdom.
 4. Medir `PROFILE BASELINE` e `PROFILE OBC-1U-LIMITED` antes de qualquer
@@ -737,8 +758,8 @@ falha conhecida nos cenários testados".
 
 ### Etapa 09 - modo estande SBPC
 
-Estado: **jogo `STAGED_V1` em release candidate de software; flash e aceite
-físico pendentes**.
+Estado: **jogo `STAGED_V1/FAIR_V1` em release candidate de software; flash,
+coleta FAIR e aceite físico pendentes**.
 
 Implementado:
 
@@ -749,7 +770,8 @@ Implementado:
 - meta de 120–180 s, sem timeout público, avanço automático ou reset do
   debrief;
 - standby integrado ao loop principal: a descoberta roda no worker e libera
-  automaticamente a abertura narrativa somente após `HELLO game=STAGED_V1`;
+  automaticamente a abertura narrativa somente após
+  `HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`;
 - abertura com Terra/CubeSat preservada após a busca, contendo somente
   `SALVE A MENSAGEM EM ÓRBITA` e `INICIAR MISSÃO`; clique ou D27 iniciam
   diretamente todas as partidas;
@@ -757,8 +779,9 @@ Implementado:
   interrompida e retorna automaticamente à abertura narrativa;
 - toque em cartão altera somente a seleção pendente; depois da abertura, toda
   transição para a frente exige confirmação explícita pela faixa verde ou D27;
-- quatro combinações independentes: `CLASSIC/NONE`, `CLASSIC/CRC32`,
-  `PQC/NONE` e `PQC/CRC32`; todas usam AES-128-GCM;
+- quatro combinações independentes: `ECDH/NONE`, `ECDH/CRC32`,
+  `MLKEM/NONE` e `MLKEM/CRC32`; todas usam HKDF-SHA256 e AES-128-GCM no
+  mesmo wolfCrypt;
 - protocolo transacional `GAME_BEGIN`, `GAME_PROTECT`, `GAME_TRANSMIT`,
   `GAME_VERIFY`, `GAME_RETRY`, `GAME_END` e `GAME_ABORT`;
 - uma única sessão ativa, ordem e ID estritos, limpeza de segredos depois da
@@ -795,10 +818,11 @@ Validado em software novamente em 2026-07-23 após a simplificação da interfac
 
 - parser e fixture cobrem 32 combinações de perfil, modo de chave, guardião e
   incidente;
-- 97 testes atuais passam, incluindo busca automática, narrativa direta,
+- a suíte host atual passa, incluindo busca automática, narrativa direta,
   reconexão limpa, confirmação pela tela em
   todas as transições, A39 assíncrono, D27, retransmissão, erro, legado,
-  `INVESTIGATE`, fachadas, replay arrastável e preservação da sessão em
+  `INVESTIGATE`, contrato `KEX_FAIR_V1`, plano pareado, fachadas, replay
+  arrastável e preservação da sessão em
   `GAME_PROTECT -> ANALOG POT -> GAME_TRANSMIT`;
 - soak de 50 partidas conclui 625 confirmações lógicas, 100 mudanças A39, 275
   comandos `GAME_*`, 25 retries, zero erros e zero crescimento de RSS;
@@ -806,14 +830,17 @@ Validado em software novamente em 2026-07-23 após a simplificação da interfac
   início/meio/fim, além do vídeo offline rotulado;
 - média headless da interface completa de 7,280 ms e 10,204 ms, abaixo do
   orçamento de 16,667 ms;
-- firmware candidato compila com 57.332 B de RAM (17,5%) e 932.173 B de flash
-  (71,1%); o binário de 938.752 B tem SHA-256
-  `288d5f4989b56f593a267ccde31f59773a1addb9a2669d1f9fb07ad4c8e5d51e`;
-  essa compilação não é validação na placa;
+- o firmware FAIR atual, incluindo `SESSION_BENCH`, compila do zero com
+  wolfSSL 5.9.2: 59.020 B de RAM, 1.005.497 B de flash e binário de
+  1.012.080 B, SHA-256 `9eba850f…32a18d`; o perfil legado atual compila sem
+  wolfSSL com 59.004 B de RAM, 940.421 B de flash e binário de 946.992 B;
+  nenhuma compilação é validação na placa;
 - implantação ficou centralizada em `tools/firmware_deploy.py`, sem Bash, com
-  upload opt-in, identidade prévia e verificação pós-reset de `STAGED_V1`.
+  upload opt-in, identidade prévia e verificação pós-reset de
+  `game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`, seguida por
+  manifesto de hashes.
 
-Evidência física histórica, anterior a `STAGED_V1`:
+Evidência física:
 
 - 50 ciclos acelerados de fixture, 100 ações lógicas de botão e 100 mudanças
   de potenciômetro sem falha;
@@ -825,13 +852,27 @@ Evidência física histórica, anterior a `STAGED_V1`:
 - firmware `INVESTIGATE` anterior gravado, quatro incidentes e um smoke
   administrativo concluídos em 2026-07-21;
 - dashboard anterior conectado permaneceu em `ATTRACT` por oito segundos;
-- o evento físico `BUTTON_PING` não foi observado nas janelas assistidas de
-  30 s e 45 s e precisa de confirmação do acionamento/fiação D27.
+- o evento físico `BUTTON_PING` não foi observado nas janelas investigativas
+  anteriores de 30 s e 45 s; o smoke FAIR curto de 2026-07-23 fechou essa
+  lacuna para o estado pressionado (`button=1`, `pot=1469`). Repouso e partida
+  integral por D27 ainda precisam de evidência.
+- em 2026-07-23, o primeiro firmware FAIR gravado confirmou o handshake,
+  `KEX_INFO` e ML-KEM; `KEX_BENCH 1` falhou apenas no setup ECDH porque o
+  backend SP ECC não estava habilitado;
+- a revisão seguinte confirmou ECDH/ML-KEM em `KEX_BENCH`, `MISSION` e
+  `SESSION_BENCH`, mas o smoke parou em `GAME_PROTECT` por uma chave serial
+  duplicada;
+- a revisão final SHA-256 `9eba850f…32a18d` foi gravada e o diagnóstico
+  `20260723T160223Z` passou 27 registros, inclusive A39 em sessão, retry,
+  `INVESTIGATE` e `BUTTON_PING`.
 
 Gate restante:
 
-- gravar o candidato atual e observar `HELLO game=STAGED_V1`;
-- validar D27, A39, ordem/ID, todas as etapas e uma retransmissão real;
+- preservar o manifesto e o diagnóstico curto aprovados;
+- executar pelo operador a bateria v2 com 400 fresh, 480 session e 6 benches;
+- validar repouso D27, uma partida visual completa por D27, outra pelo verde,
+  `GAME_ABORT`, variação A39 e todas as etapas; ordem/ID, A39 em uma posição e
+  retransmissão já passaram no smoke curto;
 - provar ausência de avanço em cada estado;
 - executar 30 partidas físicas, três horas, mais de 100 D27, mais de 100
   mudanças A39, dez recuperações USB, monitor definitivo e avaliação 4/5 com
@@ -842,52 +883,62 @@ Gate restante:
 
 ### Próximos cortes
 
-1. Levar para a fala e para o botão de resultados a distinção: checksum protege transporte,
-   confirmação de chave protege aceitação de sessão, e consumo de energia só
-   será afirmado se houver medição externa.
+1. Levar para a fala e para o debrief a distinção: checksum protege a região
+   coberta contra erros, confirmação/autenticação protege a aceitação do
+   protocolo, e consumo de energia só será afirmado se houver medição externa.
 
 ## 9. Riscos e decisões
 
 | Risco | Mitigação |
 |---|---|
 | Regressão de build/flash do ML-KEM na placa | Manter `mlkem-native` vendorizado, KAT host e build PlatformIO como validação obrigatória. |
-| Resposta serial grande de `PQC_FAULT` rejeitada no host | Limite de resposta do parser aumentado para 1024 caracteres e coberto por testes do protocolo. |
+| Resposta serial FAIR grande é rejeitada no host | Limite de resposta do parser em 4096 caracteres, separado do limite de comando do firmware e coberto por teste com frame maior que 1024. |
 | Biblioteca implementa Kyber antigo, não FIPS 203 | Identificar variante e não chamá-la de ML-KEM. |
 | Cinco amostras geram conclusão fraca | Usar campanha determinística maior na coleta e subconjunto visual na demo. |
 | Serial perde ou reordena respostas | `request_id`, timeout e parser estrito. |
 | Layout não cabe no projetor | Testar duas resoluções e reduzir conteúdo, não a fonte indiscriminadamente. |
 | Resultado simulado é confundido com medição | Campo `mode` em UI e JSON. |
 | Limite artificial é tratado como característica de todo CubeSat | Nomear o perfil e comparar com o baseline sem limitação. |
+| Comparar algoritmos por bibliotecas diferentes | Usar wolfCrypt para os dois KEX e também para RNG, HKDF e AES-GCM no perfil `FAIR_V1`. |
+| Otimização específica favorece um dos KEX | Compilar o perfil primário sem assembly do alvo e sem aceleração criptográfica; registrar flags e versão no resultado. |
+| Heap global é interpretada como pico por algoritmo | Registrar heap antes/depois, mínimo global, maior bloco e stack HWM; rotular explicitamente que não há pico isolado. |
+| Binário medido difere do binário revisado | Exigir manifesto pós-upload e comparar hashes do firmware e das fontes antes da campanha oficial. |
+| Fonte local do wolfSSL é publicada por engano ou usada sob licença incorreta | Manter `firmware/lib/wolfssl/` ignorado, registrar seu hash e cumprir GPLv3 ou a licença comercial aplicável conforme `firmware/WOLFSSL_LOCAL.md`. |
+| Warning de constant-time do wolfSSL em Xtensa é ignorado | Tratar o build portátil como configuração de benchmark, não como afirmação de resistência a side channels; avaliar implementação constante no estudo posterior. |
 
 ## 10. Entrega final
 
 ### Obrigatória
 
-- dashboard funcional sem hardware e com hardware conectado;
-- entrega de mensagem demonstrável em `CLASSIC`, `PQC` e `PQC_CRC32`;
-- popup independente e arrastável por cenário para comparação visual lado a lado;
-- campanha reproduzível;
-- bateria final dedicada em `tools/final_metrics_battery.py` para gerar
-  resultados estatísticos novos quando necessário;
-- comparação A/B baseada em bytes;
+- standby de busca funcional sem hardware; jogo público liberado somente com
+  Wisdom real validada;
+- entrega de mensagem demonstrável em `ECDH` e `MLKEM`, com guardião
+  `NONE`/`CRC32`, sob `KEX_FAIR_V1`;
+- replay didático arrastável dentro do fluxo único, sempre separado da medição;
+- campanha reproduzível em ferramenta de terminal exclusiva do operador;
+- bateria pareada dedicada em `tools/kex_metrics_battery.py` para gerar
+  resultados FAIR_V1 fresh/amortizados sem misturar os logs históricos;
+- comparação A/B baseada em tempo, bytes e memória observável;
 - JSON;
-- demo automatizada;
 - documentação das limitações;
-- onboarding, botão de resultados e roteiro.
+- abertura narrativa mínima, debrief e roteiro.
 - banco de perguntas e respostas para treino da defesa.
 
-### Hardware já entregue para o MVP
+### Firmware e hardware preservados
 
 - ESP32 conectado por bridge serial;
 - ML-KEM-512 real;
-- `MISSION CLASSIC|PQC|PQC_CRC32` compilado no firmware para coleta
-  comparativa;
+- `MISSION ECDH|MLKEM`, `KEX_INFO`, `KEX_BENCH` e `SESSION_BENCH` presentes no
+  firmware para a nova coleta comparativa; a revisão atual compila, está
+  gravada e passa o smoke FAIR curto;
 - `PQC_FAULT` real em ciphertext ML-KEM com confirmação de chave;
 - `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`;
 - medição de tempo e memória no dispositivo.
 
-O hardware, a campanha prolongada anterior, o projetor validado, `MISSION` e o
-modo `DEMO` sustentam a demonstração.
+As campanhas `CLASSIC`/`PQC` anteriores comprovam o legado, mas não sustentam
+uma conclusão quantitativa ECDH versus ML-KEM. A nova conclusão só pode usar
+um JSON `pqc-sat-kex-fair-metrics-v2` coletado na Wisdom depois do flash e dos
+gates físicos.
 O estudo e a defesa oral estão centralizados em
 `../GUIA_FINAL_APRESENTACAO.md`; a metodologia experimental detalhada permanece
 em `METRICAS_CONSOLIDADAS.md`.

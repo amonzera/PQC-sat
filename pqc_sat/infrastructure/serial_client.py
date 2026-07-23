@@ -74,6 +74,8 @@ class WisdomSerialClient:
             baudrate=self.baudrate,
             timeout=self.probe_timeout,
             require_staged_game=True,
+            require_fair_kex=True,
+            require_session_bench=True,
         )
         return device.port
 
@@ -167,7 +169,12 @@ class WisdomSerialClient:
         except ProtocolError as exc:
             raise SerialBridgeError("HELLO response did not contain key=value payload") from exc
 
-        return validate_wisdom_handshake(payload, require_staged_game=True)
+        return validate_wisdom_handshake(
+            payload,
+            require_staged_game=True,
+            require_fair_kex=True,
+            require_session_bench=True,
+        )
 
     def _wait_before_retry(self):
         deadline = time.monotonic() + SERIAL_RECONNECT_DELAY

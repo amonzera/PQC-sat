@@ -6,49 +6,137 @@ para consolidar os resultados do seminário.
 
 ## 1. Objetivo atual do seminário
 
-O projeto deve mostrar que a migração para criptografia pós-quântica aumenta o
-custo operacional em hardware embarcado e que esse custo cresce quando também
-exigimos mecanismos explícitos de integridade.
+A comparação principal é entre dois mecanismos completos de estabelecimento
+de segredo:
 
-A apresentação deve comparar três cenários de entrega de uma mensagem curta:
+| Cenário | Estabelecimento | Componentes comuns | Comando |
+|---|---|---|---|
+| `ECDH` | ECDH P-256 efêmero | wolfCrypt RNG + HKDF-SHA256 + AES-128-GCM | `MISSION ECDH` |
+| `MLKEM` | ML-KEM-512 efêmero | wolfCrypt RNG + HKDF-SHA256 + AES-128-GCM | `MISSION MLKEM` |
 
-| Cenário | O que representa | Comando |
+O contrato experimental é `KEX_FAIR_V1`: mesma biblioteca, versão, placa,
+frequência, compilador, flags e política `portable-software`, sem assembly
+específico do alvo nem aceleração criptográfica. A afirmação permitida é
+sempre contextual:
+
+> Nestas implementações e configurações específicas para ESP32, observamos
+> estes custos de ECDH P-256 e ML-KEM-512.
+
+`CRC32` continua sendo uma variável ortogonal do jogo (`NONE`/`CRC32`) e não
+altera o mecanismo de estabelecimento. Os cenários `CLASSIC`,
+`CLASSIC_CRC32`, `PQC` e `PQC_CRC32` permanecem apenas para reprodução
+histórica e regressão. `CLASSIC` não executa ECDH e não pode mais ser usado
+como baseline de criptografia assimétrica clássica.
+
+> Estado dos números em 2026-07-23: a primeira bateria `KEX_FAIR_V1` na
+> Wisdom foi concluída, mas é uma evidência exploratória parcial e não uma
+> coleta oficial aprovada. Ela registrou 36 timeouts, portanto
+> `official_candidate=false`. A consolidação humana, incluindo as 480 sessões
+> válidas e a análise da falha, está em
+> [`RESULTADOS_KEX_FAIR_20260723.md`](RESULTADOS_KEX_FAIR_20260723.md).
+> O arquivo
+> `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json` comprova o experimento
+> legado AES-local versus ML-KEM, mas não responde ECDH versus ML-KEM.
+
+### 1.1 Desenho FAIR_V1: sessão nova e custo amortizado
+
+A bateria separa duas perguntas, sem misturar as distribuições:
+
+| Família | Unidade experimental | Comando |
 |---|---|---|
-| `CLASSIC` | Mensagem cifrada/autenticada por `AES-128-GCM` com chave efêmera | `MISSION CLASSIC` |
-| `PQC` | `ML-KEM-512` estabelece a chave; `AES-128-GCM` cifra o payload | `MISSION PQC` |
-| `PQC_CRC32` | `ML-KEM-512` + `AES-GCM` + `CRC32` protegido no payload | `MISSION PQC_CRC32` |
+| `fresh` | um estabelecimento novo e uma mensagem | `MISSION ECDH|MLKEM payload_hex` |
+| `session` | um estabelecimento novo e 1, 100, 500 ou 1000 mensagens sob a mesma chave de sessão | `SESSION_BENCH ECDH|MLKEM n payload_hex` |
 
-A tese visual é:
+Cada par usa o mesmo perfil, payload e quantidade de mensagens. A ordem
+ECDH/ML-KEM é alternada dentro de cada célula para reduzir viés de aquecimento
+e deriva temporal. `KEX_BENCH n` oferece ainda a decomposição pareada do KEX.
+
+As amostras `fresh` registram:
+
+| Campo | Interpretação |
+|---|---|
+| `setup_us` | Receptor prepara o primeiro material público: chave P-256 ou chave pública ML-KEM. |
+| `initiator_us` | Iniciador gera sua resposta e seu segredo: ponto P-256 ou cápsula ML-KEM. |
+| `responder_us` | Receptor obtém o mesmo segredo: ECDH ou decapsulação. |
+| `kex_total_us` | Soma dos três subtempos do estabelecimento. |
+| `kdf_us` | Duas derivações HKDF-SHA256 para verificar igualdade ponta a ponta. |
+| `online_us` | Sessão completa menos o setup, útil quando a chave pública pode ser pré-distribuída. |
+| `end_to_end_us` | Setup + resposta + HKDF + AES-GCM da mensagem. |
+| `setup_bytes` / `response_bytes` | Material público inicial e resposta pública. |
+| `data_bytes` | Ciphertext da mensagem + nonce + tag GCM. |
+| `wire_total_fresh` | Setup + resposta + dados quando toda a sessão é nova. |
+| `wire_total_preprovisioned` | Resposta + dados quando o setup já foi distribuído. |
+
+As amostras `session` acrescentam:
+
+| Campo | Interpretação |
+|---|---|
+| `session_setup_us` | KEX mais as duas derivações HKDF. |
+| `data_total_us` | nonce inicial e processamento AES-GCM de todas as mensagens. |
+| `amortized_us_per_message` | tempo ponta a ponta inteiro dividido por `n`. |
+| `handshake_bytes` | material público inicial mais resposta pública. |
+| `data_bytes_per_message` / `data_total_bytes` | nonce, ciphertext e tag por mensagem e no lote. |
+| `wire_total_bytes` / `amortized_bytes_per_message` | handshake mais lote e custo médio inteiro. |
+| `heap_before` / `heap_after` / `heap_delta` | heap livre antes e depois da amostra. |
+| `min_heap_before` / `min_heap_global` | mínimo global desde o boot, útil como guarda de regressão, não como pico isolado do algoritmo. |
+| `largest_block_before` / `largest_block_after` | maior bloco contíguo livre. |
+| `stack_hwm_words` | menor folga de stack observada na task do loop. |
+
+O contador de nonce ocupa os quatro bytes finais de um prefixo aleatório de
+oito bytes e não se repete dentro da sessão. O benchmark mede custo do sistema
+completo nos dois papéis lógicos; não mede rede real, energia elétrica,
+resistência a side channel nem pico de heap isolado por algoritmo.
+
+Antes da coleta, o upload cria um manifesto que vincula hash do binário, hashes
+das fontes FAIR, hash determinístico da árvore wolfSSL local, porta,
+ambiente PlatformIO e os handshakes anterior e posterior. A bateria oficial
+recusa fonte, dependência ou binário alterado, porta diferente e firmware sem
+`session_bench=FAIR_SESSION_V1`. O hash prova qual árvore local entrou no
+artefato; ele não redistribui nem substitui a licença GPLv3 ou comercial
+aplicável à árvore usada.
 
 ```text
-CLASSIC  -> menor custo, cifra clássica simétrica com chave efêmera
-PQC      -> maior custo, preparo para ameaça quântica
-PQC+CRC  -> maior robustez contra corrupção acidental, com custo adicional
+python3 tools/kex_metrics_battery.py --dry-run
+
+python3 tools/firmware_deploy.py --upload --port /dev/ttyUSB0
+
+python3 tools/kex_metrics_battery.py \
+  --port /dev/ttyUSB0 \
+  --deployment-manifest logs/firmware/<timestamp>_firmware_deploy_dev-ttyUSB0.json \
+  --timeout 20 \
+  --fresh-cycles 100 \
+  --session-repeats 30 \
+  --message-counts 1 100 500 1000 \
+  --pause 0.25 \
+  --bench-repeats 3 \
+  --bench-rounds 100
 ```
 
-> Estado dos números: a fonte oficial atual é
-> `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`. As tabelas
-> pré-AES permanecem mais adiante apenas como histórico e estão identificadas
-> explicitamente.
+O JSON esperado usa `pqc-sat-kex-fair-metrics-v2`, preserva todas as amostras
+brutas, calcula média, mediana, desvio padrão, p95 e intervalo de confiança de
+95% das diferenças pareadas. Somente a configuração completa — dois perfis,
+100 pares `fresh` por perfil, 30 pares por célula `session`, 1/100/500/1000
+mensagens, três repetições de `KEX_BENCH 100`, pausa mínima de 0,25 s,
+manifesto válido, versão 5.9.2 e payload padronizado — pode produzir
+`official_candidate=true`.
 
-## 2. O que a placa realmente faz
+O resumo oficial esperado tem `failed=0`, `fresh_mission_runs=400`,
+`session_bench_runs=480`, `kex_bench_runs=6`, `invalid_pairs=0`,
+`missing_cells=0` e `profile_mismatches=0`. Execuções menores continuam úteis
+como smoke e retornam sucesso se os dados forem válidos, mas ficam
+explicitamente não oficiais. Essa bateria longa é executada pelo operador,
+nunca pelo dashboard ou pelo agente.
+
+## 2. Experimento legado preservado
 
 O comando `MISSION` roda na BlackBoard Wisdom/ESP32 e mede a entrega de uma
 mensagem de missão.
 
-Na demo ao vivo, o dashboard pode acionar o modo `Payload vivo`: antes de
-`MISSION`, ele lê sensores da Wisdom, monta um payload ASCII compacto, converte
-para hexadecimal e envia `MISSION <cenario> <payload_hex>`. Isso torna a
-apresentação mais fiel a uma telemetria de CubeSat. A bateria consolidada
-abaixo continua sendo a fonte estatística oficial e usa campanhas balanceadas
-com payload padronizado; portanto, compare os resultados consolidados entre
-cenários e use o payload vivo como demonstração imersiva do mesmo fluxo.
-
-O comando `STRESS PQC_LOOP 500 CONFIRM`, acionado pelo botão protegido
-`STRESS PQC 500` dentro de `RESULTADOS`, é uma demonstração visual de limite:
-ele repete ML-KEM 500 vezes para evidenciar espera, carga e consumo relativo.
-Ele não substitui a bateria consolidada abaixo e não deve ser usado para mudar
-as conclusões estatísticas oficiais da apresentação.
+Esses comandos permanecem na superfície textual de engenharia e nos logs
+históricos. O dashboard público atual não possui modo `Payload vivo`, botão de
+`STRESS` nem tela `RESULTADOS`; a atividade usa exclusivamente o protocolo
+`STAGED_V1/FAIR_V1`. O comando técnico `STRESS PQC_LOOP 500 CONFIRM` também
+continua disponível, mas não substitui nenhuma bateria consolidada.
 
 ### `MISSION CLASSIC`
 
@@ -131,37 +219,27 @@ metrics.mission.ratios.crc32_over_pqc
 
 Essas razões são as mais fáceis de explicar em sala.
 
-## 4. Métricas visíveis no dashboard
+## 4. Métricas na jornada pública
 
-A faixa superior da animação mostra:
+Durante `PREPARE`, `PROTECT`, `TRANSMIT`, `VERIFY` e `RETRY`, a interface
+explica entrada, operação e saída sem exibir números de benchmark. A animação
+didática é ampliada e não representa segundos de parede.
 
-- `CPU`: frequência e porcentagem ativa observada em janela móvel de 5s;
-- `RAM`: consumo atual de heap / total disponível (célula de memória) e memória livre como detalhe.
+Somente `DEBRIEF` mostra os recursos da partida atual: tempo agregado, bytes do
+resultado final e heap mínimo informado pela Wisdom. Esses três números servem
+à conversa local com o visitante e não entram na consolidação científica.
+Resultados oficiais vêm exclusivamente da bateria controlada no terminal.
 
-As métricas de tempo e tráfego de cada cenário (`CLÁSSICA`, `PQC`, `PQC+CRC`) são exibidas diretamente no log do console do painel lateral assim que a mensagem é processada/recebida.
+## 4.5. Resultados reais consolidados do experimento legado
 
-Quando um comando `MISSION` volta da placa, o dashboard mostra um overlay de
-mensagem entregue, com cenário, criptografia, checksum, tempo e tráfego. Os
-LEDs/bargraph da Wisdom também são usados como reforço lúdico:
-
-| Cenário | Efeito visual |
-|---|---|
-| `CLASSIC` | Bargraph em 25% e LED azul. |
-| `PQC` | Bargraph em 75% e LED magenta. |
-| `PQC_CRC32` | Bargraph em 100% e LED verde. |
-
-Esses efeitos não são métricas científicas; são apoio visual para a turma
-perceber o crescimento de custo.
-
-## 4.5. Resultados reais consolidados
-
-Fonte exibida atualmente na aba `RESULTADOS` do dashboard:
+Fonte histórica do experimento AES-local versus ML-KEM:
 
 ```text
 logs/20260702T044907Z_final_metrics_dev-ttyusb0.json
 ```
 
-Essa é a bateria oficial mais recente consolidada no dashboard. Embora tenha
+Essa é a bateria oficial mais recente do protocolo legado. Ela não deve ser
+apresentada como ECDH versus ML-KEM. Embora tenha
 sido produzida pelo runner geral, a validação foi recalculada diretamente dos
 600 registros `MISSION`: todos retornaram `cipher=AES-128-GCM`,
 `nonce_bytes=12`, `gcm_tag_bytes=16`, `aead_match=1` e `decrypt_ok=1`.
@@ -590,9 +668,9 @@ tabelas. O campo principal para análise é `summary`, que já contém:
 - contagem de falhas silenciosas/detectadas em `summary.faults`;
 - lista dos comandos com falha em `summary.failed_commands`.
 
-Use `tools/stage8_acceptance.py` apenas para aceite/regressão geral. Para
-métricas finais da apresentação pós-AES-GCM, prefira
-`tools/aes_gcm_metrics_battery.py`.
+Use `tools/stage8_acceptance.py` apenas para aceite/regressão geral do firmware
+FAIR atual. Para a conclusão estatística ECDH/ML-KEM, use
+`tools/kex_metrics_battery.py`; a bateria AES-GCM anterior permanece histórica.
 
 ## 6.1. Aceite longo da etapa 8
 
@@ -602,15 +680,17 @@ Comando:
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 tools/stage8_acceptance.py --port /dev/ttyUSB0 --timeout 12 --duration 1800 --interval 30
 ```
 
-O runner agora inclui `MISSION CLASSIC`, `MISSION PQC` e `MISSION PQC_CRC32`
-no smoke test e no long-run. Depois da execução, procure no resumo:
+O runner usa `KEX_INFO`, `KEX_BENCH`, `MISSION ECDH|MLKEM` e
+`SESSION_BENCH ECDH|MLKEM 1` nos dois perfis no smoke; o long-run repete as
+operações FAIR em `BASELINE`. Depois da execução, procure no resumo:
 
 ```text
 ok=true
 failed=0
-dashboard_demo_ok=true
-pqc_bench_runs=2
-mission_runs>=6
+semantic_errors=[]
+kex_bench_runs=2
+fresh_mission_runs>=4
+session_bench_runs>=4
 ```
 
 Se os números mudarem, use o JSON novo como fonte principal e atualize

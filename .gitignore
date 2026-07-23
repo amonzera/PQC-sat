@@ -4,6 +4,10 @@ __pycache__/
 venv/
 .pio/
 
+# wolfSSL is supplied out of band under GPLv3 or a commercial license. The
+# project tracks its configuration and integration, never the dependency tree.
+firmware/lib/wolfssl
+
 # Session exports are generated artifacts.
 logs/
 

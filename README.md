@@ -27,7 +27,7 @@ seriais em um worker não bloqueante. Essa tela avança automaticamente para a
 abertura narrativa somente quando recebe:
 
 ```text
-node=PQC-SAT-WISDOM board=BlackBoard-Wisdom proto=V1 game=STAGED_V1
+node=PQC-SAT-WISDOM board=BlackBoard-Wisdom proto=V1 game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1
 ```
 
 Para indicar uma porta explicitamente:
@@ -59,8 +59,9 @@ ls -l /dev/ttyUSB* /dev/ttyACM* /dev/serial/by-id/*
 ```
 
 Ausência de porta, permissão insuficiente, dispositivo errado e firmware sem
-`game=STAGED_V1` geram mensagens diferentes. Informar `--port` não pula a
-validação: a porta explícita também precisa responder ao `HELLO` correto.
+`game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` geram mensagens
+diferentes. Informar `--port` não pula a validação: a porta explícita também
+precisa responder ao `HELLO` correto.
 
 ## Interface única
 
@@ -121,7 +122,7 @@ estado da sessão.
 O firmware mantém uma única sessão transacional:
 
 ```text
-GAME_BEGIN <id> <profile> <CLASSIC|PQC> <NONE|CRC32> <incident> <payload_hex>
+GAME_BEGIN <id> <profile> <ECDH|MLKEM> <NONE|CRC32> <incident> <payload_hex>
 GAME_PROTECT <id>
 GAME_TRANSMIT <id> <byte_index> <bit_mask>
 GAME_VERIFY <id>
@@ -131,12 +132,15 @@ GAME_ABORT <id>
 ```
 
 Comandos fora de ordem ou com ID divergente retornam `BAD_GAME_STATE`. O
-firmware usa AES-128-GCM nas quatro combinações de chave e CRC; ML-KEM-512
-estabelece o segredo no caminho PQC. `GAME_RETRY` reutiliza o payload, sem
-falha injetada, mas gera chave e nonce novos.
+firmware usa wolfCrypt nas quatro combinações de KEX e CRC. ECDH P-256 e
+ML-KEM-512 estabelecem o segredo; ambos passam pelo mesmo HKDF-SHA256 e pelo
+mesmo AES-128-GCM. O perfil primário usa código portátil, sem assembly
+específico do alvo nem aceleração criptográfica. `GAME_RETRY` reutiliza o
+payload, sem falha injetada, mas gera chave e nonce novos.
 
-Os comandos técnicos legados (`MISSION`, `FAULT`, `INVESTIGATE`, bancada e
-baterias) continuam disponíveis no firmware e no console serial, mas não têm
+Os cenários `MISSION CLASSIC|PQC`, além de `FAULT`, `INVESTIGATE` e demais
+comandos de bancada, continuam disponíveis no firmware e no console serial,
+mas não têm
 botões nem um segundo dashboard:
 
 ```text
@@ -148,7 +152,7 @@ python3 tools/serial_console.py --all-commands
 ```text
 dashboard.py                         entrypoint Python único
 pqc_sat/cli.py                       composição, descoberta e loop Pygame
-pqc_sat/infrastructure/wisdom.py     sondagem HELLO e validação STAGED_V1
+pqc_sat/infrastructure/wisdom.py     sondagem HELLO e validação STAGED_V1/FAIR_V1/FAIR_SESSION_V1
 pqc_sat/infrastructure/serial_client.py transporte serial não bloqueante
 pqc_sat/stand/investigation.py       máquina de estados e confirmações explícitas
 pqc_sat/stand/model.py               tipos e validação das respostas GAME_*
@@ -159,6 +163,35 @@ pqc_sat/ui/panel/investigation_view.py telas do jogo
 config/game.json                     configuração pública v3
 firmware/                            implementação Arduino/PlatformIO
 ```
+
+O código-fonte do wolfSSL não faz parte do Git do projeto. Instale localmente a
+revisão GPLv3 oficial ou a distribuição comercial licenciada conforme
+[`firmware/WOLFSSL_LOCAL.md`](firmware/WOLFSSL_LOCAL.md). O build
+FAIR_V1 é:
+
+```text
+python3 -m platformio run -e robocore_wisdom_esp32_fair
+```
+
+A coleta estatística nova fica separada dos resultados históricos:
+
+```text
+python3 tools/kex_metrics_battery.py --dry-run
+python3 tools/kex_metrics_battery.py \
+  --port /dev/ttyUSB0 \
+  --deployment-manifest logs/firmware/<manifesto_deploy>.json \
+  --timeout 20 \
+  --fresh-cycles 100 \
+  --session-repeats 30 \
+  --message-counts 1 100 500 1000 \
+  --pause 0.25 \
+  --bench-repeats 3 \
+  --bench-rounds 100
+```
+
+A segunda execução mede sessões novas e amortizadas e é uma bateria longa para
+o operador, não um passo da demo. O dashboard mostra tempo, bytes e heap apenas
+no debrief da partida; nunca alimenta o resultado oficial.
 
 Os logs novos usam `pqc-sat-stand-log-v2` e ficam, por padrão, em
 `logs/stand/YYYYMMDD/`. Eles separam seleção, confirmação D27/tela, comandos,
@@ -203,7 +236,11 @@ python3 tools/firmware_deploy.py --upload
 ```
 
 O utilitário é Python, não usa shell/Bash, identifica a Wisdom por `HELLO`
-antes de gravar e exige `game=STAGED_V1` depois do reset. Para fixar uma porta:
+antes de gravar e exige `game=STAGED_V1 kex=FAIR_V1` e
+`session_bench=FAIR_SESSION_V1` depois do reset. Após o sucesso, ele imprime o
+caminho de um manifesto JSON com hashes do binário e das fontes, porta e ambos
+os handshakes. O manifesto inclui ainda um hash determinístico da árvore
+wolfSSL local, sem copiar seu conteúdo. Para fixar uma porta:
 
 ```text
 python3 tools/firmware_deploy.py --upload --port /dev/serial/by-id/<wisdom>

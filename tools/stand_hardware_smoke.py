@@ -66,6 +66,8 @@ def main(argv=None) -> int:
             baudrate=args.baud,
             timeout=args.probe_timeout,
             require_staged_game=True,
+            require_fair_kex=True,
+            require_session_bench=True,
         )
     except SerialBridgeError as exc:
         print(f"ERRO: {exc}", file=sys.stderr)
@@ -114,7 +116,7 @@ def main(argv=None) -> int:
                 elif controller.state is InvestigationState.SELECT_PROFILE:
                     controller.handle_action(f"profile:{config.baseline_mhz}", now=now)
                 elif controller.state is InvestigationState.SELECT_KEY_MODE:
-                    controller.handle_action("key:PQC", now=now)
+                    controller.handle_action("key:MLKEM", now=now)
                 elif controller.state is InvestigationState.SELECT_GUARD:
                     controller.handle_action("guard:CRC32", now=now)
                 elif controller.state is InvestigationState.DIAGNOSE and controller.incident is not None:

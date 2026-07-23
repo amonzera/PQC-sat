@@ -55,9 +55,10 @@ class StandSessionLogger:
             ],
             fixture_source=fixture_source or None,
             protocol="STAGED_V1",
+            kex_experiment="KEX_FAIR_V1",
             public_interaction_timeout_enabled=config.public_interaction_timeout_enabled,
             public_auto_reset_enabled=config.public_auto_reset_enabled,
-            key_modes=["CLASSIC", "PQC"],
+            key_modes=["ECDH", "MLKEM"],
             guards=["NONE", "CRC32"],
         )
 

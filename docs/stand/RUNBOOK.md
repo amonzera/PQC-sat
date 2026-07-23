@@ -4,7 +4,8 @@
 
 - notebook com Python, pygame-ce e pyserial instalados;
 - BlackBoard Wisdom conectada por USB;
-- firmware candidato com `game=STAGED_V1` já gravado;
+- firmware candidato com
+  `game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` já gravado;
 - D27 em repouso como `button=0` e pressionado como `button=1`;
 - A39 variando de forma observável;
 - suspensão de tela e do sistema desabilitada pelo operador.
@@ -12,9 +13,10 @@
 Não existe fallback simulado no programa do evento. Se a placa não estiver
 presente e validada, a interface não abre.
 
-Se o diagnóstico reconhecer a Wisdom mas informar firmware sem `STAGED_V1`, o
-operador deve compilar sem gravação e, depois de revisar o resultado, autorizar
-o upload explicitamente:
+Se o diagnóstico reconhecer a Wisdom mas informar firmware sem
+`game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`, o operador deve instalar a árvore wolfSSL local conforme
+`firmware/WOLFSSL_LOCAL.md`, compilar sem gravação e, depois de revisar o resultado, autorizar o
+upload explicitamente:
 
 ```text
 python3 tools/firmware_deploy.py
@@ -22,7 +24,12 @@ python3 tools/firmware_deploy.py --upload
 ```
 
 O segundo comando identifica a placa por `HELLO`, grava o binário e só termina
-com sucesso após o novo firmware responder `game=STAGED_V1`.
+com sucesso após o novo firmware responder `game=STAGED_V1 kex=FAIR_V1` e
+`session_bench=FAIR_SESSION_V1`. Guarde a linha
+`firmware_deploy_manifest=logs/firmware/...json`; a coleta oficial exige esse
+arquivo. Ele registra também o hash da árvore wolfSSL local; mantenha essa
+mesma árvore local até terminar a coleta, pois qualquer mudança faz a bateria
+falhar de forma fechada.
 
 ## 2. Identificar a placa
 
@@ -40,7 +47,8 @@ porta selecionada: /dev/ttyUSB0
 ```
 
 e retorno zero após confirmar `node=PQC-SAT-WISDOM`,
-`board=BlackBoard-Wisdom`, `proto=V1`, `game=STAGED_V1` e `uptime_ms` válido.
+`board=BlackBoard-Wisdom`, `proto=V1`, `game=STAGED_V1`, `kex=FAIR_V1`,
+`session_bench=FAIR_SESSION_V1` e `uptime_ms` válido.
 
 Se houver duas Wisdoms, use:
 
@@ -64,7 +72,10 @@ python3 tools/stand_diagnostics.py --port /dev/ttyUSB0 --full --wait-button-seco
 ```
 
 Esse comando altera temporariamente o perfil, executa operações curtas e
-restaura o baseline. O relatório deve registrar `active_game_a39` entre
+restaura o baseline. O relatório deve confirmar `KEX_INFO`, um
+`KEX_BENCH 1`, `MISSION ECDH`, `MISSION MLKEM`, `SESSION_BENCH ECDH 1`,
+`SESSION_BENCH MLKEM 1` e registrar
+`active_game_a39` entre
 `GAME_PROTECT` e `GAME_TRANSMIT`, com o mesmo ID chegando a `TRANSMIT`; isso
 detecta a regressão em que `ANALOG POT` apagava a sessão. O diagnóstico não
 substitui o gate longo.
@@ -137,8 +148,8 @@ execute o dashboard como root.
 ### Porta existe, mas não é aceita
 
 O programa agora mostra o motivo da sondagem. Se o retorno indicar firmware sem
-`STAGED_V1`, compile e grave o candidato conforme `firmware/README.md`; não
-mascare o problema com uma porta fixa.
+`game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`, compile e grave o candidato conforme
+`firmware/README.md`; não mascare o problema com uma porta fixa.
 
 ### Desconexão durante uma partida
 
@@ -158,13 +169,54 @@ python3 tools/generate_game_evidence.py
 
 Elas usam fixture determinística e devem permanecer rotuladas como teste.
 
-## 8. Gate longo
+## 8. Bateria FAIR oficial
+
+Esta é uma campanha longa de pesquisa e não pertence ao fluxo do visitante.
+O agente não a inicia. Depois de upload, manifesto e diagnóstico curto
+aprovados, o operador primeiro confirma o plano:
+
+```text
+python3 tools/kex_metrics_battery.py --dry-run
+```
+
+O plano oficial deve informar 905 comandos, 400 missões `fresh`, 480 execuções
+`SESSION_BENCH` e 6 `KEX_BENCH`. Então o operador executa, substituindo o
+manifesto pelo caminho impresso no upload:
+
+```text
+python3 tools/kex_metrics_battery.py \
+  --port /dev/ttyUSB0 \
+  --deployment-manifest logs/firmware/<timestamp>_firmware_deploy_dev-ttyUSB0.json \
+  --timeout 20 \
+  --fresh-cycles 100 \
+  --session-repeats 30 \
+  --message-counts 1 100 500 1000 \
+  --pause 0.25 \
+  --bench-repeats 3 \
+  --bench-rounds 100
+```
+
+O runner salva
+`logs/<timestamp>_kex_fair_metrics_dev-ttyusb0.json`. O resumo aceito deve ter
+`official_candidate=true`, `failed=0`, `fresh_mission_runs=400`,
+`session_bench_runs=480`, `kex_bench_runs=6`, `invalid_pairs=0`,
+`missing_cells=0` e `profile_mismatches=0`. Não interrompa a campanha salvo
+falha de segurança, temperatura, alimentação ou serial. Depois, chame a IA
+passando o caminho do JSON para análise; não copie apenas as médias.
+
+## 9. Gate longo do estande
 
 O agente nunca inicia baterias longas. O operador executa conscientemente:
 
 ```text
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 tools/stage8_acceptance.py --port /dev/ttyUSB0 --timeout 12 --duration 1800 --interval 30
 ```
+
+O JSON `pqc-sat-stage8-acceptance-v2` deve terminar com `ok=true`,
+`failed=0`, `semantic_errors=[]`, `kex_bench_runs=2`,
+`fresh_mission_runs>=4` e `session_bench_runs>=4`. O runner rejeita firmware
+sem `STAGED_V1`, `FAIR_V1` ou `FAIR_SESSION_V1`; ele não usa os cenários
+legados `CLASSIC/PQC`.
 
 Depois, execute 30 partidas físicas, três horas de exposição, mais de 100
 confirmações D27, 100 mudanças A39 e dez reconexões. Inclua ciclos pelo verde,

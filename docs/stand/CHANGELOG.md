@@ -1,5 +1,63 @@
 # Changelog do modo estande SBPC
 
+## 2026-07-23 — comparação FAIR ECDH P-256 versus ML-KEM-512
+
+- superfície pública migrada de `CLASSIC/PQC` para `ECDH/MLKEM`, preservando
+  os comandos antigos como `LEGACY_V1`;
+- novo handshake de pesquisa anuncia
+  `game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`;
+- mesmo wolfCrypt 5.9.2 usado para os dois KEX e para RNG, HKDF-SHA256 e
+  AES-128-GCM, com aceleração ESP32 e assembly específico desativados;
+- `SESSION_BENCH ECDH|MLKEM` passou a medir uma sessão nova seguida por 1, 100,
+  500 ou 1000 mensagens, separando setup, dados, total, amortização, bytes,
+  heap, maior bloco e stack high-water mark;
+- `tools/kex_metrics_battery.py` v2 agenda 400 missões frescas, 480 sessões
+  amortizadas e 6 benchmarks, em pares de ordem alternada, e só marca uma
+  coleta oficial com desenho completo, respostas válidas e manifesto de deploy;
+- `tools/stage8_acceptance.py` v2 deixou de executar `CLASSIC/PQC`: o smoke e
+  o long-run agora validam semanticamente `KEX_INFO`, ECDH/ML-KEM e
+  `SESSION_BENCH`, mantendo esse aceite separado da coleta estatística;
+- `tools/firmware_deploy.py --upload` agora grava manifesto JSON somente após
+  validar o firmware FAIR recém-gravado, vinculando hashes do binário, fontes e
+  árvore wolfSSL local, além de porta e handshakes;
+- o dashboard mostra custo somente no debrief, depois de dados reais da
+  Wisdom; o replay intermediário permanece qualitativo e repete o KEX
+  selecionado no retry;
+- 117 testes host passam, incluindo descoberta versionada, manifesto com
+  dependência, equações de sessão, códigos de retorno KEX, aceite serial FAIR e
+  rejeição de logs `STAGED_V1` com modo de chave legado;
+- o perfil legado atual compila sem wolfSSL com 59.004 B de RAM, 940.421 B de
+  flash e binário de 946.992 B
+  (`8cfd774614d8162d4af8e06fdbf221891a31e1fe25a22f70f6ac36888d152188`);
+- a árvore Arduino oficial wolfSSL 5.9.2, commit `ac01707f…`, foi instalada
+  localmente sob GPLv3 e permanece ignorada pelo Git;
+- o primeiro smoke FAIR real confirmou handshake, `KEX_INFO` e ML-KEM, mas
+  `KEX_BENCH 1` registrou `ecdh_ok=0`, setup de 29 µs e os demais estágios
+  zerados em `logs/stand/diagnostics/20260723T152842Z_stand_diagnostic.json`;
+- a causa foi `WOLFSSL_SP_MATH` sem `WOLFSSL_HAVE_SP_ECC`, combinação em que o
+  wolfSSL retorna `WC_KEY_SIZE_E (-234)` para P-256; o firmware agora ativa o
+  backend SP ECC C de 32 bits, impede essa configuração inválida no build e
+  publica `ecdh_rc`/`mlkem_rc`;
+- a revisão `afa5724c…af0d47` foi gravada e o segundo smoke real confirmou
+  `KEX_BENCH 1`, missões e sessões ECDH/ML-KEM, além de `FAULT`; o fluxo
+  transacional chegou a `GAME_BEGIN`, mas `GAME_PROTECT` repetia a chave
+  `experiment` já emitida pelo bloco comum;
+- `GAME_PROTECT` agora preserva um único `experiment=KEX_FAIR_V1`, e o
+  diagnóstico mostra o `BAD_GAME_STATE` deliberado como teste negativo
+  aprovado;
+- o novo build passou com 59.020 B de RAM, 1.005.497 B de flash e binário de
+  1.012.080 B, SHA-256
+  `9eba850f2ea493edbdb89d7103f85589456277426f50136a2e337f8dac32a18d`;
+- essa revisão foi gravada pelo manifesto `20260723T155737Z` e o diagnóstico
+  `20260723T160223Z` concluiu 27 registros com `result=PASS`: backend comum,
+  ECDH/ML-KEM, sessões, falhas, caminho `GAME_*`, A39 ativo, retry,
+  compatibilidade `INVESTIGATE` e `BUTTON_PING` físico;
+- o build emite o aviso genérico Xtensa do wolfSSL sobre implementações
+  rápidas constant-time; side-channel não é objeto medido nem alegação desta
+  pesquisa. Baterias longas, partida visual integral, matriz, ensaio e testes
+  com visitantes continuam pendentes; o firmware não é ainda uma release
+  aprovada para o estande.
+
 ## 2026-07-23 — abertura mínima e fluxo direto
 
 - preservada a busca automática da Wisdom e a abertura narrativa com Terra e

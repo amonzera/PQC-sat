@@ -8,10 +8,12 @@ from unittest import mock
 
 from tools import aes_gcm_metrics_battery
 from tools import final_metrics_battery
+from tools import kex_metrics_battery
 from tools import serial_console
 from tools import stage8_acceptance
 from tools.serial_bridge import SerialBridgeError
 from tools.serial_protocol import (
+    MAX_COMMAND_CHARS,
     MAX_FRAME_CHARS,
     ProtocolError,
     build_command,
@@ -28,6 +30,323 @@ from tools.serial_commands import (
 
 
 class SerialProtocolTests(unittest.TestCase):
+    def test_fair_firmware_source_uses_one_portable_wolfcrypt_backend(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        adapter = (
+            repo_root / "firmware" / "esp32_serial_spike" / "pqc_sat_fair_crypto.cpp"
+        ).read_text(encoding="utf-8")
+        settings = (
+            repo_root / "firmware" / "esp32_serial_spike" / "user_settings.h"
+        ).read_text(encoding="utf-8")
+        platformio = (repo_root / "platformio.ini").read_text(encoding="utf-8")
+
+        self.assertIn("wc_ecc_shared_secret", adapter)
+        self.assertIn("wc_MlKemKey_Encapsulate", adapter)
+        self.assertIn("wc_HKDF", adapter)
+        self.assertIn("wc_AesGcmEncrypt", adapter)
+        self.assertIn("NO_ESP32_CRYPT", settings)
+        self.assertIn("WOLFSSL_NO_ASM", settings)
+        self.assertIn("#define SP_WORD_SIZE 32", settings)
+        self.assertIn("#define WOLFSSL_HAVE_SP_ECC", settings)
+        self.assertIn("requires the portable 32-bit SP ECC backend", adapter)
+        self.assertIn("PQC_SAT_ENABLE_FAIR_CRYPTO=1", platformio)
+        self.assertIn("robocore_wisdom_esp32_fair", platformio)
+        firmware = (
+            repo_root / "firmware" / "esp32_serial_spike" / "esp32_serial_spike.ino"
+        ).read_text(encoding="utf-8")
+        self.assertIn("SESSION_BENCH ECDH|MLKEM 1|100|500|1000 payload_hex", firmware)
+        self.assertIn('print_kv("session_bench", FAIR_SESSION_BENCH);', firmware)
+        self.assertIn('print_kv_i32("ecdh_rc", ecdh.failure_rc);', firmware)
+        self.assertIn('print_kv_i32("mlkem_rc", mlkem.failure_rc);', firmware)
+        self.assertIn(
+            "print_fair_metadata(staged_game.fair_algorithm, false);",
+            firmware,
+        )
+
+    def test_fair_bench_validator_requires_zero_algorithm_return_codes(self):
+        payload = {
+            **kex_metrics_battery.FAIR_COMMON,
+            "paired_order": "alternating",
+            "n": "1",
+            "pairs": "1",
+            "ok": "2",
+            "ecdh_ok": "1",
+            "ecdh_rc": "0",
+            "ecdh_setup_avg_us": "10",
+            "ecdh_initiator_avg_us": "20",
+            "ecdh_responder_avg_us": "30",
+            "ecdh_total_avg_us": "60",
+            "ecdh_setup_bytes": "65",
+            "ecdh_response_bytes": "65",
+            "mlkem_ok": "1",
+            "mlkem_rc": "0",
+            "mlkem_setup_avg_us": "40",
+            "mlkem_initiator_avg_us": "50",
+            "mlkem_responder_avg_us": "60",
+            "mlkem_total_avg_us": "150",
+            "mlkem_setup_bytes": "800",
+            "mlkem_response_bytes": "768",
+            "profile": "BASELINE",
+            "cpu_mhz": "240",
+            "elapsed_us": "210",
+            "heap": "200000",
+            "min_heap": "190000",
+        }
+
+        self.assertEqual(
+            kex_metrics_battery.validate_bench(payload, 1, "BASELINE"),
+            [],
+        )
+        payload["ecdh_rc"] = "-234"
+        self.assertIn(
+            "código de retorno KEX não é zero",
+            kex_metrics_battery.validate_bench(payload, 1, "BASELINE"),
+        )
+
+    def test_fair_metrics_plan_is_paired_and_alternates_order(self):
+        args = kex_metrics_battery.parse_args(
+            [
+                "--cycles",
+                "2",
+                "--session-repeats",
+                "2",
+                "--message-counts",
+                "1",
+                "--bench-repeats",
+                "1",
+                "--bench-rounds",
+                "3",
+            ]
+        )
+        steps = kex_metrics_battery.planned_steps(args)
+        commands = [step.command for step in steps if step.phase == "mission"]
+        sessions = [step for step in steps if step.phase == "session"]
+
+        self.assertEqual(len(commands), 8)
+        self.assertIn("MISSION ECDH ", commands[0])
+        self.assertIn("MISSION MLKEM ", commands[1])
+        self.assertIn("MISSION MLKEM ", commands[2])
+        self.assertIn("MISSION ECDH ", commands[3])
+        self.assertEqual(len(sessions), 8)
+        self.assertEqual(
+            [step.scenario for step in sessions[:4]],
+            ["ECDH", "MLKEM", "MLKEM", "ECDH"],
+        )
+        self.assertEqual(
+            [step.order_position for step in sessions[:4]],
+            [1, 2, 1, 2],
+        )
+
+    def test_fair_metrics_only_labels_full_balanced_design_official(self):
+        full = kex_metrics_battery.parse_args([])
+        smoke = kex_metrics_battery.parse_args(
+            ["--cycles", "2", "--bench-repeats", "1", "--bench-rounds", "3"]
+        )
+
+        self.assertEqual(kex_metrics_battery.official_design_errors(full), [])
+        self.assertTrue(kex_metrics_battery.official_design_errors(smoke))
+
+    def test_official_fair_battery_refuses_missing_manifest_before_serial(self):
+        with mock.patch.object(kex_metrics_battery, "discover_wisdom") as discover:
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                status = kex_metrics_battery.main([])
+
+        self.assertEqual(status, 2)
+        discover.assert_not_called()
+        self.assertIn("manifesto do firmware gravado", stderr.getvalue())
+
+    def test_host_parser_accepts_large_fair_metrics_response(self):
+        metrics = {f"metric_{index}": "x" * 40 for index in range(40)}
+        frame = build_response("fair-large", "OK", metrics)
+
+        self.assertGreater(len(frame), 1024)
+        self.assertLess(len(frame), MAX_FRAME_CHARS)
+        self.assertEqual(parse_frame(frame).request_id, "fair-large")
+
+    def test_fair_metrics_validator_checks_wire_accounting(self):
+        payload = {
+            **kex_metrics_battery.FAIR_COMMON,
+            **kex_metrics_battery.MISSION_REQUIRED,
+            "scenario": "ECDH",
+            "kex": "ECDH-P256",
+            "bytes_payload": "8",
+            "setup_bytes": "65",
+            "response_bytes": "65",
+            "data_bytes": "40",
+            "wire_total_fresh": "170",
+            "wire_total_preprovisioned": "105",
+            "bytes_total": "170",
+            "heap": "200000",
+            "min_heap": "190000",
+            **{field: "1" for field in kex_metrics_battery.TIMING_FIELDS},
+            "kex_total_us": "3",
+            "online_us": "9",
+            "end_to_end_us": "10",
+            "elapsed_us": "10",
+        }
+        self.assertEqual(kex_metrics_battery.validate_mission(payload, "ECDH", 8), [])
+        payload["wire_total_fresh"] = "169"
+        self.assertIn(
+            "wire_total_fresh não fecha",
+            kex_metrics_battery.validate_mission(payload, "ECDH", 8),
+        )
+
+    def test_fair_session_validator_checks_time_bytes_and_memory(self):
+        payload = {
+            **kex_metrics_battery.FAIR_COMMON,
+            "session_bench": "FAIR_SESSION_V1",
+            "scenario": "ECDH",
+            "kex": "ECDH-P256",
+            "key_match": "1",
+            "aead_match": "1",
+            "messages": "100",
+            "messages_ok": "100",
+            "bytes_payload": "8",
+            "setup_us": "10",
+            "initiator_us": "20",
+            "responder_us": "30",
+            "kex_total_us": "60",
+            "kdf_us": "5",
+            "session_setup_us": "65",
+            "rng_total_us": "2",
+            "encrypt_total_us": "100",
+            "decrypt_total_us": "110",
+            "data_total_us": "220",
+            "end_to_end_us": "300",
+            "amortized_us_per_message": "3",
+            "setup_bytes": "65",
+            "response_bytes": "65",
+            "handshake_bytes": "130",
+            "data_bytes_per_message": "36",
+            "data_total_bytes": "3600",
+            "wire_total_bytes": "3730",
+            "amortized_bytes_per_message": "37",
+            "heap_before": "200000",
+            "heap_after": "199000",
+            "heap_delta": "1000",
+            "min_heap_before": "190000",
+            "min_heap_global": "189000",
+            "largest_block_before": "120000",
+            "largest_block_after": "119000",
+            "stack_hwm_words": "1000",
+            "profile": "BASELINE",
+            "cpu_mhz": "240",
+        }
+
+        self.assertEqual(
+            kex_metrics_battery.validate_session(
+                payload,
+                "ECDH",
+                100,
+                8,
+                "BASELINE",
+            ),
+            [],
+        )
+        payload["wire_total_bytes"] = "3729"
+        self.assertIn(
+            "wire_total_bytes não fecha",
+            kex_metrics_battery.validate_session(
+                payload,
+                "ECDH",
+                100,
+                8,
+                "BASELINE",
+            ),
+        )
+
+    def test_fair_pair_validator_rejects_missing_order_position(self):
+        records = [
+            {
+                "sequence_index": 1,
+                "pair_id": "fresh:BASELINE:001",
+                "pair_family": "fresh",
+                "scenario_requested": "ECDH",
+                "order_position": 1,
+                "payload": {},
+            },
+            {
+                "sequence_index": 2,
+                "pair_id": "fresh:BASELINE:001",
+                "pair_family": "fresh",
+                "scenario_requested": "MLKEM",
+                "order_position": 1,
+                "payload": {},
+            },
+        ]
+
+        _pairs, errors = kex_metrics_battery._pair_records(records)
+
+        self.assertIn(
+            "fresh:BASELINE:001 não contém as posições 1 e 2",
+            errors,
+        )
+
+    def test_fair_manifest_binds_firmware_sources_port_and_capability(self):
+        digest = "a" * 64
+        manifest = {
+            "schema_version": "pqc-sat-firmware-deploy-v1",
+            "platformio_env": "robocore_wisdom_esp32_fair",
+            "uploaded": True,
+            "verified": True,
+            "firmware_sha256": digest,
+            "port": "/dev/ttyUSB9",
+            "port_realpath": "/dev/ttyUSB9",
+            "post_upload_handshake": {
+                "game": "STAGED_V1",
+                "kex": "FAIR_V1",
+                "session_bench": "FAIR_SESSION_V1",
+            },
+            "source_sha256": {
+                str(path.relative_to(kex_metrics_battery.ROOT)): digest
+                for path in kex_metrics_battery.SOURCE_PATHS
+            },
+            "dependency_provenance": {
+                "wolfssl": {
+                    "expected_version": kex_metrics_battery.WOLFSSL_EXPECTED_VERSION,
+                    "expected_upstream_commit": (
+                        kex_metrics_battery.WOLFSSL_EXPECTED_UPSTREAM_COMMIT
+                    ),
+                    "file_count": 12,
+                    "tree_sha256": digest,
+                }
+            },
+        }
+
+        with mock.patch.object(
+            kex_metrics_battery,
+            "file_sha256",
+            return_value=digest,
+        ):
+            with mock.patch.object(
+                kex_metrics_battery,
+                "directory_sha256",
+                return_value=(12, digest),
+            ):
+                self.assertEqual(
+                    kex_metrics_battery.validate_deployment_manifest(
+                        manifest,
+                        expected_port="/dev/ttyUSB9",
+                    ),
+                    [],
+                )
+        manifest["post_upload_handshake"]["session_bench"] = "unavailable"
+        with mock.patch.object(
+            kex_metrics_battery,
+            "file_sha256",
+            return_value=digest,
+        ):
+            with mock.patch.object(
+                kex_metrics_battery,
+                "directory_sha256",
+                return_value=(12, digest),
+            ):
+                errors = kex_metrics_battery.validate_deployment_manifest(manifest)
+        self.assertIn(
+            "handshake pós-upload não é STAGED_V1/FAIR_V1/FAIR_SESSION_V1",
+            errors,
+        )
+
     def test_staged_firmware_owns_and_clears_shared_mlkem_buffers(self):
         repo_root = Path(__file__).resolve().parents[1]
         source = (repo_root / "firmware" / "esp32_serial_spike" / "esp32_serial_spike.ino").read_text(
@@ -113,6 +432,10 @@ class SerialProtocolTests(unittest.TestCase):
         with self.assertRaises(ProtocolError):
             parse_frame(oversized)
 
+    def test_rejects_command_larger_than_firmware_input_buffer(self):
+        with self.assertRaisesRegex(ProtocolError, str(MAX_COMMAND_CHARS)):
+            build_command(1, "MISSION", "x" * MAX_COMMAND_CHARS)
+
     def test_rejects_payload_without_key_value(self):
         with self.assertRaises(ProtocolError):
             decode_key_values(("seq=1", "bad_field"))
@@ -130,8 +453,11 @@ class SerialProtocolTests(unittest.TestCase):
         self.assertIn("      muda a cor do indicador principal", rendered)
         full_rendered = "\n".join(command_help_lines(demo_only=False))
         self.assertIn("OLED INIT|CLEAR|TEST|STANDBY", full_rendered)
-        self.assertIn("MISSION CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32", full_rendered)
-        self.assertIn("GAME_BEGIN id profile CLASSIC|PQC NONE|CRC32", full_rendered)
+        self.assertIn("MISSION ECDH|ECDH_CRC32|MLKEM|MLKEM_CRC32", full_rendered)
+        self.assertIn("GAME_BEGIN id profile ECDH|MLKEM|CLASSIC|PQC", full_rendered)
+        self.assertIn("KEX_INFO", full_rendered)
+        self.assertIn("KEX_BENCH n", full_rendered)
+        self.assertIn("SESSION_BENCH ECDH|MLKEM 1|100|500|1000", full_rendered)
         self.assertIn("GAME_RETRY id", full_rendered)
         self.assertTrue(is_demo_firmware_command("MISSION CLASSIC_CRC32"))
 
@@ -145,6 +471,8 @@ class SerialProtocolTests(unittest.TestCase):
             self.assertNotIn(command_name, DEMO_FIRMWARE_COMMAND_NAMES)
         self.assertIn("STRESS", FIRMWARE_COMMAND_NAMES)
         self.assertNotIn("STRESS", DEMO_FIRMWARE_COMMAND_NAMES)
+        self.assertIn("SESSION_BENCH", FIRMWARE_COMMAND_NAMES)
+        self.assertNotIn("SESSION_BENCH", DEMO_FIRMWARE_COMMAND_NAMES)
 
         full_rendered = "\n".join(command_help_lines(demo_only=False))
         demo_rendered = "\n".join(command_help_lines())
@@ -188,6 +516,32 @@ class SerialProtocolTests(unittest.TestCase):
 
         self.assertEqual(status, 1)
         self.assertIn("error: missing port", stderr.getvalue())
+
+    def test_stage8_acceptance_uses_only_current_fair_measurements(self):
+        commands = stage8_acceptance.SMOKE_COMMANDS + stage8_acceptance.LONG_COMMANDS
+        measured = [
+            command
+            for command in commands
+            if command.startswith(("MISSION ", "KEX_BENCH ", "SESSION_BENCH "))
+        ]
+
+        self.assertTrue(any(command.startswith("MISSION ECDH ") for command in measured))
+        self.assertTrue(any(command.startswith("MISSION MLKEM ") for command in measured))
+        self.assertTrue(any(command.startswith("SESSION_BENCH ECDH 1 ") for command in measured))
+        self.assertTrue(any(command.startswith("SESSION_BENCH MLKEM 1 ") for command in measured))
+        self.assertFalse(any("CLASSIC" in command or "PQC_BENCH" in command for command in measured))
+
+    def test_stage8_acceptance_fails_closed_on_invalid_fair_payload(self):
+        summary = stage8_acceptance.summarize(
+            [{"ok": True, "command": "KEX_INFO", "payload": {}}]
+        )
+
+        self.assertFalse(summary["ok"])
+        self.assertEqual(summary["failed"], 0)
+        self.assertEqual(
+            summary["semantic_errors"][0]["error"],
+            "profile FAIR ausente ou inválido",
+        )
 
     def test_final_metrics_battery_plans_balanced_profiles(self):
         args = mock.Mock(

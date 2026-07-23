@@ -39,8 +39,12 @@ class InvestigationState(str, Enum):
 
 
 class KeyMode(str, Enum):
-    CLASSIC = "CLASSIC"
-    PQC = "PQC"
+    ECDH = "ECDH"
+    MLKEM = "MLKEM"
+
+
+FAIR_KEY_MODES = (KeyMode.ECDH, KeyMode.MLKEM)
+LEGACY_KEY_MODES = ("CLASSIC", "PQC")
 
 
 class GuardMode(str, Enum):
@@ -273,8 +277,8 @@ class StandConfig:
             raise StandConfigError("configuração v3 exige animações positivas por checkpoint")
         if config.public_interaction_timeout_enabled or config.public_auto_reset_enabled:
             raise StandConfigError("fluxo público v3 não permite timeout ou reset automático")
-        if tuple(data.get("key_modes", ())) != ("CLASSIC", "PQC"):
-            raise StandConfigError("configuração v3 exige CLASSIC e PQC como modos de chave")
+        if tuple(data.get("key_modes", ())) != tuple(mode.value for mode in FAIR_KEY_MODES):
+            raise StandConfigError("configuração v3 exige ECDH e MLKEM como modos de chave")
         if tuple(data.get("guards", ())) != ("NONE", "CRC32"):
             raise StandConfigError("configuração v3 exige NONE e CRC32 como guardiões")
         if set(config.incident_sequence) != {
@@ -755,7 +759,7 @@ def parse_investigation_response(
     if incident == IncidentScenario.NORMAL.value and after_byte != before_byte:
         raise StandProtocolError("transmissão normal não pode alterar o byte")
 
-    use_app_crc = scenario in {"CLASSIC_CRC32", "PQC_CRC32"}
+    use_app_crc = scenario.endswith("_CRC32")
     expected = {
         IncidentScenario.NORMAL.value: ("DELIVERED", True, True, True, use_app_crc, use_app_crc, use_app_crc),
         IncidentScenario.CHANNEL_BITFLIP.value: ("FRAME_REJECT", False, False, False, use_app_crc, False, False),
@@ -924,6 +928,28 @@ def parse_game_stage_response(
             raise StandProtocolError("PROTECT não comprovou chave e envelope AES-GCM")
         _required_int(payload, "nonce_crc32", base=0)
         _required_int(payload, "session_key_crc32", base=0)
+        if key_mode in FAIR_KEY_MODES:
+            expected_kex = "ECDH-P256" if key_mode is KeyMode.ECDH else "ML-KEM-512"
+            if _required_text(payload, "experiment").upper() != "KEX_FAIR_V1":
+                raise StandProtocolError("PROTECT não pertence ao experimento KEX_FAIR_V1")
+            if _required_text(payload, "kex").upper() != expected_kex:
+                raise StandProtocolError("PROTECT retornou algoritmo de estabelecimento divergente")
+            if not _required_text(payload, "crypto_impl").lower().startswith("wolfcrypt"):
+                raise StandProtocolError("PROTECT não comprovou backend wolfCrypt comum")
+            if _required_text(payload, "kdf").upper() != "HKDF-SHA256":
+                raise StandProtocolError("PROTECT não comprovou HKDF-SHA256 comum")
+            if _required_text(payload, "optimization").lower() != "portable-software":
+                raise StandProtocolError("PROTECT não comprovou política portátil comum")
+            if _required_bool(payload, "target_asm") or _required_bool(payload, "hw_crypto"):
+                raise StandProtocolError("PROTECT ativou aceleração fora do perfil FAIR_V1")
+            setup_bytes = _required_int(payload, "setup_bytes")
+            response_bytes = _required_int(payload, "response_bytes")
+            expected_sizes = (65, 65) if key_mode is KeyMode.ECDH else (800, 768)
+            if (setup_bytes, response_bytes) != expected_sizes:
+                raise StandProtocolError("PROTECT retornou material público com tamanho divergente")
+            for timing in ("setup_us", "initiator_us", "responder_us", "kex_total_us", "kdf_us"):
+                if _required_int(payload, timing) <= 0:
+                    raise StandProtocolError(f"PROTECT retornou {timing} não positivo")
     else:
         if incident is None or selection is None:
             raise ValueError("TRANSMIT exige incidente interno e vetor confirmado")
@@ -1093,6 +1119,8 @@ __all__ = (
     "StandProtocolError",
     "InvestigationState",
     "KeyMode",
+    "FAIR_KEY_MODES",
+    "LEGACY_KEY_MODES",
     "GuardMode",
     "GameStage",
     "OperationalDecision",

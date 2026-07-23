@@ -126,6 +126,8 @@ def validate_cycle(record: dict[str, object]) -> list[str]:
             return errors
         if result.get("source") != "hardware-live":
             errors.append("partida não veio do hardware")
+        if str(result.get("key_mode", "")) not in {"ECDH", "MLKEM"}:
+            errors.append("partida STAGED_V1 não usou ECDH/MLKEM FAIR")
         incident = str(result.get("incident", ""))
         guard = str(result.get("guard", ""))
         use_app_crc = guard == "CRC32"

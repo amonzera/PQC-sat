@@ -17,31 +17,42 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.final_metrics_battery import send_record, utc_now_iso, write_document
+from tools.kex_metrics_battery import (
+    DEFAULT_PAYLOAD,
+    DEFAULT_PAYLOAD_HEX,
+    PROFILE_CPU,
+    SESSION_BENCH_CAPABILITY,
+    payload_of,
+    validate_bench,
+    validate_kex_info,
+    validate_mission,
+    validate_session,
+)
 from tools.serial_bridge import SerialBridge, SerialBridgeError, SerialBridgeTimeout
 from pqc_sat.infrastructure.wisdom import discover_wisdom
 
 
-SCHEMA_VERSION = "pqc-sat-stage8-acceptance-v1"
+SCHEMA_VERSION = "pqc-sat-stage8-acceptance-v2"
 DEFAULT_LOG_DIR = Path("logs")
 SMOKE_COMMANDS = (
     "HELLO",
     "PING",
     "STATUS",
     "TELEMETRY",
-    "PQC_INFO",
-    "PQC_KAT",
-    "PQC_FAULT 0 0x01 CONFIRM",
-    "PQC_FAULT 0 0x01 NONE",
-    "PQC_BENCH 100",
-    "MISSION CLASSIC",
-    "MISSION PQC",
-    "MISSION PQC_CRC32",
+    "KEX_INFO",
+    "KEX_BENCH 100",
+    f"MISSION ECDH {DEFAULT_PAYLOAD_HEX}",
+    f"MISSION MLKEM {DEFAULT_PAYLOAD_HEX}",
+    f"SESSION_BENCH ECDH 1 {DEFAULT_PAYLOAD_HEX}",
+    f"SESSION_BENCH MLKEM 1 {DEFAULT_PAYLOAD_HEX}",
     "PROFILE OBC-1U-LIMITED",
-    "PQC_BENCH 100",
-    "MISSION CLASSIC",
-    "MISSION PQC",
-    "MISSION PQC_CRC32",
-    "FAULT CRC32 5051432D534154 0 0x01",
+    "STATUS",
+    "KEX_INFO",
+    "KEX_BENCH 100",
+    f"MISSION ECDH {DEFAULT_PAYLOAD_HEX}",
+    f"MISSION MLKEM {DEFAULT_PAYLOAD_HEX}",
+    f"SESSION_BENCH ECDH 1 {DEFAULT_PAYLOAD_HEX}",
+    f"SESSION_BENCH MLKEM 1 {DEFAULT_PAYLOAD_HEX}",
     "PROFILE BASELINE",
     "OLED STANDBY",
     "LED GREEN",
@@ -52,11 +63,11 @@ LONG_COMMANDS = (
     "PING",
     "TELEMETRY",
     "STATUS",
-    "PQC_INFO",
-    "MISSION CLASSIC",
-    "MISSION PQC",
-    "MISSION PQC_CRC32",
-    "FAULT CRC32 5051432D534154 0 0x01",
+    "KEX_INFO",
+    f"MISSION ECDH {DEFAULT_PAYLOAD_HEX}",
+    f"MISSION MLKEM {DEFAULT_PAYLOAD_HEX}",
+    f"SESSION_BENCH ECDH 1 {DEFAULT_PAYLOAD_HEX}",
+    f"SESSION_BENCH MLKEM 1 {DEFAULT_PAYLOAD_HEX}",
 )
 
 
@@ -92,29 +103,80 @@ def run_long(bridge: SerialBridge, duration: float, interval: float) -> list[dic
 
 
 def choose_port(explicit: str | None) -> str:
-    """Resolve the port by probing the actual staged-game firmware."""
+    """Resolve the port by probing the current staged FAIR firmware."""
 
-    return discover_wisdom(explicit, require_staged_game=True).port
+    device = discover_wisdom(
+        explicit,
+        require_staged_game=True,
+        require_fair_kex=True,
+        require_session_bench=True,
+    )
+    return device.port
 
 
 def summarize(records: list[dict[str, object]]) -> dict[str, object]:
     failed = [record for record in records if not record.get("ok")]
-    pqc_bench = [
+    kex_bench = [
         record
         for record in records
-        if str(record.get("command", "")).startswith("PQC_BENCH") and record.get("ok")
+        if str(record.get("command", "")).startswith("KEX_BENCH") and record.get("ok")
     ]
     mission_runs = [
         record
         for record in records
         if str(record.get("command", "")).startswith("MISSION") and record.get("ok")
     ]
+    session_runs = [
+        record
+        for record in records
+        if str(record.get("command", "")).startswith("SESSION_BENCH") and record.get("ok")
+    ]
+    semantic_errors: list[dict[str, object]] = []
+    for index, record in enumerate(records, 1):
+        if not record.get("ok"):
+            continue
+        command = str(record.get("command", ""))
+        parts = command.split()
+        payload = payload_of(record)
+        expected_profile = payload.get("profile")
+        errors: list[str] = []
+        is_fair_measurement = (
+            command == "KEX_INFO"
+            or parts[:1] in (["KEX_BENCH"], ["MISSION"], ["SESSION_BENCH"])
+        )
+        if is_fair_measurement and expected_profile not in PROFILE_CPU:
+            errors = ["profile FAIR ausente ou inválido"]
+        elif command == "KEX_INFO":
+            errors = validate_kex_info(payload, expected_profile)
+        elif parts[:1] == ["KEX_BENCH"] and len(parts) == 2:
+            errors = validate_bench(payload, int(parts[1]), str(expected_profile))
+        elif parts[:1] == ["MISSION"] and len(parts) == 3:
+            errors = validate_mission(
+                payload,
+                parts[1],
+                len(DEFAULT_PAYLOAD),
+                expected_profile,
+            )
+        elif parts[:1] == ["SESSION_BENCH"] and len(parts) == 4:
+            errors = validate_session(
+                payload,
+                parts[1],
+                int(parts[2]),
+                len(DEFAULT_PAYLOAD),
+                str(expected_profile),
+            )
+        semantic_errors.extend(
+            {"record": index, "command": command, "error": error}
+            for error in errors
+        )
     return {
         "records": len(records),
         "failed": len(failed),
-        "pqc_bench_runs": len(pqc_bench),
-        "mission_runs": len(mission_runs),
-        "ok": not failed,
+        "kex_bench_runs": len(kex_bench),
+        "fresh_mission_runs": len(mission_runs),
+        "session_bench_runs": len(session_runs),
+        "semantic_errors": semantic_errors,
+        "ok": not failed and not semantic_errors,
     }
 
 
@@ -143,7 +205,15 @@ def main() -> int:
         "requested_duration_s": 0 if args.skip_long_run else args.duration,
         "actual_elapsed_s": round(time.monotonic() - started, 2),
         "records": records,
-        "game_preflight": {"ok": True, "port": port, "required_capability": "STAGED_V1"},
+        "game_preflight": {
+            "ok": True,
+            "port": port,
+            "required_capabilities": {
+                "game": "STAGED_V1",
+                "kex": "FAIR_V1",
+                "session_bench": SESSION_BENCH_CAPABILITY,
+            },
+        },
     }
     document["summary"] = summarize(records)
     path = write_document(document, args.log_dir, "stage8_acceptance")

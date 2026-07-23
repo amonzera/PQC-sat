@@ -28,13 +28,25 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PQC_DECAP", "decapsula ciphertext armazenado e compara segredo"),
     CommandInfo("PQC_FAULT index mask [CONFIRM|NONE]", "aplica bit-flip em ciphertext ML-KEM e testa confirmação"),
     CommandInfo("PQC_BENCH n", "executa n rodadas keygen/encap/decap, 1..100"),
+    CommandInfo("KEX_INFO", "reporta o contrato FAIR_V1, backend comum e tamanhos públicos"),
+    CommandInfo("KEX_BENCH n", "compara ECDH P-256 e ML-KEM-512 em pares alternados, 1..100"),
+    CommandInfo(
+        "SESSION_BENCH ECDH|MLKEM 1|100|500|1000 payload_hex",
+        "mede uma sessão FAIR e o custo amortizado de várias mensagens AES-GCM",
+    ),
     CommandInfo("STRESS PQC_LOOP n CONFIRM", "executa ML-KEM em loop extremo, 1..500, com confirmação explícita"),
-    CommandInfo("MISSION CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32 [payload_hex]", "envia mensagem curta e mede custo/bytes/segurança por cenário"),
+    CommandInfo(
+        "MISSION ECDH|ECDH_CRC32|MLKEM|MLKEM_CRC32|CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32 [payload_hex]",
+        "mede a sessão FAIR_V1 ou preserva os cenários legados explicitamente rotulados",
+    ),
     CommandInfo(
         "INVESTIGATE scenario incident payload_hex index mask incident_id",
         "executa incidente em camadas e reporta CRC de quadro, GCM e CRC da aplicação",
     ),
-    CommandInfo("GAME_BEGIN id profile CLASSIC|PQC NONE|CRC32 incident payload_hex", "inicia uma sessão transacional STAGED_V1"),
+    CommandInfo(
+        "GAME_BEGIN id profile ECDH|MLKEM|CLASSIC|PQC NONE|CRC32 incident payload_hex",
+        "inicia sessão STAGED_V1; a superfície pública usa apenas ECDH ou MLKEM",
+    ),
     CommandInfo("GAME_PROTECT id", "estabelece a chave e monta o envelope AES-GCM"),
     CommandInfo("GAME_TRANSMIT id byte_index bit_mask", "aplica o incidente oculto no vetor escolhido"),
     CommandInfo("GAME_VERIFY id", "verifica CRC de quadro, tag GCM e CRC da aplicação"),
@@ -64,28 +76,9 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
 )
 
 
-DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = (
-    CommandInfo("INJECT_FAULT", "aplica bit-flip determinístico com o guardião ativo"),
-    CommandInfo("BIT_FLIP [index mask]", "aplica bit-flip determinístico ou manual com o guardião ativo"),
-    CommandInfo("CHECKSUM ON|OFF|TOGGLE|STATUS", "liga/desliga o guardião CRC32 do fluxo manual"),
-    CommandInfo("GUARD NONE|CRC32", "define explicitamente o guardião ativo"),
-    CommandInfo("PQC_STATUS", "consulta PQC_INFO na placa ou mostra pendência local"),
-    CommandInfo("SET_PRESET_CLASSIC", "seleciona preset visual CLASSIC antes de ENVIAR MSG"),
-    CommandInfo("SET_PRESET_PQC", "seleciona preset visual PQC antes de ENVIAR MSG"),
-    CommandInfo("SET_PRESET_PQC_CRC32", "seleciona preset visual PQC+CRC antes de ENVIAR MSG"),
-    CommandInfo("SEND_MESSAGE", "envia mensagem usando o preset visual selecionado"),
-    CommandInfo("TOGGLE_LIVE_PAYLOAD", "liga/desliga payload de missão gerado por sensores da Wisdom"),
-    CommandInfo("MISSION CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32", "executa entrega de mensagem nos quatro cruzamentos de chave e guardião pelo terminal"),
-    CommandInfo("CRC_CHECK", "aplica bit-flip e verifica CRC32 real"),
-    CommandInfo("EXPORT_JSON", "salva eventos e métricas em JSON"),
-    CommandInfo("SAVE_SESSION", "alias de EXPORT_JSON"),
-    CommandInfo("RUN_BATTERY n", "executa bateria A/B e exporta JSON"),
-    CommandInfo("DEMO [n]", "executa campanha A/B visual cronometrada"),
-    CommandInfo("DEMO_PAUSE|DEMO_RESUME", "pausa ou retoma a campanha visual"),
-    CommandInfo("DEMO_STOP|DEMO_RESTART", "para ou reinicia a campanha visual"),
-    CommandInfo("RESET_SESSION", "salva dados pendentes, zera sessão e reinicia a seed"),
-    CommandInfo("HELP", "mostra ajuda avançada do terminal textual"),
-)
+# The production dashboard has no local command console. Keep the public name
+# for import compatibility, but do not advertise controls that no longer exist.
+DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = ()
 
 
 DEMO_FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
@@ -95,6 +88,12 @@ DEMO_FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("MISSION CLASSIC_CRC32", "usa chave AES efêmera local, AES-GCM e CRC32 protegido"),
     CommandInfo("MISSION PQC", "usa ML-KEM-512 para chave e AES-128-GCM para cifrar"),
     CommandInfo("MISSION PQC_CRC32", "usa ML-KEM-512, AES-GCM e CRC32 protegido no payload"),
+    CommandInfo("MISSION ECDH", "usa ECDH P-256, HKDF-SHA256 e AES-128-GCM no wolfCrypt"),
+    CommandInfo("MISSION ECDH_CRC32", "usa o fluxo ECDH FAIR_V1 com CRC32 protegido"),
+    CommandInfo("MISSION MLKEM", "usa ML-KEM-512, HKDF-SHA256 e AES-128-GCM no wolfCrypt"),
+    CommandInfo("MISSION MLKEM_CRC32", "usa o fluxo ML-KEM FAIR_V1 com CRC32 protegido"),
+    CommandInfo("KEX_INFO", "confirma o contrato e a versão do backend FAIR_V1"),
+    CommandInfo("KEX_BENCH 10", "executa pares alternados de ECDH e ML-KEM"),
     CommandInfo("TELEMETRY", "atualiza telemetria real da Wisdom"),
     CommandInfo("SENSOR_READ TEMP_HUM", "lê temperatura e umidade"),
     CommandInfo("SENSOR_READ ACCEL", "lê aceleração para demonstrar movimento"),
@@ -124,7 +123,20 @@ def is_demo_firmware_command(command_line: str) -> bool:
     if name in {"PING", "STATUS", "TELEMETRY"}:
         return len(parts) == 1
     if name == "MISSION":
-        return len(parts) == 2 and parts[1] in {"CLASSIC", "CLASSIC_CRC32", "PQC", "PQC_CRC32"}
+        return len(parts) == 2 and parts[1] in {
+            "CLASSIC",
+            "CLASSIC_CRC32",
+            "PQC",
+            "PQC_CRC32",
+            "ECDH",
+            "ECDH_CRC32",
+            "MLKEM",
+            "MLKEM_CRC32",
+        }
+    if name == "KEX_INFO":
+        return len(parts) == 1
+    if name == "KEX_BENCH":
+        return len(parts) == 2 and parts[1].isdigit() and 1 <= int(parts[1]) <= 100
     if name == "SENSOR_READ":
         return len(parts) == 2 and parts[1] in {"TEMP_HUM", "ACCEL", "APDS"}
     if name == "OLED":
@@ -172,7 +184,7 @@ def command_help_lines(*, include_dashboard: bool = False, demo_only: bool = Tru
     """Return compact human-readable help lines for terminal or dashboard use."""
 
     lines: list[str] = []
-    if include_dashboard:
+    if include_dashboard and DASHBOARD_COMMANDS:
         lines.append("Comandos locais do dashboard:")
         for info in DASHBOARD_COMMANDS:
             lines.extend(_format_help_entry(info))

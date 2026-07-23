@@ -35,12 +35,23 @@ from pqc_sat.stand.model import (  # noqa: E402
 )
 from tools.serial_bridge import SerialBridge, SerialBridgeError  # noqa: E402
 from tools.serial_protocol import ProtocolError, decode_key_values  # noqa: E402
+from tools.kex_metrics_battery import (  # noqa: E402
+    validate_bench,
+    validate_kex_info,
+    validate_mission,
+    validate_session,
+)
 
 
 def choose_port(explicit: str | None) -> str:
     """Compatibility helper backed by an active STAGED_V1 probe."""
 
-    return discover_wisdom(explicit, require_staged_game=True).port
+    return discover_wisdom(
+        explicit,
+        require_staged_game=True,
+        require_fair_kex=True,
+        require_session_bench=True,
+    ).port
 
 
 def request(bridge: SerialBridge, command_line: str) -> dict[str, object]:
@@ -62,7 +73,7 @@ def main(argv=None) -> int:
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=8.0)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    parser.add_argument("--check-only", action="store_true", help="confirma Wisdom/STAGED_V1 por HELLO e encerra")
+    parser.add_argument("--check-only", action="store_true", help="confirma Wisdom/STAGED_V1/FAIR_V1 por HELLO e encerra")
     parser.add_argument(
         "--full",
         action="store_true",
@@ -79,6 +90,8 @@ def main(argv=None) -> int:
             baudrate=args.baud,
             timeout=min(args.timeout, 3.0),
             require_staged_game=True,
+            require_fair_kex=True,
+            require_session_bench=True,
         )
         port = device.port
     except SerialBridgeError as exc:
@@ -95,13 +108,17 @@ def main(argv=None) -> int:
         commands.extend(
             [
                 f"PROFILE {config.baseline_name}",
-                f"MISSION CLASSIC {config.payload_hex}",
-                f"MISSION PQC {config.payload_hex}",
+                "KEX_INFO",
+                "KEX_BENCH 1",
+                f"MISSION ECDH {config.payload_hex}",
+                f"MISSION MLKEM {config.payload_hex}",
+                f"SESSION_BENCH ECDH 1 {config.payload_hex}",
+                f"SESSION_BENCH MLKEM 1 {config.payload_hex}",
                 f"FAULT NONE {config.payload_hex} 0 0x01",
                 f"FAULT CRC32 {config.payload_hex} 0 0x01",
                 "GAME_VERIFY DIAG-NONE",
                 "HELLO",
-                f"GAME_BEGIN DIAG-GAME {config.baseline_name} PQC CRC32 RX_MEMORY {investigation_payload}",
+                f"GAME_BEGIN DIAG-GAME {config.baseline_name} MLKEM CRC32 RX_MEMORY {investigation_payload}",
                 "GAME_PROTECT DIAG-GAME",
                 "ANALOG POT",
                 "GAME_TRANSMIT DIAG-GAME A39",
@@ -135,12 +152,13 @@ def main(argv=None) -> int:
                     )
                 record = request(bridge, command)
                 records.append(record)
-                print(f"{record['status']:>5}  {command}")
                 expected_bad_state = command == "GAME_VERIFY DIAG-NONE"
                 if expected_bad_state:
                     if record["status"] == "OK" or record["payload"].get("code") != "BAD_GAME_STATE":
                         raise SerialBridgeError("ordem GAME_* inválida não retornou BAD_GAME_STATE")
+                    print(f"   OK  {command} (BAD_GAME_STATE esperado)")
                     continue
+                print(f"{record['status']:>5}  {command}")
                 if record["status"] != "OK":
                     raise SerialBridgeError(f"{command} retornou {record['status']}")
                 if command == "HELLO":
@@ -150,8 +168,9 @@ def main(argv=None) -> int:
                         or payload.get("board") != "BlackBoard-Wisdom"
                         or payload.get("proto") != "V1"
                         or payload.get("game") != "STAGED_V1"
+                        or payload.get("kex") != "FAIR_V1"
                     ):
-                        raise SerialBridgeError("HELLO não confirmou Wisdom/V1/game=STAGED_V1")
+                        raise SerialBridgeError("HELLO não confirmou Wisdom/V1/game=STAGED_V1/kex=FAIR_V1")
                     try:
                         hello_uptime_ms = int(str(payload["uptime_ms"]), 10)
                     except (KeyError, TypeError, ValueError) as exc:
@@ -182,6 +201,51 @@ def main(argv=None) -> int:
                         config.baseline_name,
                         config.baseline_mhz,
                     )
+                if command == "KEX_INFO":
+                    errors = validate_kex_info(
+                        record["payload"],
+                        config.baseline_name,
+                    )
+                    if errors:
+                        raise SerialBridgeError("KEX_INFO inválido: " + "; ".join(errors))
+                if command == "KEX_BENCH 1":
+                    errors = validate_bench(
+                        record["payload"],
+                        1,
+                        config.baseline_name,
+                    )
+                    if errors:
+                        raise SerialBridgeError(
+                            "KEX_BENCH inválido: " + "; ".join(errors)
+                        )
+                if command.startswith("MISSION ECDH ") or command.startswith("MISSION MLKEM "):
+                    scenario = command.split()[1]
+                    errors = validate_mission(
+                        record["payload"],
+                        scenario,
+                        len(bytes.fromhex(config.payload_hex)),
+                        config.baseline_name,
+                    )
+                    if errors:
+                        raise SerialBridgeError(
+                            f"MISSION {scenario} inválido: " + "; ".join(errors)
+                        )
+                if command.startswith("SESSION_BENCH "):
+                    parts = command.split()
+                    scenario = parts[1]
+                    messages = int(parts[2], 10)
+                    errors = validate_session(
+                        record["payload"],
+                        scenario,
+                        messages,
+                        len(bytes.fromhex(config.payload_hex)),
+                        config.baseline_name,
+                    )
+                    if errors:
+                        raise SerialBridgeError(
+                            f"SESSION_BENCH {scenario} inválido: "
+                            + "; ".join(errors)
+                        )
                 if command.startswith("INVESTIGATE "):
                     parts = command.split()
                     byte_index = int(parts[4], 10)
@@ -212,7 +276,7 @@ def main(argv=None) -> int:
                         stage=GameStage.PREPARE,
                         profile=config.baseline_name,
                         profile_mhz=config.baseline_mhz,
-                        key_mode=KeyMode.PQC,
+                        key_mode=KeyMode.MLKEM,
                         guard=GuardMode.CRC32,
                         payload_len=len(bytes.fromhex(game_payload_hex)),
                         payload_bytes=bytes.fromhex(game_payload_hex),
@@ -226,7 +290,7 @@ def main(argv=None) -> int:
                         stage=GameStage.PROTECT,
                         profile=config.baseline_name,
                         profile_mhz=config.baseline_mhz,
-                        key_mode=KeyMode.PQC,
+                        key_mode=KeyMode.MLKEM,
                         guard=GuardMode.CRC32,
                         payload_len=len(bytes.fromhex(game_payload_hex)),
                         source="hardware-live",
@@ -239,7 +303,7 @@ def main(argv=None) -> int:
                         stage=GameStage.TRANSMIT,
                         profile=config.baseline_name,
                         profile_mhz=config.baseline_mhz,
-                        key_mode=KeyMode.PQC,
+                        key_mode=KeyMode.MLKEM,
                         guard=GuardMode.CRC32,
                         payload_len=len(bytes.fromhex(game_payload_hex)),
                         source="hardware-live",
@@ -255,7 +319,7 @@ def main(argv=None) -> int:
                         incident=IncidentScenario.RX_MEMORY,
                         profile=config.baseline_name,
                         profile_mhz=config.baseline_mhz,
-                        key_mode=KeyMode.PQC,
+                        key_mode=KeyMode.MLKEM,
                         guard=GuardMode.CRC32,
                         selection=game_selection,
                         payload_len=len(bytes.fromhex(game_payload_hex)),
@@ -270,7 +334,7 @@ def main(argv=None) -> int:
                         incident=IncidentScenario.RX_MEMORY,
                         profile=config.baseline_name,
                         profile_mhz=config.baseline_mhz,
-                        key_mode=KeyMode.PQC,
+                        key_mode=KeyMode.MLKEM,
                         guard=GuardMode.CRC32,
                         selection=game_selection,
                         payload_len=len(bytes.fromhex(game_payload_hex)),

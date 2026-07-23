@@ -13,6 +13,7 @@ from pqc_sat.stand.model import (
     GameResult,
     GameStage,
     GuardMode,
+    FAIR_KEY_MODES,
     IncidentScenario,
     InvestigationState,
     KeyMode,
@@ -39,11 +40,12 @@ class InvestigationController:
 
     flow_name = "investigation"
     protocol_capability = "STAGED_V1"
-    KEY_MODES = tuple(mode.value for mode in KeyMode)
+    kex_capability = "FAIR_V1"
+    KEY_MODES = tuple(mode.value for mode in FAIR_KEY_MODES)
     GUARDS = tuple(mode.value for mode in GuardMode)
     PROTECTIONS = tuple(
         scenario_for(key_mode, guard)
-        for key_mode in KeyMode
+        for key_mode in FAIR_KEY_MODES
         for guard in GuardMode
     )
     DIAGNOSES = ("CHANNEL", "AUTH", "MEMORY")
@@ -437,13 +439,18 @@ class InvestigationController:
         board = str(payload.get("board", ""))
         proto = str(payload.get("proto", ""))
         capability = str(payload.get("game", ""))
+        kex_capability = str(payload.get("kex", ""))
         valid_hardware = node == "PQC-SAT-WISDOM" and board == "BlackBoard-Wisdom" and proto == "V1"
         valid_fixture = self.mode == "simulated" and node == "OFFLINE-FIXTURE" and proto == "V1"
-        if not (valid_hardware or valid_fixture) or capability != self.protocol_capability:
+        if (
+            not (valid_hardware or valid_fixture)
+            or capability != self.protocol_capability
+            or kex_capability != self.kex_capability
+        ):
             self.handshake_ok = False
             self.error_message = (
-                f"firmware incompatível: node={node} proto={proto} game={capability or 'ausente'}; "
-                "grave STAGED_V1"
+                f"firmware incompatível: node={node} proto={proto} game={capability or 'ausente'} "
+                f"kex={kex_capability or 'ausente'}; grave STAGED_V1 com FAIR_V1"
             )
             if self.state is not InvestigationState.ERROR:
                 self.transition(InvestigationState.ERROR, reason="handshake_rejected", now=now, cause="error")

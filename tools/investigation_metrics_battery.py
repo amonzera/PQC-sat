@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from pqc_sat.stand.model import (  # noqa: E402
+    FAIR_KEY_MODES,
     FaultSelection,
     GameStage,
     GuardMode,
@@ -35,7 +36,7 @@ from tools.serial_protocol import decode_key_values  # noqa: E402
 from tools.stand_diagnostics import choose_port  # noqa: E402
 
 
-COMBINATIONS = tuple((key_mode, guard) for key_mode in KeyMode for guard in GuardMode)
+COMBINATIONS = tuple((key_mode, guard) for key_mode in FAIR_KEY_MODES for guard in GuardMode)
 INCIDENTS = tuple(IncidentScenario)
 
 
@@ -243,7 +244,7 @@ def main(argv=None) -> int:
         "matrix": {
             "profiles": [config.baseline_name, config.limited_name],
             "scenarios": [scenario_for(key_mode, guard) for key_mode, guard in COMBINATIONS],
-            "key_modes": [mode.value for mode in KeyMode],
+            "key_modes": [mode.value for mode in FAIR_KEY_MODES],
             "guards": [mode.value for mode in GuardMode],
             "incidents": [incident.value for incident in INCIDENTS],
             "mission": config.missions[0].mission_id,

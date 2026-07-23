@@ -3,7 +3,8 @@
 ## Decisão vigente
 
 Existe um único programa público: `python3 dashboard.py`. Ele sempre exige uma
-BlackBoard Wisdom real com `proto=V1` e `game=STAGED_V1`.
+BlackBoard Wisdom real com `proto=V1`, `game=STAGED_V1`, `kex=FAIR_V1` e
+`session_bench=FAIR_SESSION_V1`.
 
 Foram removidos:
 
@@ -58,6 +59,7 @@ node=PQC-SAT-WISDOM
 board=BlackBoard-Wisdom
 proto=V1
 game=STAGED_V1
+kex=FAIR_V1
 uptime_ms=<uint32>
 ```
 

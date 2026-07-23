@@ -92,7 +92,7 @@ def build_completed_investigation_controller(config_path: Path, fixture_path: Pa
     press()
     choose("mission:TELEMETRY")
     choose("profile:240")
-    choose("key:PQC")
+    choose("key:MLKEM")
     choose("guard:CRC32")
     finish_stage()  # PREPARE -> PROTECT
     controller.set_simulated_pot(client.pot_value)

@@ -6,33 +6,34 @@ Este documento fixa a narrativa permitida para a experiência pública.
 
 | Mecanismo | Função neste projeto | Não afirmar |
 |---|---|---|
+| ECDH P-256 | estabelece um segredo compartilhado clássico; a KDF produz a chave AES | que o cenário legado `CLASSIC` executa ECDH |
 | ML-KEM-512 | estabelece um segredo compartilhado; a KDF produz a chave AES | que ML-KEM cifra o payload |
 | AES-128-GCM | cifra o plaintext e autentica ciphertext/dados associados com tag | que GCM não detecta alteração do ciphertext |
 | CRC32 | detecta corrupção acidental no payload coberto pelo harness | que autentica, identifica atacante ou substitui GCM |
 
-## Baseline correto
+## Comparação correta
 
-`MISSION CLASSIC` e `GAME_BEGIN ... CLASSIC ...` são um baseline simétrico
-AES-128-GCM. O firmware gera uma chave AES aleatória por mensagem e executa
-emissor e receptor logicamente na mesma Wisdom. Esse caminho não implementa
-ECDH, RSA, certificado ou uma pilha clássica assimétrica completa.
+O jogo público compara:
 
-`CLASSIC_CRC32` usa exatamente esse estabelecimento local de chave e adiciona
-o CRC da aplicação. Portanto modo de chave e guardião são variáveis
-independentes; CRC32 não transforma o baseline em PQC.
+> ECDH P-256 versus ML-KEM-512 para estabelecer o segredo, seguidos pelo mesmo
+> RNG, HKDF-SHA256 e AES-128-GCM do wolfCrypt, na mesma placa e configuração.
 
-A comparação mostrada é:
+`MISSION CLASSIC` permanece como baseline simétrico AES-GCM histórico. Ele gera
+uma chave AES local e não implementa ECDH, RSA, certificado ou uma pilha
+clássica assimétrica completa. Portanto suas razões antigas não respondem à
+pergunta ECDH versus ML-KEM.
 
-> custo de adicionar ML-KEM-512 a um baseline simétrico AES-GCM.
+O guardião `NONE|CRC32` é variável independente do KEX. CRC32 não transforma o
+baseline em PQC nem oferece autenticação.
 
 ## Evidência de AES-128-GCM
 
 - `AES128_KEY_BYTES = 16` no firmware;
-- chave configurada no Mbed TLS com 128 bits;
+- chave configurada no wolfCrypt com 128 bits no caminho FAIR;
 - nonce aleatório de 12 bytes e tag de 16 bytes;
-- `mbedtls_gcm_auth_decrypt` verifica antes de aceitar o plaintext;
+- `wc_AesGcmDecrypt` verifica antes de aceitar o plaintext FAIR;
 - contexto de KDF contém `AES-128-GCM`;
-- 600/600 missões da coleta oficial registram `cipher=AES-128-GCM`.
+- `KEX_INFO`, `MISSION` e `SESSION_BENCH` exigem `cipher=AES-128-GCM`.
 
 Não há base executável para dizer AES-256-GCM.
 
@@ -73,21 +74,21 @@ permanece como implementação compatível do mesmo modelo para bancada.
 |---|---|---|
 | `CHANNEL_BITFLIP` | ciphertext depois do CRC de transmissão | CRC do quadro e GCM divergem; pacote rejeitado |
 | `TAMPER` | ciphertext, seguido de recálculo do CRC sem chave | CRC do quadro coincide, tag GCM falha |
-| `RX_MEMORY` | plaintext depois de `mbedtls_gcm_auth_decrypt` | GCM coincide; CRC da aplicação diverge se presente |
+| `RX_MEMORY` | plaintext depois da verificação AES-GCM | GCM coincide; CRC da aplicação diverge se presente |
 | `NORMAL` | nenhuma mutação | todas as verificações aplicáveis coincidem |
 
 No caso de CRC do quadro inválido, o harness continua a verificação GCM apenas
 para instrumentação; o plaintext nunca é aceito. Sem CRC da aplicação,
-`RX_MEMORY` é classificado `SILENT_CORRUPTION`. Com `CLASSIC_CRC32` ou
-`PQC_CRC32`, a referência fica dentro do plaintext autenticado e o resultado
+`RX_MEMORY` é classificado `SILENT_CORRUPTION`. Com `ECDH_CRC32` ou
+`MLKEM_CRC32`, a referência fica dentro do plaintext autenticado e o resultado
 é `APP_REJECT`.
 
 Esses padrões localizam uma camada provável. Não atribuem causalidade física
 ou intenção: radiação, ataque e defeito de software continuam indistinguíveis
 sem evidência externa adicional.
 
-No caminho PQC, o dashboard só aceita uma resposta quando o firmware confirma
-`key_match=1` e as verificações GCM previstas estão presentes. Uma chave
+Nos dois caminhos, o dashboard só aceita uma resposta quando o firmware
+confirma `key_match=1` e as verificações GCM previstas estão presentes. Uma chave
 divergente, campo ausente, ordem/ID incorreto ou vetor que não represente um
 único bit é erro de protocolo, não evidência experimental válida.
 
@@ -116,20 +117,26 @@ contexto de CubeSats; não é um CubeSat e não possui qualificação para voo.
 `elapsed_us` e os tempos de estágio são tempos de processamento e podem ser
 discutidos como proxy de custo computacional. Não houve instrumento elétrico
 externo, portanto watts, joules e consumo de energia não foram medidos. A
-animação ampliada não mede duração: o número recebido da Wisdom é a evidência.
+animação ampliada não mede duração; números da partida aparecem somente no
+debrief e resultados científicos vêm da bateria controlada.
 
-`bytes_total` é um modelo do pacote do experimento. Em PQC, inclui ciphertext
-ML-KEM, nonce, tag GCM, ciphertext do payload e CRC quando aplicável; não inclui
-a chave pública ML-KEM provisionada fora dessa troca.
+No FAIR, `wire_total_fresh` inclui setup, resposta, nonce, tag e ciphertext.
+`SESSION_BENCH` separa handshake, dados e custo amortizado para 1, 100, 500 e
+1000 mensagens. ECDH usa 65 + 65 bytes públicos; ML-KEM usa 800 + 768.
+
+Memória significa heap livre antes/depois, mínimo global desde o boot, maior
+bloco livre e folga de stack da task. O mínimo global não é pico isolado por
+algoritmo; nenhuma conclusão de energia ou pico exclusivo deve ser derivada.
 
 ## Frases que devem aparecer ou ser ditas
 
+- “A comparação clássica atual usa ECDH P-256.”
 - “ML-KEM estabelece o segredo compartilhado.”
 - “AES-GCM cifra e autentica a mensagem.”
 - “CRC32 detecta corrupção acidental na região coberta.”
 - “A falha é injetada por software; não usamos radiação real.”
 - “80 MHz é um perfil experimental, não uma especificação universal de CubeSat.”
-- “A animação é didática; o valor numérico vem da medição real.”
+- “A animação é didática; os resultados oficiais vêm da bateria na placa.”
 
 ## Frases proibidas
 
@@ -140,18 +147,24 @@ a chave pública ML-KEM provisionada fora dessa troca.
 - “Esta placa é um CubeSat.”
 - “Medimos consumo de energia.”
 - “PQC é inviável.”
-- “A comparação clássica usa ECDH.”
+- “O cenário legado CLASSIC é ECDH.”
+- “O mínimo global de heap é o pico isolado de cada algoritmo.”
 
 ## Fonte dos números
 
-A campanha oficial vigente é
+A campanha
 `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`, SHA-256
 `bcf16f1f49f6433ca7bdfde000023af1cb3b72546a3af16d570fe212edd6ce8d`.
 Ela possui 1.038 registros, zero falhas, 600 missões, seis benchmarks PQC e
-400 ensaios de falha. Essa campanha continua sendo a fonte dos resultados
-consolidados. Leituras `GAME_*` ao vivo descrevem somente a partida atual;
-sessões de visitantes não substituem a campanha. A fixture permanece
-identificada como referência histórica/modelo offline.
+400 ensaios de falha. Ela é evidência histórica de AES local versus ML-KEM,
+não a fonte de uma conclusão ECDH versus ML-KEM.
+
+Ainda não há campanha FAIR oficial. A nova fonte só será um JSON
+`pqc-sat-kex-fair-metrics-v2` com manifesto válido,
+`official_candidate=true`, 400 amostras fresh, 480 amostras de sessão, seis
+benches e zero pares/células/perfis inválidos. Leituras `GAME_*` ao vivo
+descrevem somente a partida atual; sessões de visitantes e fixture não
+substituem a campanha.
 
 ## Referências normativas e contextuais
 

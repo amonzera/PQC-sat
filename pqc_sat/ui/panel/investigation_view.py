@@ -39,7 +39,7 @@ STEP_LABELS = {
     "ATTRACT": "CHAMADO PARA A MISSÃO",
     "SELECT_MISSION": "ESCOLHA 1/4 • MENSAGEM",
     "SELECT_PROFILE": "ESCOLHA 2/4 • CPU",
-    "SELECT_KEY_MODE": "ESCOLHA 3/4 • CHAVE",
+    "SELECT_KEY_MODE": "ESCOLHA 3/4 • ABORDAGEM",
     "SELECT_GUARD": "ESCOLHA 4/4 • CRC",
     "PREPARE": "CHECKPOINT 1/4 • PREPARAR",
     "PROTECT": "CHECKPOINT 2/4 • PROTEGER",
@@ -69,6 +69,14 @@ def _enum_value(value, default="--"):
     if value is None:
         return default
     return str(getattr(value, "value", value))
+
+
+def _approach_label(value, default="--"):
+    key_mode = _enum_value(value, default=default)
+    return {
+        "ECDH": "CLÁSSICA • ECDH P-256",
+        "MLKEM": "PÓS-QUÂNTICA • ML-KEM-512",
+    }.get(key_mode, key_mode)
 
 
 class InvestigationPresentationMixin:
@@ -139,10 +147,11 @@ class InvestigationPresentationMixin:
         surface.blit(step, (header.centerx - step.get_width() // 2, header.centery - step.get_height() // 2))
 
     def _draw_confirmed_loadout(self, surface, body, controller):
+        key_label = _approach_label(controller.selected_key_mode)
         values = (
             ("MISSÃO", controller.selected_mission.title if controller.selected_mission else "--", C_ACCENT_CYAN),
             ("CPU", f"{controller.selected_profile_mhz} MHz" if controller.selected_profile_mhz else "--", C_ACCENT_BLUE),
-            ("CHAVE", _enum_value(controller.selected_key_mode), C_ACCENT_PURPLE),
+            ("ABORDAGEM", key_label, C_ACCENT_PURPLE),
             ("CRC APP", "LIGADO" if controller.selected_guard is GuardMode.CRC32 else "DESLIGADO" if controller.selected_guard is GuardMode.NONE else "--", C_ACCENT_GREEN),
         )
         if all(value == "--" for _, value, _ in values):
@@ -390,7 +399,7 @@ class InvestigationPresentationMixin:
                 "CPU NOMINAL",
                 "Ritmo integral do ESP32.",
                 "Baseline da campanha controlada. A animação representa ritmo de CPU; não mede energia.",
-                f"{controller.config.baseline_mhz} MHz • MAIS RÁPIDO",
+                f"{controller.config.baseline_mhz} MHz • PERFIL NOMINAL",
                 C_ACCENT_CYAN,
                 "cpu_fast",
             ),
@@ -409,25 +418,25 @@ class InvestigationPresentationMixin:
     def _draw_game_key_modes(self, surface, body, controller, t):
         choices = (
             ChoiceVisual(
-                "key:CLASSIC",
-                "CHAVE AES LOCAL",
-                "A Wisdom cria chave efêmera + nonce.",
-                "Baseline simétrico local: não é ECDH. AES-128-GCM cifra e autentica a mensagem.",
-                "CHAVE LOCAL • AES-128-GCM",
+                "key:ECDH",
+                "CLÁSSICA",
+                "ECDH P-256 estabelece o segredo.",
+                "Receptor e iniciador trocam pontos públicos P-256 e chegam ao mesmo segredo; HKDF deriva a chave do AES-GCM.",
+                "ECDH P-256 • WOLFCRYPT",
                 C_ACCENT_ORANGE,
                 "classic_key",
             ),
             ChoiceVisual(
-                "key:PQC",
-                "ML-KEM-512",
-                "Uma cápsula estabelece o segredo.",
-                "KeyGen, Encaps, Decaps e KDF estabelecem a chave; AES-128-GCM protege a mensagem.",
-                "ML-KEM ESTABELECE • AES-GCM PROTEGE",
+                "key:MLKEM",
+                "PÓS-QUÂNTICA",
+                "ML-KEM-512 estabelece o segredo.",
+                "KeyGen, Encaps e Decaps usam chave pública e cápsula para chegar ao mesmo segredo; HKDF deriva a chave do AES-GCM.",
+                "ML-KEM-512 • WOLFCRYPT",
                 C_ACCENT_PURPLE,
                 "capsule",
             ),
         )
-        self._draw_choice_cards(surface, body, controller, "COMO OBTER A CHAVE DE SESSÃO?", choices, t)
+        self._draw_choice_cards(surface, body, controller, "QUAL ABORDAGEM VAI ESTABELECER O SEGREDO?", choices, t)
 
     def _draw_game_guards(self, surface, body, controller, t):
         choices = (
@@ -453,32 +462,11 @@ class InvestigationPresentationMixin:
         self._draw_choice_cards(surface, body, controller, "ADICIONAR UM GUARDIÃO AO PLAINTEXT?", choices, t)
 
     def _stage_status(self, surface, body, controller, *, title, subtitle):
-        title_surface = self._render_clipped(FONT_TITLE, title, C_TEXT_PRIMARY, body.width - 370)
+        title_surface = self._render_clipped(FONT_TITLE, title, C_TEXT_PRIMARY, body.width - 30)
         surface.blit(title_surface, (body.x + 8, body.y + 3))
-        subtitle_surface = self._render_clipped(FONT_SMALL, subtitle, C_TEXT_DIM, body.width - 380)
+        subtitle_surface = self._render_clipped(FONT_SMALL, subtitle, C_TEXT_DIM, body.width - 30)
         surface.blit(subtitle_surface, (body.x + 8, body.y + 34))
         measurement = controller.current_stage_measurement
-        if measurement is not None:
-            metrics = (
-                ("TEMPO REAL", _format_elapsed(measurement.elapsed_us)),
-                ("PACOTE", f"{measurement.bytes_total} B"),
-                ("HEAP LIVRE", f"{measurement.heap / 1024:.1f} KiB"),
-            )
-            total_w = min(450, body.width // 3 + 100)
-            gap = 7
-            box_w = (total_w - gap * 2) // 3
-            x0 = body.right - total_w
-            for index, (label, value) in enumerate(metrics):
-                self._draw_overlay_metric_box(
-                    surface,
-                    label,
-                    value,
-                    x0 + index * (box_w + gap),
-                    body.y,
-                    box_w,
-                    54,
-                    C_ACCENT_CYAN,
-                )
         if controller.pending is not None:
             ready = False
             waiting = "PROCESSANDO…"
@@ -544,11 +532,10 @@ class InvestigationPresentationMixin:
 
     def _cue_evidence(self, controller, cue, measurement):
         if cue.measured_us is not None:
-            return f"TEMPO REAL DESTA OPERAÇÃO: {_format_elapsed(cue.measured_us)}"
+            return "OPERAÇÃO EXECUTADA E VALIDADA PELA WISDOM"
         state = controller.state.value
         if state == "PREPARE":
-            payload_bytes = len(controller.selected_mission.payload_bytes) if controller.selected_mission else 0
-            return f"WISDOM VALIDOU: {payload_bytes} B DE PAYLOAD • {measurement.bytes_total} B NESTA ETAPA"
+            return "WISDOM VALIDOU O PAYLOAD E O CRC ESCOLHIDO"
         if state == "TRANSMIT" and controller.selection and cue.key == "bit":
             selection = controller.selection
             return (
@@ -563,13 +550,19 @@ class InvestigationPresentationMixin:
             raw = controller.retry_result.raw_response
             values = {
                 "payload": f"MESMO PAYLOAD = {raw.get('same_payload', '--')}",
-                "fresh_key": f"CHAVE NOVA = {raw.get('fresh_key', '--')}",
+                "keygen": f"CHAVE NOVA = {raw.get('fresh_key', '--')}",
+                "encaps": f"CHAVE NOVA = {raw.get('fresh_key', '--')}",
+                "decaps": f"CHAVE NOVA = {raw.get('fresh_key', '--')}",
+                "ecdh_setup": f"CHAVE NOVA = {raw.get('fresh_key', '--')}",
+                "ecdh_initiator": f"CHAVE NOVA = {raw.get('fresh_key', '--')}",
+                "ecdh_responder": f"CHAVE NOVA = {raw.get('fresh_key', '--')}",
+                "kdf": f"CHAVE NOVA = {raw.get('fresh_key', '--')}",
                 "fresh_nonce": f"NONCE NOVO = {raw.get('fresh_nonce', '--')}",
-                "protect": f"PACOTE REAL = {controller.retry_result.bytes_total} B",
+                "protect": "PACOTE PROTEGIDO NOVAMENTE",
                 "delivered": f"RESULTADO = {controller.retry_result.result}",
             }
             return values.get(cue.key, f"RESULTADO REAL: {controller.retry_result.result}")
-        return f"TEMPO REAL DA ETAPA: {_format_elapsed(measurement.elapsed_us)}"
+        return "ETAPA EXECUTADA E VALIDADA PELA WISDOM"
 
     def _draw_cue_explanation(self, surface, visual, cue, evidence):
         card = pygame.Rect(visual.x + 14, visual.bottom - 151, visual.width - 28, 82)
@@ -722,10 +715,10 @@ class InvestigationPresentationMixin:
         self._draw_timeline_nodes(surface, visual, timeline, progress)
 
     def _draw_game_protect(self, surface, body, controller, t):
-        if _enum_value(controller.selected_key_mode) == "PQC":
-            subtitle = "ML-KEM-512 estabelece o segredo; AES-128-GCM cifra e autentica a mensagem."
+        if _enum_value(controller.selected_key_mode) == "MLKEM":
+            subtitle = "ML-KEM-512 estabelece o segredo; HKDF-SHA256 deriva a chave do AES-128-GCM."
         else:
-            subtitle = "A Wisdom gera chave AES local efêmera e nonce; AES-128-GCM cifra e autentica."
+            subtitle = "ECDH P-256 estabelece o segredo; HKDF-SHA256 deriva a chave do AES-128-GCM."
         measurement = self._stage_status(
             surface,
             body,
@@ -776,8 +769,6 @@ class InvestigationPresentationMixin:
             progress=cue_progress,
         )
         label = active.label
-        if active.measured_us is not None:
-            label += f" • {_format_elapsed(active.measured_us)} REAL"
         self._draw_stand_centered(surface, FONT_BODY, label, active.color, content.centerx, icon_rect.bottom - 2, content.width - 430)
         self._draw_timeline_nodes(surface, visual, timeline, progress)
 
@@ -1045,11 +1036,12 @@ class InvestigationPresentationMixin:
         measured_result = controller.retry_result or result
         bytes_total = measured_result.bytes_total if measured_result else 0
         min_heap = measured_result.min_heap if measured_result else 0
+        approach = _approach_label(controller.selected_key_mode)
         badges = (
+            ("ABORDAGEM", approach, C_ACCENT_PURPLE),
             ("ENTREGA", delivery, C_ACCENT_GREEN if delivery == "DELIVERED" else C_ACCENT_ORANGE),
             ("SEGURANÇA", result.result if result else "--", C_ACCENT_CYAN),
-            ("CUSTO REAL", f"{_format_elapsed(elapsed)} • {bytes_total} B • {min_heap / 1024:.1f} KiB mín.", C_ACCENT_PURPLE),
-            ("SUA HIPÓTESE", f"{controller.selected_diagnosis or '--'} • {'CONFIRMADA' if controller.diagnosis_correct else 'REVISAR'}", verdict_color),
+            ("RECURSOS DESTA PARTIDA", f"{_format_elapsed(elapsed)} • {bytes_total} B • {min_heap / 1024:.1f} KiB mín.", verdict_color),
         )
         badge_gap = 8
         badge_w = (body.width - 46 - badge_gap * 3) // 4

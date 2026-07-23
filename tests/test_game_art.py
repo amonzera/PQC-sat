@@ -39,16 +39,16 @@ class GameArtTests(unittest.TestCase):
                     self.assertIs(game_act_for_state(state), act)
         self.assertEqual(set().union(*expected.values()), {state.value for state in InvestigationState})
 
-    def test_pqc_timeline_uses_real_substage_timings(self):
+    def test_mlkem_timeline_uses_real_substage_timings(self):
         raw = {
-            "keygen_us": "3100",
-            "encap_us": "3700",
-            "decap_us": "4900",
+            "setup_us": "3100",
+            "initiator_us": "3700",
+            "responder_us": "4900",
             "kdf_us": "120",
             "rng_us": "80",
             "encrypt_us": "390",
         }
-        timeline = build_didactic_timeline("PROTECT", raw, key_mode="PQC", guard="CRC32")
+        timeline = build_didactic_timeline("PROTECT", raw, key_mode="MLKEM", guard="CRC32")
         self.assertEqual([cue.key for cue in timeline.cues], ["keygen", "encaps", "decaps", "kdf", "nonce", "aes"])
         self.assertEqual([cue.measured_us for cue in timeline.cues], [3100, 3700, 4900, 120, 80, 390])
         self.assertEqual(timeline.cues[0].start, 0.0)
@@ -59,22 +59,85 @@ class GameArtTests(unittest.TestCase):
         self.assertEqual(timeline.station_progresses[0], 0.0)
         self.assertEqual(timeline.station_progresses[-1], 1.0)
 
-    def test_classic_and_crc_choices_change_the_replay_content(self):
-        classic = build_didactic_timeline(
+    def test_ecdh_and_crc_choices_change_the_replay_content(self):
+        ecdh = build_didactic_timeline(
             "PROTECT",
-            {"rng_us": "91", "encrypt_us": "411"},
-            key_mode="CLASSIC",
+            {
+                "setup_us": "310",
+                "initiator_us": "290",
+                "responder_us": "270",
+                "kdf_us": "40",
+                "rng_us": "91",
+                "encrypt_us": "411",
+            },
+            key_mode="ECDH",
             guard="NONE",
         )
-        self.assertEqual([cue.key for cue in classic.cues], ["rng", "aes"])
-        with_crc = build_didactic_timeline("PREPARE", {}, key_mode="PQC", guard="CRC32")
-        without_crc = build_didactic_timeline("PREPARE", {}, key_mode="PQC", guard="NONE")
+        self.assertEqual(
+            [cue.key for cue in ecdh.cues],
+            ["ecdh_setup", "ecdh_initiator", "ecdh_responder", "kdf", "nonce", "aes"],
+        )
+        with_crc = build_didactic_timeline("PREPARE", {}, key_mode="MLKEM", guard="CRC32")
+        without_crc = build_didactic_timeline("PREPARE", {}, key_mode="MLKEM", guard="NONE")
         self.assertIn("app_crc", [cue.key for cue in with_crc.cues])
         self.assertNotIn("app_crc", [cue.key for cue in without_crc.cues])
 
+    def test_retry_replay_explains_the_selected_key_establishment(self):
+        raw = {
+            "setup_us": "310",
+            "initiator_us": "290",
+            "responder_us": "270",
+            "kdf_us": "40",
+            "rng_us": "91",
+            "encrypt_us": "411",
+        }
+        ecdh = build_didactic_timeline(
+            "RETRY",
+            raw,
+            key_mode="ECDH",
+            guard="NONE",
+        )
+        mlkem = build_didactic_timeline(
+            "RETRY",
+            raw,
+            key_mode="MLKEM",
+            guard="NONE",
+        )
+
+        self.assertIn("ecdh_setup", [cue.key for cue in ecdh.cues])
+        self.assertNotIn("keygen", [cue.key for cue in ecdh.cues])
+        self.assertIn("keygen", [cue.key for cue in mlkem.cues])
+        self.assertNotIn("ecdh_setup", [cue.key for cue in mlkem.cues])
+
+    def test_stage_replay_keeps_numeric_resource_metrics_for_debrief(self):
+        controller = build_completed_investigation_controller(
+            DEFAULT_CONFIG_PATH,
+            DEFAULT_FIXTURE_PATH,
+        )
+        measurement = {
+            "setup_us": "310",
+            "initiator_us": "290",
+            "responder_us": "270",
+            "kdf_us": "40",
+            "rng_us": "91",
+            "encrypt_us": "411",
+        }
+        timeline = build_didactic_timeline(
+            "PROTECT",
+            measurement,
+            key_mode=controller.selected_key_mode,
+            guard=controller.selected_guard,
+        )
+        panel = GamePanel.for_test(controller)
+
+        evidence = panel._cue_evidence(controller, timeline.cues[0], measurement)
+
+        self.assertEqual(evidence, "OPERAÇÃO EXECUTADA E VALIDADA PELA WISDOM")
+        self.assertNotIn("TEMPO", evidence)
+
     def test_timeline_rejects_missing_validated_measurement(self):
         with self.assertRaisesRegex(ValueError, "resposta GAME_\\*"):
-            build_didactic_timeline("PROTECT", None, key_mode="PQC", guard="CRC32")
+            build_didactic_timeline("PROTECT", None, key_mode="MLKEM", guard="CRC32")
 
     def test_every_procedural_icon_draws_without_external_assets(self):
         icons = (

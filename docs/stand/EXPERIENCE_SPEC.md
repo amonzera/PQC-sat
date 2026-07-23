@@ -1,6 +1,6 @@
 # Especificação — Missão Bit Flip por etapas
 
-Estado: release candidate de software; firmware `STAGED_V1` ainda não validado
+Estado: release candidate de software; firmware `STAGED_V1/FAIR_V1` ainda não validado
 na Wisdom. Público: visitantes da 78ª Reunião Anual da SBPC. Duração alvo:
 120–180 segundos por partida.
 
@@ -35,7 +35,8 @@ já confirmadas e nunca transforma uma seleção pendente em decisão.
 ## Invariante de interação
 
 O standby técnico não pertence à máquina pública: ele procura a Wisdom e sai
-automaticamente após validar `HELLO game=STAGED_V1`. No modo hardware, nenhuma transição para a frente ocorre sem uma confirmação
+automaticamente após validar
+`HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`. No modo hardware, nenhuma transição para a frente ocorre sem uma confirmação
 explícita associada no log: um `BUTTON_PING` D27 válido ou a faixa verde da
 tela. A abertura narrativa de `ATTRACT` permanece até `INICIAR MISSÃO` ou D27.
 
@@ -77,7 +78,7 @@ bancada; a jornada visual anterior foi removida.
 | `ATTRACT` | Terra, CubeSat e chamada `SALVE A MENSAGEM EM ÓRBITA` | `INICIAR MISSÃO` ou D27 abrem diretamente uma nova partida |
 | `SELECT_MISSION` | telemetria, comando crítico ou configuração | fixa missão, payload, prioridade e prazo |
 | `SELECT_PROFILE` | 240 ou 80 MHz | fixa o perfil experimental |
-| `SELECT_KEY_MODE` | chave AES local ou ML-KEM-512 | fixa como o segredo será obtido |
+| `SELECT_KEY_MODE` | `CLÁSSICA — ECDH P-256` ou `PÓS-QUÂNTICA — ML-KEM-512` | fixa como o segredo será estabelecido |
 | `SELECT_GUARD` | CRC da aplicação desligado ou CRC32 ligado | fixa o guardião e envia `GAME_BEGIN` |
 | `PREPARE` | bytes serializados e CRC opcional anexado | envia `GAME_PROTECT` |
 | `PROTECT` | chave/cápsula, KDF, AES-GCM, ciphertext e tag | captura A39 no D27 ou por `ANALOG POT` e envia `GAME_TRANSMIT` |
@@ -107,21 +108,22 @@ Não há texto livre, imagem externa nem dado pessoal.
 
 Todas as quatro combinações usam AES-128-GCM:
 
-| Modo de chave | Guardião | Cenário protocolar |
+| Estabelecimento | Guardião | Cenário protocolar |
 |---|---|---|
-| AES efêmera local | nenhum | `CLASSIC` |
-| AES efêmera local | CRC32 da aplicação | `CLASSIC_CRC32` |
-| ML-KEM-512 | nenhum | `PQC` |
-| ML-KEM-512 | CRC32 da aplicação | `PQC_CRC32` |
+| ECDH P-256 efêmero | nenhum | `ECDH` |
+| ECDH P-256 efêmero | CRC32 da aplicação | `ECDH_CRC32` |
+| ML-KEM-512 efêmero | nenhum | `MLKEM` |
+| ML-KEM-512 efêmero | CRC32 da aplicação | `MLKEM_CRC32` |
 
-`CLASSIC` não é ECDH. ML-KEM estabelece um segredo; uma KDF deriva a chave;
-AES-GCM cifra e autentica a mensagem. O CRC32 é anexado ao plaintext antes do
-AES-GCM, detecta corrupção acidental na região coberta e não autentica.
+Os dois caminhos usam wolfCrypt, RNG comum, HKDF-SHA256 e AES-128-GCM sob a
+política `portable-software`. O CRC32 é anexado ao plaintext antes do AES-GCM,
+detecta corrupção acidental na região coberta e não autentica. Os cenários
+legados `CLASSIC`/`PQC` continuam aceitos pelo firmware apenas para regressão.
 
 ## Protocolo transacional
 
 ```text
-GAME_BEGIN <id> <profile> <CLASSIC|PQC> <NONE|CRC32> <incident> <payload_hex>
+GAME_BEGIN <id> <profile> <ECDH|MLKEM> <NONE|CRC32> <incident> <payload_hex>
 GAME_PROTECT <id>
 GAME_TRANSMIT <id> <byte_index> <bit_mask>
 GAME_VERIFY <id>
@@ -130,7 +132,8 @@ GAME_END <id> <ACCEPT|SAFE_MODE>
 GAME_ABORT <id>
 ```
 
-O `HELLO` anuncia `game=STAGED_V1`. Há uma única sessão ativa. Ordem ou ID
+O `HELLO` aceito pela superfície pública anuncia
+`game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`. Há uma única sessão ativa. Ordem ou ID
 incorreto retorna `BAD_GAME_STATE` e limpa a sessão. Novo `GAME_BEGIN`, erro
 fatal, `GAME_ABORT`, `HELLO` ou reconexão também apagam o contexto anterior.
 Durante a sessão, `ANALOG POT` é a única leitura não `GAME_*` permitida: ela
@@ -169,10 +172,12 @@ portanto, movimento visual não antecipa nem inventa execução criptográfica.
 As animações são então orientadas pelo estado e pela resposta aceita:
 
 - `PREPARE`: bytes e CRC opcional;
-- `PROTECT`: KeyGen/Encaps/Decaps/KDF quando PQC, depois AES-GCM e tag;
+- `PROTECT`: setup, iniciador, receptor, HKDF, nonce, AES-GCM e tag; a arte
+  distingue o intercâmbio de pontos ECDH do par/cápsula ML-KEM;
 - `TRANSMIT`: pacote, A39, bit e pulso do incidente ainda oculto;
 - `VERIFY`: quadro, GCM e aplicação em ordem;
-- `RETRY`: novo envelope e entrega confirmada;
+- `RETRY`: o KEX selecionado é repetido, seguido por nova chave derivada, novo
+  nonce, novo envelope e entrega confirmada;
 - `DEBRIEF`: linha causal entre escolhas, incidente, evidências e ação.
 
 Depois de executar uma vez do início ao fim, o replay entra em modo de revisão.
@@ -187,13 +192,13 @@ fim automático, o arraste está desabilitado. Antes da resposta serial, sequer
 existe replay construído. Em `TRANSMIT`, a revisão mostra byte, bit e máscara
 do A39, mas mantém a causa do incidente oculta até `DEBRIEF`.
 
-A tela rotula “animação didática em tempo ampliado” e mantém o tempo real da
-Wisdom visível. `elapsed_us` é tempo de processamento, não energia. O debrief
-separa entrega, detecção/segurança, tempo/bytes/heap e diagnóstico; não há nota,
-ranking ou gamificação competitiva.
+A tela rotula “animação didática em tempo ampliado”. Os checkpoints explicam
+causalidade sem mostrar números de recursos; somente o debrief exibe
+tempo/bytes/heap da partida. `elapsed_us` é tempo de processamento, não
+energia. Não há nota, ranking ou gamificação competitiva.
 
-No caminho PQC, a duração relativa de KeyGen, Encaps, Decaps, KDF, RNG e
-AES-GCM usa os subtimings presentes na resposta validada. Etapas sem subtiming
+Nos dois caminhos, a duração relativa de setup, iniciador, receptor, HKDF, RNG
+e AES-GCM usa os subtimings presentes na resposta validada. Etapas sem subtiming
 individual continuam qualitativas e não recebem um número inventado. Em
 `VERIFY`, o valor de cada portal vem exclusivamente de `GameResult`.
 
