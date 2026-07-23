@@ -7,7 +7,11 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import statistics
 import sys
+
+
+MIN_A39_ADC_DELTA = 16
 
 
 def parse_timestamp(value: str) -> datetime:
@@ -24,7 +28,10 @@ def load_records(paths: list[Path]) -> list[dict[str, object]]:
                 record = json.loads(line)
             except ValueError as exc:
                 raise ValueError(f"{path}:{line_number}: JSON inválido") from exc
-            if record.get("schema_version") != "pqc-sat-stand-log-v1":
+            if record.get("schema_version") not in {
+                "pqc-sat-stand-log-v1",
+                "pqc-sat-stand-log-v2",
+            }:
                 raise ValueError(f"{path}:{line_number}: schema incompatível")
             record["_path"] = str(path)
             records.append(record)
@@ -53,29 +60,133 @@ def count_disconnect_recoveries(records: list[dict[str, object]]) -> tuple[int, 
 
 
 def count_pot_activity(records: list[dict[str, object]]) -> tuple[int, int, int]:
-    """Count samples, selected-bit transitions and unique selected positions."""
-    last_position: dict[str, int] = {}
-    unique_positions: set[tuple[str, int]] = set()
+    """Count real A39 changes without mixing raw ADC and derived bit positions."""
+    last_position: dict[tuple[str, str], int] = {}
+    unique_positions: set[tuple[str, str, int]] = set()
     samples = 0
     changes = 0
     for record in records:
-        if record.get("event") != "fault_selection":
+        event = record.get("event")
+        schema = record.get("schema_version")
+        if (
+            schema == "pqc-sat-stand-log-v2"
+            and event == "button_confirmed"
+            and record.get("origin") in {"physical", "screen"}
+            and record.get("pot_source") in {None, "BUTTON_PING", "ANALOG POT"}
+        ):
+            value = record.get("pot")
+            stream = "raw_a39"
+        elif schema in {None, "pqc-sat-stand-log-v1"} and event == "fault_selection":
+            value = record.get("bit_position")
+            stream = "derived_bit"
+        else:
             continue
         try:
-            position = int(record["bit_position"])
+            position = int(value)
         except (KeyError, TypeError, ValueError):
             continue
         session = str(record.get("session_id"))
+        key = (session, stream)
         samples += 1
-        if session in last_position and last_position[session] != position:
+        minimum_delta = MIN_A39_ADC_DELTA if stream == "raw_a39" else 1
+        if key in last_position and abs(last_position[key] - position) >= minimum_delta:
             changes += 1
-        last_position[session] = position
-        unique_positions.add((session, position))
+        last_position[key] = position
+        unique_positions.add((session, stream, position))
     return samples, changes, len(unique_positions)
 
 
 def validate_cycle(record: dict[str, object]) -> list[str]:
     errors = []
+    if record.get("flow") == "investigation":
+        result = record.get("result")
+        if not isinstance(result, dict):
+            return ["partida STAGED_V1 sem resultado estruturado"]
+        if record.get("schema_version") == "pqc-sat-stand-log-v1":
+            incident = str(result.get("incident", ""))
+            use_app_crc = str(result.get("scenario", "")) == "PQC_CRC32"
+            expected = {
+                "NORMAL": ("DELIVERED", True, True, True, use_app_crc, use_app_crc, use_app_crc),
+                "CHANNEL_BITFLIP": ("FRAME_REJECT", False, False, False, use_app_crc, False, False),
+                "TAMPER": ("AUTH_REJECT", False, True, False, use_app_crc, False, False),
+                "RX_MEMORY": ("APP_REJECT" if use_app_crc else "SILENT_CORRUPTION", not use_app_crc, True, True, use_app_crc, use_app_crc, False),
+            }.get(incident)
+            observed = (
+                result.get("result"), result.get("accepted"), result.get("frame_crc_match"),
+                result.get("aead_match"), result.get("app_crc_present"),
+                result.get("app_crc_checked"), result.get("app_crc_match"),
+            )
+            if result.get("source") != "hardware-live":
+                errors.append("investigação V1 não veio do hardware")
+            if expected is None or observed != expected:
+                errors.append(f"tabela investigativa V1 contraditória: {incident}")
+            duration = record.get("duration_seconds")
+            if not isinstance(duration, (int, float)) or duration > 90:
+                errors.append("ciclo V1 excedeu 90 s ou não registrou duração")
+            return errors
+        if result.get("source") != "hardware-live":
+            errors.append("partida não veio do hardware")
+        incident = str(result.get("incident", ""))
+        guard = str(result.get("guard", ""))
+        use_app_crc = guard == "CRC32"
+        expected = {
+            "NORMAL": ("DELIVERED", True, True, True, use_app_crc, use_app_crc, use_app_crc),
+            "CHANNEL_BITFLIP": ("FRAME_REJECT", False, False, False, use_app_crc, False, False),
+            "TAMPER": ("AUTH_REJECT", False, True, False, use_app_crc, False, False),
+            "RX_MEMORY": (
+                "APP_REJECT" if use_app_crc else "SILENT_CORRUPTION",
+                not use_app_crc,
+                True,
+                True,
+                use_app_crc,
+                use_app_crc,
+                False,
+            ),
+        }.get(incident)
+        observed = (
+            result.get("result"),
+            result.get("accepted"),
+            result.get("frame_crc_match"),
+            result.get("aead_match"),
+            result.get("app_crc_present"),
+            result.get("app_crc_checked"),
+            result.get("app_crc_match"),
+        )
+        if expected is None or observed != expected:
+            errors.append(f"tabela STAGED_V1 contraditória: {incident}/{guard}")
+        if result.get("aead_checked") is not True:
+            errors.append("tag AES-GCM não foi verificada")
+        selection = result.get("selection")
+        if not isinstance(selection, dict):
+            errors.append("vetor single-bit ausente ou inválido")
+        else:
+            try:
+                byte_index = int(selection.get("byte_index"))
+                mask = int(selection.get("bit_mask"))
+                bit_position = int(selection.get("bit_position"))
+            except (TypeError, ValueError):
+                errors.append("vetor single-bit ausente ou inválido")
+            else:
+                invalid_mask = mask <= 0 or mask > 0x80 or bool(mask & (mask - 1))
+                if invalid_mask or byte_index < 0 or bit_position != byte_index * 8 + (mask.bit_length() - 1):
+                    errors.append("vetor single-bit fora da faixa")
+        duration = record.get("duration_seconds")
+        if not isinstance(duration, (int, float)) or duration <= 0:
+            errors.append("partida não registrou duração positiva")
+        diagnosis = str(record.get("diagnosis", ""))
+        if diagnosis not in {"CHANNEL", "AUTH", "MEMORY"}:
+            errors.append("partida sem diagnóstico confirmado")
+        decision = str(record.get("decision", ""))
+        if decision not in {"ACCEPT", "RETRY", "SAFE_MODE"}:
+            errors.append("partida sem decisão operacional confirmada")
+        retry = record.get("retry_result")
+        if decision == "RETRY":
+            if not isinstance(retry, dict) or retry.get("result") != "DELIVERED":
+                errors.append("retransmissão não terminou DELIVERED")
+            elif not all(str(retry.get("raw_response", {}).get(key)) == "1" for key in ("same_payload", "fresh_key", "fresh_nonce")):
+                errors.append("retransmissão não comprovou payload igual e material novo")
+        return errors
+
     measurements = record.get("measurements", {})
     faults = record.get("faults", {})
     if not isinstance(measurements, dict) or not isinstance(faults, dict):
@@ -111,6 +222,46 @@ def validate_cycle(record: dict[str, object]) -> list[str]:
     return errors
 
 
+def validate_confirmation_transition_causes(records: list[dict[str, object]]) -> list[str]:
+    """Every v2 forward transition must reference an allowed explicit confirmation."""
+
+    confirmations: dict[tuple[str, int], str] = {}
+    errors: list[str] = []
+    for record in records:
+        if record.get("schema_version") != "pqc-sat-stand-log-v2":
+            continue
+        session = str(record.get("session_id"))
+        if record.get("event") == "button_confirmed" and record.get("origin") in {"physical", "screen"}:
+            try:
+                confirmations[(session, int(record["button_seq"]))] = str(record.get("origin"))
+            except (KeyError, TypeError, ValueError):
+                errors.append(f"{session}: confirmação sem sequência")
+        if record.get("event") != "transition":
+            continue
+        state = str(record.get("state", ""))
+        if state in {"ERROR", "ATTRACT"} and record.get("cause") != "button":
+            continue
+        try:
+            button_seq = int(record["button_seq"])
+        except (KeyError, TypeError, ValueError):
+            errors.append(f"{session}: transição {state} sem button_seq")
+            continue
+        origin = confirmations.get((session, button_seq))
+        if record.get("cause") != "button" or origin is None:
+            errors.append(f"{session}: transição {state} sem confirmação correspondente")
+            continue
+        recorded_origin = str(record.get("confirmation_origin", ""))
+        if recorded_origin and recorded_origin != origin:
+            errors.append(f"{session}: transição {state} divergiu da origem {origin}")
+    return errors
+
+
+def validate_physical_transition_causes(records: list[dict[str, object]]) -> list[str]:
+    """Compatibility alias for callers of the former physical-only validator."""
+
+    return validate_confirmation_transition_causes(records)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("logs", nargs="+", type=Path)
@@ -132,10 +283,31 @@ def main(argv=None) -> int:
     ends = [record for record in records if record.get("event") == "session_end"]
     hardware_sessions = {str(record.get("session_id")) for record in starts if record.get("mode") == "hardware"}
     non_hardware = [record for record in starts if record.get("mode") != "hardware"]
-    handshakes = [record for record in records if record.get("event") == "handshake" and record.get("mode") == "hardware"]
+    handshakes = [
+        record
+        for record in records
+        if record.get("event") == "handshake"
+        and record.get("mode") == "hardware"
+        and isinstance(record.get("payload"), dict)
+        and (
+            record.get("schema_version") == "pqc-sat-stand-log-v1"
+            or record["payload"].get("game") == "STAGED_V1"
+        )
+    ]
     cycles = [record for record in records if record.get("event") == "cycle_complete"]
     errors = [record for record in records if record.get("event") == "error"]
-    buttons = [record for record in records if record.get("event") == "button" and record.get("origin") == "physical"]
+    buttons = [
+        record
+        for record in records
+        if record.get("event") in {"button", "button_confirmed"}
+        and record.get("origin") == "physical"
+    ]
+    screen_confirmations = [
+        record
+        for record in records
+        if record.get("event") == "button_confirmed"
+        and record.get("origin") == "screen"
+    ]
     pot_samples, pot_changes, pot_unique_positions = count_pot_activity(records)
 
     disconnects, disconnect_recoveries = count_disconnect_recoveries(records)
@@ -153,6 +325,14 @@ def main(argv=None) -> int:
     for record in cycles:
         for message in validate_cycle(record):
             cycle_errors.append({"cycle": record.get("cycle"), "session_id": record.get("session_id"), "error": message})
+    transition_errors = validate_confirmation_transition_causes(records)
+    staged_durations = [
+        float(record["duration_seconds"])
+        for record in cycles
+        if record.get("flow") == "investigation" and isinstance(record.get("duration_seconds"), (int, float))
+    ]
+    median_duration = statistics.median(staged_durations) if staged_durations else 0.0
+    has_staged_v2 = any(record.get("schema_version") == "pqc-sat-stand-log-v2" for record in records)
 
     gates = {
         "only_hardware_sessions": not non_hardware and bool(hardware_sessions),
@@ -164,9 +344,11 @@ def main(argv=None) -> int:
         "continuous_runtime": max_continuous >= args.min_continuous_seconds,
         "no_errors": not errors,
         "cycle_invariants": not cycle_errors,
+        "confirmation_transition_invariant": not transition_errors,
+        "median_duration_120_180": (120.0 <= median_duration <= 180.0) if has_staged_v2 else True,
     }
     report = {
-        "schema_version": "pqc-sat-stand-hardware-acceptance-v1",
+        "schema_version": "pqc-sat-stand-hardware-acceptance-v2",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "result": "PASS" if all(gates.values()) else "FAIL",
         "inputs": [str(path) for path in args.logs],
@@ -176,6 +358,7 @@ def main(argv=None) -> int:
             "handshakes": len(handshakes),
             "cycles": len(cycles),
             "button_actions": len(buttons),
+            "screen_confirmations": len(screen_confirmations),
             "pot_samples": pot_samples,
             "pot_changes": pot_changes,
             "pot_unique_positions": pot_unique_positions,
@@ -183,6 +366,7 @@ def main(argv=None) -> int:
             "disconnect_recoveries": disconnect_recoveries,
             "errors": len(errors),
             "max_continuous_seconds": round(max_continuous, 3),
+            "median_game_seconds": round(median_duration, 3),
         },
         "thresholds": {
             "cycles": args.min_cycles,
@@ -190,8 +374,10 @@ def main(argv=None) -> int:
             "pot_changes": args.min_pot_changes,
             "disconnect_recoveries": args.min_disconnects,
             "continuous_seconds": args.min_continuous_seconds,
+            "a39_minimum_adc_delta_per_change": MIN_A39_ADC_DELTA,
         },
         "cycle_errors": cycle_errors,
+        "transition_errors": transition_errors,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

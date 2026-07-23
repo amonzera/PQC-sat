@@ -1,0 +1,79 @@
+{
+  "schema_version": "pqc-sat-stand-config-v3",
+  "payload": "PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK",
+  "payload_display": "TEMP=24,5 C  |  STATUS=OK  |  MSG=HELLO_UFF",
+  "auto_reset_seconds": 18.0,
+  "serial_timeout_seconds": 8.0,
+  "intro_seconds": 7.5,
+  "comparison_hold_seconds": 12.0,
+  "fault_hold_seconds": 8.0,
+  "interaction_timeout_seconds": 30.0,
+  "public_flow": {
+    "interaction_timeout_enabled": false,
+    "auto_reset_enabled": false
+  },
+  "kiosk_fullscreen": true,
+  "windowed_size": [1366, 768],
+  "animation": {
+    "min_duration_ms": 1200,
+    "max_duration_ms": 4800,
+    "checkpoints_ms": {
+      "PREPARE": 2200,
+      "PROTECT": 4200,
+      "TRANSMIT": 3000,
+      "VERIFY": 3600,
+      "RETRY": 3000,
+      "DEBRIEF": 1200
+    }
+  },
+  "profiles": {
+    "baseline_name": "BASELINE",
+    "baseline_mhz": 240,
+    "limited_name": "OBC-1U-LIMITED",
+    "limited_mhz": 80
+  },
+  "potentiometer": {
+    "minimum": 0,
+    "maximum": 4095,
+    "poll_interval_seconds": 0.18
+  },
+  "button_debounce_seconds": 0.35,
+  "investigation": {
+    "seed": 42,
+    "incident_sequence": ["CHANNEL_BITFLIP", "TAMPER", "RX_MEMORY"],
+    "target_min_seconds": 120.0,
+    "target_max_seconds": 180.0,
+    "screen_input_guard_seconds": 0.22
+  },
+  "key_modes": ["CLASSIC", "PQC"],
+  "guards": ["NONE", "CRC32"],
+  "missions": [
+    {
+      "id": "TELEMETRY",
+      "title": "TELEMETRIA CRÍTICA",
+      "description": "Temperatura crítica; solicitar modo de segurança.",
+      "payload": "TEMP=84C|STATUS=CRITICAL|SAFE=REQUEST",
+      "priority": "ALTA",
+      "deadline_ms": 2000,
+      "consequence": "Uma leitura corrompida pode ocultar uma condição térmica crítica."
+    },
+    {
+      "id": "SAFE_COMMAND",
+      "title": "COMANDO DE EMERGÊNCIA",
+      "description": "Ordenar que o satélite entre em modo seguro.",
+      "payload": "CMD=SAFE_MODE|PRIORITY=CRITICAL|SEQ=0042",
+      "priority": "CRÍTICA",
+      "deadline_ms": 500,
+      "consequence": "Uma decisão errada pode impedir ou disparar o modo seguro."
+    },
+    {
+      "id": "CONFIG_UPDATE",
+      "title": "ATUALIZAR CONFIGURAÇÃO",
+      "description": "Alterar a janela de comunicação da missão.",
+      "payload": "CFG=COMMS_WINDOW|VALUE=12MIN|SEQ=0043",
+      "priority": "MÉDIA",
+      "deadline_ms": 10000,
+      "consequence": "Uma configuração silenciosamente corrompida pode perder a janela de comunicação."
+    }
+  ]
+}

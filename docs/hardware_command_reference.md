@@ -13,7 +13,7 @@ Comandos locais do dashboard, como `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`,
 `DEMO_STOP`, `DEMO_RESTART`, `RUN_BATTERY`, `CHECKSUM`, `EXPORT_JSON` e
 `TOGGLE_LIVE_PAYLOAD`, não são comandos do firmware. O comando `MISSION`, por
 outro lado, existe no firmware e é o caminho principal da apresentação para
-medir `CLASSIC`, `PQC` e `PQC_CRC32`.
+medir `CLASSIC`, `CLASSIC_CRC32`, `PQC` e `PQC_CRC32`.
 
 ## Protocolo
 
@@ -46,7 +46,9 @@ python3 tools/serial_console.py --commands
 | Comando | Uso | Papel na demonstração |
 |---|---|---|
 | `STATUS` | `STATUS` | Mostra perfil, CPU, heap, flash e radio sob demanda. |
-| `MISSION` | `MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32` | Entrega mensagem curta e mede tempo, bytes, heap e resultado nos três cenários centrais do seminário. |
+| `MISSION` | `MISSION CLASSIC`, `MISSION CLASSIC_CRC32`, `MISSION PQC`, `MISSION PQC_CRC32` | Entrega mensagem curta e mede tempo, bytes, heap e resultado; `CLASSIC_CRC32` permite cruzar modo de chave e guardião. |
+| `GAME_*` | `GAME_BEGIN` … `GAME_END` | Protocolo transacional `STAGED_V1` do jogo público; cada comando executa uma etapa real separada. |
+| `INVESTIGATE` | `INVESTIGATE cenário incidente payload_hex índice máscara id` | Compatibilidade monolítica de bancada/fluxo legado para o mesmo experimento em camadas. |
 | `TOGGLE_LIVE_PAYLOAD` | comando local do dashboard | Liga/desliga o modo em que sensores reais da Wisdom geram o payload antes de `MISSION`. |
 | `DEMO` | `DEMO`, `DEMO_PAUSE`, `DEMO_RESUME`, `DEMO_STOP`, `DEMO_RESTART` | Comandos locais do dashboard para executar a apresentação A/B cronometrada. |
 | `FAULT` | `FAULT NONE payload_hex index mask`, `FAULT CRC32 payload_hex index mask` | Comando serial técnico usado para validar bit-flip e CRC32 na placa. No dashboard, use `INJECT_FAULT` e `CRC_CHECK`. |
@@ -96,8 +98,9 @@ dashboard guarda também os metadados locais do payload vivo no popup e no JSON:
 | `sensor_failures` | Lista de sensores que não responderam; o payload usa `NA`. |
 
 Para falhas ao vivo, o dashboard também usa `ANALOG POT` como seletor físico
-de bit-flip: o valor 0..4095 é mapeado para uma posição dentro do payload, e o
-popup mostra `pot -> byte/mask -> resultado`.
+de bit-flip. No jogo por etapas, esse comando é solicitado de forma assíncrona
+quando a faixa verde confirma `PROTECT`; D27 já fornece o mesmo valor em
+`BUTTON_PING`. O valor 0..4095 é mapeado para uma posição dentro do payload.
 
 O OLED continua com `OLED STANDBY`. O firmware atual não possui comando para
 escrever texto arbitrário no display; por isso fases como `KEYGEN`, `CRC` e
@@ -111,9 +114,11 @@ processamento e custo relativo.
 | Uso | Significado |
 |---|---|
 | `MISSION CLASSIC` | Payload cifrado/autenticado por AES-128-GCM com chave efêmera gerada na placa. |
+| `MISSION CLASSIC_CRC32` | Mesmo baseline local com CRC32 anexado ao plaintext antes da proteção AES-GCM. |
 | `MISSION PQC` | ML-KEM-512 estabelece segredo; AES-128-GCM cifra e autentica a mensagem. |
 | `MISSION PQC_CRC32` | Mesmo fluxo PQC com CRC32 inserido no material protegido antes da cifragem. |
 | `MISSION CLASSIC payload_hex` | Executa o cenário clássico com payload hexadecimal escolhido. |
+| `MISSION CLASSIC_CRC32 payload_hex` | Executa chave AES local + AES-GCM + CRC32 com payload hexadecimal escolhido. |
 | `MISSION PQC payload_hex` | Executa PQC com payload hexadecimal escolhido. |
 | `MISSION PQC_CRC32 payload_hex` | Executa PQC+CRC32 com payload hexadecimal escolhido. |
 
@@ -121,7 +126,7 @@ Campos retornados:
 
 | Campo | Interpretação |
 |---|---|
-| `scenario` | `CLASSIC`, `PQC` ou `PQC_CRC32`. |
+| `scenario` | `CLASSIC`, `CLASSIC_CRC32`, `PQC` ou `PQC_CRC32`. |
 | `result` | `DELIVERED` ou `REJECTED`. |
 | `crypto` | `AES-128-GCM` no clássico; `ML-KEM-512` nos cenários PQC. |
 | `cipher` | Cifra AEAD usada no payload: `AES-128-GCM`. |
@@ -141,6 +146,52 @@ auditar sessões ML-KEM antigas do projeto. Ele não abre popup no dashboard e
 não faz parte da demonstração visual de falha. Na apresentação, a falha correta
 é `FAULT NONE|CRC32`, isto é: bit-flip em payload, sem checksum versus com
 CRC32. No fluxo `MISSION`, a autenticação da mensagem vem do AES-GCM.
+
+## Protocolo do jogo `STAGED_V1`
+
+O `HELLO` atual anuncia `game=STAGED_V1`. A sequência válida é:
+
+```text
+GAME_BEGIN G000001 BASELINE PQC CRC32 RX_MEMORY 54454D503D383443
+GAME_PROTECT G000001
+GAME_TRANSMIT G000001 0 0x01
+GAME_VERIFY G000001
+GAME_RETRY G000001
+GAME_END G000001 ACCEPT
+```
+
+| Comando | Pré-condição | Efeito |
+|---|---|---|
+| `GAME_BEGIN id profile key guard incident payload_hex` | nenhuma sessão, ou início explícito novo | restaura o baseline, aplica perfil, serializa payload e CRC opcional |
+| `GAME_PROTECT id` | `PREPARE` do mesmo ID | obtém chave, executa AES-GCM e monta o envelope |
+| `GAME_TRANSMIT id index mask` | `PROTECT` do mesmo ID | fixa vetor single-bit, monta quadro e aplica incidente oculto |
+| `GAME_VERIFY id` | `TRANSMIT` do mesmo ID | verifica quadro, GCM e CRC da aplicação; apaga segredos |
+| `GAME_RETRY id` | `VERIFY` do mesmo ID | mesmo payload, nova chave/nonce, sem falha, resultado `DELIVERED` |
+| `GAME_END id ACCEPT\|SAFE_MODE` | `VERIFY` ou `RETRY` do mesmo ID | registra decisão, apaga sessão e restaura 240 MHz |
+| `GAME_ABORT id` | qualquer estágio ativo do mesmo ID | apaga sessão e restaura o baseline |
+
+ID ou ordem incorreta retorna `BAD_GAME_STATE` e limpa a sessão. `HELLO`, erro
+fatal e reconexão também limpam. Respostas fornecem métricas, estados e CRCs
+curtos de material; nunca chaves, segredos, nonce ou ciphertext completos.
+`ANALOG POT` é a única consulta de bancada permitida enquanto a sessão está
+ativa: ela lê A39 sem alterar o estágio e viabiliza a confirmação verde em
+`PROTECT`. Outros comandos não `GAME_*` continuam falhando de forma fechada.
+
+## Comando INVESTIGATE legado
+
+O fluxo legado usa uma única execução real na Wisdom:
+
+```text
+INVESTIGATE PQC_CRC32 RX_MEMORY 54454D503D383443 0 0x01 C0001-RX_MEMORY-0
+```
+
+Os cenários são `CLASSIC`, `CLASSIC_CRC32`, `PQC` e `PQC_CRC32`. Os incidentes
+são `NORMAL`, `CHANNEL_BITFLIP`, `TAMPER` e `RX_MEMORY`. A resposta inclui o vetor single-bit,
+`frame_crc_tx/rx/match`, `aead_checked/match`,
+`app_crc_present/checked/match`, aceitação, resultado, tempo, bytes e heap.
+`TAMPER` recalcula o CRC não autenticado depois da mutação, mas não consegue
+produzir uma tag GCM válida. `RX_MEMORY` ocorre depois da verificação GCM e só
+é rejeitado pelo CRC da aplicação quando esse mecanismo está presente.
 
 ## Comandos PQC de bancada
 
@@ -190,7 +241,7 @@ são registro técnico histórico; a demo visual atual usa `FAULT NONE|CRC32`.
 
 | Comando | Uso | Possibilidade de comunicação |
 |---|---|---|
-| `HELLO` | `HELLO` | Handshake; identifica `PQC-SAT-WISDOM`, placa, protocolo e transporte. |
+| `HELLO` | `HELLO` | Handshake; identifica placa/protocolo, anuncia `game=STAGED_V1`, traz `uptime_ms` e limpa qualquer sessão de jogo anterior. |
 | `PING` | `PING` | Teste de ida e volta UART com `uptime_ms`. |
 | `STATUS` | `STATUS` | Estado do ESP32: perfil, chip, CPU, heap, flash e radio. |
 | `TELEMETRY` | `TELEMETRY` | Snapshot de uptime, CPU, heap, potenciômetro, som, botão e relé. |
@@ -203,7 +254,15 @@ são registro técnico histórico; a demo visual atual usa `FAULT NONE|CRC32`.
 | `PQC_FAULT` | `PQC_FAULT index mask [CONFIRM\|NONE]` | Comando avançado de bancada para corromper ciphertext ML-KEM. Mantido fora da demo visual; use `FAULT NONE|CRC32` para o popup didático. |
 | `PQC_BENCH` | `PQC_BENCH n` | Executa benchmark de bancada para 1 a 100 rodadas. |
 | `STRESS` | `STRESS PQC_LOOP n CONFIRM` | Executa carga extrema de ML-KEM para demonstrar limite operacional; use `n=500` no fechamento visual. |
-| `MISSION` | `MISSION CLASSIC\|PQC\|PQC_CRC32 [payload_hex]` | Entrega mensagem curta e mede custo/bytes/segurança por cenário. |
+| `MISSION` | `MISSION CLASSIC\|CLASSIC_CRC32\|PQC\|PQC_CRC32 [payload_hex]` | Entrega mensagem curta e mede custo/bytes/segurança por cenário. |
+| `GAME_BEGIN` | `GAME_BEGIN id profile CLASSIC\|PQC NONE\|CRC32 incident payload_hex` | Inicia sessão transacional e prepara o plaintext. |
+| `GAME_PROTECT` | `GAME_PROTECT id` | Estabelece chave, protege com AES-GCM e monta envelope. |
+| `GAME_TRANSMIT` | `GAME_TRANSMIT id index mask` | Confirma o vetor e aplica o incidente na camada definida. |
+| `GAME_VERIFY` | `GAME_VERIFY id` | Produz as três evidências e apaga segredos. |
+| `GAME_RETRY` | `GAME_RETRY id` | Retransmite mesmo payload com chave/nonce novos e sem falha. |
+| `GAME_END` | `GAME_END id ACCEPT\|SAFE_MODE` | Encerra a sessão e restaura o baseline. |
+| `GAME_ABORT` | `GAME_ABORT id` | Aborta, limpa a sessão e restaura o baseline. |
+| `INVESTIGATE` | `INVESTIGATE scenario incident payload_hex index mask incident_id` | Instrumenta, na mesma execução, CRC externo do quadro, autenticação GCM e CRC interno da aplicação. |
 | `PERIPHERALS` | `PERIPHERALS` | Detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C. |
 | `I2C_SCAN` | `I2C_SCAN` | Varre o barramento I2C em SDA21/SCL22. |
 | `FEATURES` | `FEATURES`, `FEATURES CORE`, `FEATURES I2C`, `FEATURES GPIO`, `FEATURES ANALOG`, `FEATURES EXPANSION` | Lista grupos de recursos conhecidos pela firmware. |
@@ -220,6 +279,13 @@ são registro técnico histórico; a demo visual atual usa `FAULT NONE|CRC32`.
 | `PROFILE` | `PROFILE BASELINE`, `PROFILE OBC-1U-LIMITED` | Alterna perfil operacional do ESP32. |
 | `RESET_STATS` | `RESET_STATS` | Zera contadores internos da firmware. |
 | `HELP` | `HELP`, `HELP LED`, `HELP BARGRAPH`, `HELP RGB`, `HELP OLED` | Lista grupos ou explica um comando específico. |
+
+Enquanto uma sessão `GAME_*` está ativa, ela possui uso exclusivo do perfil,
+dos indicadores e dos buffers de trabalho ML-KEM. Nesse intervalo o firmware
+aceita apenas a continuação `GAME_*`, um novo `GAME_BEGIN` (que substitui a
+sessão) ou `HELLO` (reconexão e limpeza). Qualquer outro comando retorna
+`BAD_GAME_STATE`, apaga a sessão e restaura o perfil baseline. Execute comandos
+de bancada somente antes de `GAME_BEGIN` ou depois de `GAME_END`/`GAME_ABORT`.
 
 ## Política de uso
 

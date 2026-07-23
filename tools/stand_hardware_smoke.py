@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one end-to-end stand cycle against real hardware."""
+"""Run short staged-game cycles against a physically confirmed Wisdom."""
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ if str(ROOT) not in sys.path:
 
 import pygame  # noqa: E402
 
-from dashboard import DashboardSerialClient, render_dashboard_presentation_frame  # noqa: E402
-from stand_demo import (  # noqa: E402
-    DEFAULT_CONFIG_PATH,
-    DemoState,
-    StandConfig,
-    StandController,
-    StandSessionLogger,
-)
+from pqc_sat.infrastructure.serial_client import WisdomSerialClient  # noqa: E402
+from pqc_sat.infrastructure.wisdom import discover_wisdom  # noqa: E402
+from pqc_sat.stand.investigation import InvestigationController  # noqa: E402
+from pqc_sat.stand.model import InvestigationState, StandConfig  # noqa: E402
+from pqc_sat.stand.session import StandSessionLogger  # noqa: E402
+from pqc_sat.stand.settings import DEFAULT_CONFIG_PATH  # noqa: E402
+from pqc_sat.ui.capture import render_game_frame  # noqa: E402
+from tools.serial_bridge import SerialBridgeError  # noqa: E402
 
 
 def report_path(path: Path) -> str:
@@ -37,18 +37,19 @@ def report_path(path: Path) -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", default="/dev/ttyUSB0")
+    parser.add_argument("--port", help="porta explícita; se omitida, sonda todas por HELLO")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=8.0)
-    parser.add_argument("--cycles", type=int, default=1, help="quantidade de ciclos administrativos")
-    parser.add_argument("--overall-timeout", type=float, help="limite total; padrão ajustado à quantidade de ciclos")
-    parser.add_argument(
-        "--production-timings",
-        action="store_true",
-        help="preserva os tempos visuais do config em vez de acelerar o ciclo",
-    )
+    parser.add_argument("--probe-timeout", type=float, default=2.5)
+    parser.add_argument("--cycles", type=int, default=1, help="quantidade de partidas físicas")
+    parser.add_argument("--overall-timeout", type=float)
+    parser.add_argument("--production-timings", action="store_true")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    parser.add_argument("--output", type=Path, default=ROOT / "docs" / "stand" / "evidence" / "hardware_smoke.json")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=ROOT / "docs" / "stand" / "evidence" / "hardware_smoke.json",
+    )
     parser.add_argument(
         "--evidence-log",
         type=Path,
@@ -59,125 +60,105 @@ def main(argv=None) -> int:
     if args.cycles <= 0:
         parser.error("--cycles deve ser positivo")
 
+    try:
+        device = discover_wisdom(
+            args.port,
+            baudrate=args.baud,
+            timeout=args.probe_timeout,
+            require_staged_game=True,
+        )
+    except SerialBridgeError as exc:
+        print(f"ERRO: {exc}", file=sys.stderr)
+        return 2
+
     base_config = StandConfig.load(args.config)
     config = base_config if args.production_timings else replace(
         base_config,
-        intro_seconds=0.12,
-        comparison_hold_seconds=0.12,
-        fault_hold_seconds=0.12,
-        auto_reset_seconds=0.2,
-        pot_poll_interval_seconds=0.05,
         button_debounce_seconds=0.05,
+        screen_input_guard_seconds=0.05,
+        checkpoint_animation_ms=tuple(
+            (stage, 120)
+            for stage in ("PREPARE", "PROTECT", "TRANSMIT", "VERIFY", "RETRY", "DEBRIEF")
+        ),
     )
-    overall_timeout = (
-        args.overall_timeout
-        if args.overall_timeout is not None
-        else (
-            120.0 * args.cycles
-            if args.production_timings
-            else max(35.0, 5.0 * args.cycles)
-        )
-    )
+    overall_timeout = args.overall_timeout or (240.0 if args.production_timings else 90.0) * args.cycles
     if overall_timeout <= 0:
         parser.error("--overall-timeout deve ser positivo")
-    client = DashboardSerialClient(port=args.port, baudrate=args.baud, timeout=args.timeout)
+
+    client = WisdomSerialClient(port=device.port, baudrate=args.baud, timeout=args.timeout)
     logger = StandSessionLogger(args.log_dir, mode="hardware", config=config)
-    controller = StandController(config, client.send, mode="hardware", logger=logger)
+    controller = InvestigationController(config, client.send, mode="hardware", logger=logger)
     pygame.font.init()
-    states_seen = []
-    started = time.monotonic()
-    start_pressed = False
-    bit_pressed = False
+    states_seen: list[str] = []
+    cycle_summaries: list[dict[str, object]] = []
+    pending_snapshot = None
+    last_prompt_state = ""
     result = "FAIL"
     error = ""
-    captured_measurements = {}
-    captured_faults = {}
-    captured_selection = None
-    captured_duration = None
-    cycle_summaries = []
+    started = time.monotonic()
     client.start()
     try:
         while time.monotonic() - started < overall_timeout:
             now = time.monotonic()
             for event_type, payload in client.poll():
                 controller.handle_serial_event(event_type, payload, now=now)
+
             if controller.state.value not in states_seen:
                 states_seen.append(controller.state.value)
-                render_dashboard_presentation_frame(controller, now=now)
+                render_game_frame(controller, now=now)
+
+            input_ready = controller.input_ready(now)
+            if input_ready and not controller.pending_choice:
+                if controller.state is InvestigationState.SELECT_MISSION:
+                    controller.handle_action("mission:TELEMETRY", now=now)
+                elif controller.state is InvestigationState.SELECT_PROFILE:
+                    controller.handle_action(f"profile:{config.baseline_mhz}", now=now)
+                elif controller.state is InvestigationState.SELECT_KEY_MODE:
+                    controller.handle_action("key:PQC", now=now)
+                elif controller.state is InvestigationState.SELECT_GUARD:
+                    controller.handle_action("guard:CRC32", now=now)
+                elif controller.state is InvestigationState.DIAGNOSE and controller.incident is not None:
+                    expected = controller._EXPECTED_DIAGNOSIS[controller.incident]
+                    controller.handle_action(f"diagnosis:{expected}", now=now)
+                elif controller.state is InvestigationState.SELECT_RESPONSE:
+                    controller.handle_action("response:RETRY", now=now)
+
+            if controller.state.value != last_prompt_state:
+                last_prompt_state = controller.state.value
+                print(f"[{last_prompt_state}] pressione o D27 físico somente quando a tela liberar", flush=True)
+
             if (
-                controller.ready
-                and controller.state == DemoState.ATTRACT
-                and controller.pending is None
-                and not start_pressed
+                controller.state is InvestigationState.DEBRIEF
+                and controller.end_receipt is not None
+                and controller.animation_complete
+                and pending_snapshot is None
             ):
-                start_pressed = controller.handle_button(now=now, origin="hardware-smoke-driver")
-            if (
-                controller.state == DemoState.SELECT_BIT
-                and controller.substage == "select_ready"
-                and controller.selection is not None
-                and controller.pending is None
-                and not bit_pressed
-            ):
-                bit_pressed = controller.handle_button(now=now, origin="hardware-smoke-driver")
+                pending_snapshot = {
+                    "cycle": controller.cycle_index,
+                    "selection": asdict(controller.selection) if controller.selection else None,
+                    "stages": {stage.value: asdict(value) for stage, value in controller.stage_measurements.items()},
+                    "result": asdict(controller.result) if controller.result else None,
+                    "retry": asdict(controller.retry_result) if controller.retry_result else None,
+                    "diagnosis": controller.selected_diagnosis,
+                    "diagnosis_correct": controller.diagnosis_correct,
+                    "decision": controller.operational_decision.value if controller.operational_decision else None,
+                    "d27_confirmations": controller.button_sequence,
+                }
+
             controller.update(now=now)
-            if controller.state == DemoState.ERROR:
+            if controller.state is InvestigationState.ERROR:
                 error = controller.error_message
                 break
-            if controller.state == DemoState.SUMMARY:
-                if controller.state.value not in states_seen:
-                    states_seen.append(controller.state.value)
-                    render_dashboard_presentation_frame(controller, now=now)
-                captured_measurements = {key: asdict(value) for key, value in controller.measurements.items()}
-                captured_faults = {key: asdict(value) for key, value in controller.fault_results.items()}
-                captured_selection = asdict(controller.selection) if controller.selection else None
-                captured_duration = controller.last_cycle_duration
-                cycle_summaries.append(
-                    {
-                        "cycle": controller.completed_cycles,
-                        "duration_seconds": captured_duration,
-                        "selection": captured_selection,
-                        "measurements": {
-                            key: {
-                                "elapsed_us": value["elapsed_us"],
-                                "bytes_total": value["bytes_total"],
-                                "result": value["result"],
-                                "source": value["source"],
-                                "payload_hex": value["payload_hex"],
-                            }
-                            for key, value in captured_measurements.items()
-                        },
-                        "faults": {
-                            key: {
-                                "byte_index": value["byte_index"],
-                                "bit_mask": value["bit_mask"],
-                                "before_byte": value["before_byte"],
-                                "after_byte": value["after_byte"],
-                                "result": value["result"],
-                                "source": value["source"],
-                            }
-                            for key, value in captured_faults.items()
-                        },
-                    }
-                )
+            if pending_snapshot is not None and controller.state is InvestigationState.ATTRACT:
+                pending_snapshot["duration_seconds"] = controller.last_cycle_duration
+                cycle_summaries.append(pending_snapshot)
+                pending_snapshot = None
                 if controller.completed_cycles >= args.cycles:
                     result = "PASS"
                     break
-                controller.reset_to_attract(reason="hardware_smoke_next_cycle", now=now)
-                start_pressed = False
-                bit_pressed = False
             time.sleep(0.01)
         else:
             error = "overall timeout"
-
-        if result == "PASS":
-            controller.reset_to_attract(reason="hardware_smoke_complete")
-            restore_deadline = time.monotonic() + 2.0
-            while controller.pending is not None and time.monotonic() < restore_deadline:
-                now = time.monotonic()
-                for event_type, payload in client.poll():
-                    controller.handle_serial_event(event_type, payload, now=now)
-                controller.update(now=now)
-                time.sleep(0.01)
     finally:
         client.stop()
         logger.close()
@@ -185,35 +166,29 @@ def main(argv=None) -> int:
 
     args.evidence_log.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(logger.path, args.evidence_log)
-
     report = {
-        "schema_version": "pqc-sat-stand-hardware-smoke-v1",
+        "schema_version": "pqc-sat-stand-hardware-smoke-v3",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "result": result,
         "timing_mode": "production-config" if args.production_timings else "accelerated",
-        "port": args.port,
+        "flow": "staged_game",
+        "port": device.port,
+        "preflight_handshake": device.handshake,
         "cycles_requested": args.cycles,
         "states_seen": states_seen,
         "handshake": controller.handshake,
         "connection_status": controller.connection_status,
         "completed_cycles": controller.completed_cycles,
-        "cycle_duration_seconds": captured_duration,
-        "measurements": captured_measurements,
-        "faults": captured_faults,
-        "selection": captured_selection,
         "cycle_summaries": cycle_summaries,
         "rejected_events": controller.rejected_events,
+        "ignored_inputs": controller.ignored_inputs,
+        "d27_confirmations": controller.button_sequence,
         "error": error or None,
         "session_log": report_path(args.evidence_log),
         "runtime_session_log": report_path(logger.path),
         "limitations": [
-            "O driver administrativo acionou as duas transições de cada ciclo; BUTTON_PING físico é validado separadamente.",
-            (
-                "Os tempos visuais vieram da configuração de produção."
-                if args.production_timings
-                else "Os tempos visuais foram reduzidos; as métricas criptográficas são respostas reais da Wisdom."
-            ),
-            "Os ciclos administrativos não substituem o ensaio físico de 30 ciclos/3 horas.",
+            "O script pré-seleciona cartões; todas as transições exigem BUTTON_PING físico.",
+            "Este smoke curto não substitui o ensaio físico de 30 partidas e 3 horas.",
         ],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

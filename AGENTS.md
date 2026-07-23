@@ -13,11 +13,9 @@ PQC-SAT é uma demonstração didática sobre:
 - comparação de entrega de mensagem em `CLASSIC`, `PQC` e `PQC_CRC32`;
 - integração com uma sessão ML-KEM-512 em ESP32.
 
-O projeto tem duas camadas que não podem ser confundidas:
-
-1. **Baseline atual**: dashboard Pygame em modo simulado.
-2. **Arquitetura alvo**: campanha determinística, entrega de mensagem,
-   exportação JSON, firmware e bridge serial.
+O programa público tem uma única camada operacional: jogo Pygame conectado à
+Wisdom real. Fixture e relógio sintético existem somente em testes e evidências
+offline; nunca são opções do entrypoint de produção.
 
 Nunca apresente uma funcionalidade planejada como concluída.
 
@@ -38,19 +36,16 @@ implementar.
 
 ### Implementado
 
-- dashboard fullscreen em `dashboard.py`;
+- interface única fullscreen em `dashboard.py`; somente o standby de busca
+  funciona sem conexão, e o jogo exige a Wisdom validada;
 - Terra, CubeSat, estrelas, nebulosa e partículas procedurais;
-- painel de telemetria e console;
-- comandos locais do dashboard: `INJECT_FAULT`, `BIT_FLIP`, `PQC_STATUS`,
-  `CRC_CHECK`, `RUN_BATTERY`, `RESET_SESSION`, `SEND_MESSAGE`,
-  `SET_PRESET_CLASSIC`, `SET_PRESET_PQC`, `SET_PRESET_PQC_CRC32`,
-  `TOGGLE_CLASSIC`, `TOGGLE_PQC`, `TOGGLE_CHECKSUM` e `HELP`;
+- fluxo público por cartões, 14 estados e confirmações por D27 ou faixa verde;
 - firmware serial `V1` para a RoboCore BlackBoard Wisdom;
 - bridge serial Python e console `tools/serial_console.py`;
-- modo padrão de `dashboard.py` tenta detectar a Wisdom e encaminha comandos do
-  console visual para a ESP32 sem bloquear o loop Pygame;
-- seed exclusiva para os resultados de falha (`42`);
-- indicadores explícitos de modo simulado;
+- `dashboard.py` abre o standby e sonda todas as portas em worker por `HELLO`; exige
+  `node=PQC-SAT-WISDOM`, `board=BlackBoard-Wisdom`, `proto=V1`,
+  `game=STAGED_V1` e `uptime_ms` válido antes de mostrar a abertura narrativa;
+- seed determinística exclusiva para incidentes de teste (`42`);
 - mutação real de payload com CRC32 no dashboard e no firmware via
   `FAULT NONE|CRC32 payload_hex index mask`;
 - backend ML-KEM-512 real na Wisdom com `mlkem-native` v1.1.0, commit
@@ -67,21 +62,17 @@ implementar.
   entregar mensagem curta e medir tempo total, bytes, heap, confirmação,
   checksum e resultado por cenário;
 - exportação JSON com eventos, resumo e amostras de hardware.
-- checksum ativável/desativável no dashboard por `CHECKSUM ON|OFF|TOGGLE` e
-  `GUARD NONE|CRC32`;
+- guardião selecionável no jogo como `NONE` ou `CRC32`;
 - amostras `PQC_*` exportadas em JSON com timings, KAT, `key_match`,
   `key_confirmed`, `tag_match`, tamanhos e CRCs curtos, sem segredos
   completos;
 - eventos de payload exportam overhead do guardião em `guard_prepare_us`,
   `guard_verify_us` e `guard_overhead_us`.
-- faixa superior mostra CPU em MHz e `% ativo` observado em janela móvel de
-  5s, e a RAM formatada como consumo de heap / total disponível;
-- modo apresentação interativo e manual com presets `CLÁSSICA`, `PQC` e
-  `PQC+CRC`, seguidos por `ENVIAR MSG`;
+- interface mostra tempos, bytes e heap apenas após respostas `GAME_*` reais;
 - `PQC_FAULT index mask [CONFIRM|NONE]` implementado no firmware para
   corromper ciphertext ML-KEM real e classificar `KEY_MISMATCH` ou
   `PROTOCOL_REJECT` por confirmação HMAC-SHA256 da chave derivada.
-- etapa 8 de software implementada com splash opcional, `--no-splash`,
+- etapa 8 de software implementada com standby opcional, `--no-splash`,
   autosave no fechamento, cleanup preservando traceback, cache de superfícies
   grandes, faixa superior focada em CPU/RAM e testes
   headless para 1920x1080 e 1366x768;
@@ -111,13 +102,67 @@ implementar.
 - uma sessão adicional de 20 ciclos reais acelerados concluiu 60 missões e 40
   falhas sem erro, mas usou acionamento administrativo e não substitui o gate
   físico longo.
+- arquitetura Python modular com `dashboard.py` como único entrypoint;
+  `stand_demo.py`, dashboard manual legado, launchers Bash e flags de simulação
+  de produção foram removidos; limites estão em
+  `docs/DASHBOARD_ARCHITECTURE.md`;
+- `Missão Bit Flip` oferece três missões, 240/80 MHz, chave CLASSIC/PQC,
+  guardião NONE/CRC32, incidente oculto, diagnóstico e resposta operacional;
+- comando `INVESTIGATE` implementado no firmware para instrumentar, na mesma
+  execução, CRC do quadro, AES-GCM e CRC da aplicação em `NORMAL`,
+  `CHANNEL_BITFLIP`, `TAMPER` e `RX_MEMORY`; build local pós-mudança usa 17,3%
+  de RAM e 70,6% de flash.
+- validação investigativa concluída em 2026-07-21 com 158 testes, soak offline
+  de 50 ciclos, 22 screenshots e vídeo rotulado de 44 s; o firmware atual foi
+  gravado na Wisdom e um smoke investigativo real percorreu `ATTRACT` até
+  `SUMMARY`, com `CHANNEL_BITFLIP`/`PQC_CRC32` classificado `FRAME_REJECT`,
+  zero eventos rejeitados e invariantes do log aprovados; o dashboard de
+  produção conectado permaneceu oito segundos em `ATTRACT`, sem transição
+  espontânea;
+- o diagnóstico real executou os quatro casos curtos de `INVESTIGATE`; duas
+  janelas assistidas de 30 s e 45 s não observaram `BUTTON_PING`, portanto o
+  acionamento/fiação de D27 continua pendente e o smoke administrativo não é
+  aceite físico longo.
+- jogo didático `STAGED_V1` implementado em software com 14 estados: toque em
+  cartão apenas seleciona, D27 ou faixa verde confirmam cada transição, A39 seleciona o bit, resposta
+  serial e animação apenas liberam a confirmação, sem timeout ou reset público;
+- primeiro handshake fecha automaticamente a busca e mostra a abertura com
+  Terra/CubeSat, chamada única e botão `INICIAR MISSÃO`; clique ou D27 abrem
+  diretamente as escolhas; depois do replay validado, a própria mensagem pode ser
+  arrastada por estações explicadas sem alterar o controlador ou o gate de confirmação;
+- standby permanece até `HELLO STAGED_V1` e fecha automaticamente; a abertura
+  narrativa permanece até clique ou D27, e o controle de tela usa `ANALOG POT` antes
+  de confirmar `PROTECT`;
+- cartões de escolha são quadrados, sem subtítulos internos, com títulos e
+  artes causais em destaque; a torre sobre a Terra foi removida e o CubeSat
+  móvel preservado com sorriso angular;
+- protocolo transacional `GAME_BEGIN`, `GAME_PROTECT`, `GAME_TRANSMIT`,
+  `GAME_VERIFY`, `GAME_RETRY`, `GAME_END` e `GAME_ABORT` implementado no
+  firmware, preservando `INVESTIGATE` e o fluxo legado; `CLASSIC_CRC32` permite
+  escolher modo de chave e CRC da aplicação independentemente;
+- validação host atual do jogo por etapas concluída com 97 testes, matriz de 32
+  casos, soak offline de 50 partidas, 66 capturas, vídeo rotulado e benchmark
+  abaixo de 16,667 ms em ambas as resoluções; o firmware candidato compila com
+  57.332 B de RAM e 932.173 B de flash, mas ainda não foi gravado nem executado
+  na Wisdom;
+- corrigida no candidato a incompatibilidade observada em hardware na qual
+  `ANALOG POT` retornava `BAD_GAME_STATE` durante `PROTECT` e apagava a sessão;
+  a leitura A39 agora é a única consulta não `GAME_*` permitida e a regressão
+  exige que `GAME_TRANSMIT` continue válido depois dela; falta novo flash para
+  validar a correção na placa;
+- `tools/firmware_deploy.py` prepara build e upload sem Bash: a gravação só
+  ocorre com `--upload`, depois de provar a identidade da Wisdom por `HELLO`, e
+  o comando só termina com sucesso após validar `game=STAGED_V1`;
+- sondagem real em 2026-07-22 reconheceu a Wisdom pelo caminho estável
+  `/dev/serial/by-id`, mas confirmou que a revisão atualmente gravada ainda não
+  anuncia `game=STAGED_V1`; nenhum upload foi executado.
 
 ### Não implementado
-Nenhuma etapa técnica de implementação permanece aberta para o MVP do
-seminário. Para a extensão de estande SBPC ainda faltam o aceite físico longo,
-o `BUTTON_PING` observado na interface, o ensaio no monitor definitivo e o
-teste de compreensão com cinco pessoas; não declarar a extensão pronta antes
-de fechar esses gates em `docs/stand/FINAL_VALIDATION.md`.
+Nenhuma etapa técnica permanece aberta para o MVP original do seminário. O
+jogo `STAGED_V1` ainda precisa de flash, handshake e smoke reais, `BUTTON_PING`
+observado, partida inteira por D27, ensaio no monitor definitivo, aceite físico
+longo e teste de compreensão com cinco pessoas; não declarar a extensão pronta
+antes de fechar esses gates em `docs/stand/FINAL_VALIDATION.md`.
 
 ## 4. Stack
 
@@ -125,11 +170,11 @@ de fechar esses gates em `docs/stand/FINAL_VALIDATION.md`.
 
 | Componente | Tecnologia |
 |---|---|
-| Linguagem validada | Python 3.14.5 |
+| Linguagem validada | Python 3.14.6 |
 | Renderização | pygame-ce 2.5.7 |
-| Aplicação | `dashboard.py` monolítico |
+| Aplicação | pacote `pqc_sat/`; `dashboard.py` é fachada/entrypoint |
 | Assets | desenho procedural, sem arquivos externos |
-| Serial | pyserial 3.5+ opcional |
+| Serial | pyserial 3.5+ obrigatório em produção |
 | Firmware | Arduino/PlatformIO para BlackBoard Wisdom |
 | PQC | ML-KEM-512 com `mlkem-native` v1.1.0 vendorizado |
 
@@ -150,39 +195,30 @@ ML-KEM/FIPS 203.
 ## 5. Regras de implementação
 
 - Preserve o baseline funcional e trabalhe incrementalmente.
-- Mantenha o dashboard em um único arquivo Python até que exista motivo
-  concreto e aprovação para modularização.
+- Mantenha `dashboard.py` como fachada fina e entrypoint estável. Código novo
+  deve respeitar as camadas de `pqc_sat/` documentadas em
+  `docs/DASHBOARD_ARCHITECTURE.md`; não reintroduza implementação no entrypoint.
 - Firmware pode e deve ter arquivos próprios sob `firmware/`.
 - Use constantes `C_*` para cores reutilizadas.
 - Use `pygame.SRCALPHA` quando transparência for necessária.
 - Não bloqueie o loop principal com `sleep`, I/O serial ou criptografia longa.
 - Não carregue imagens, sons ou fontes externas sem decisão explícita.
 - Não mostre `ESP32 ONLINE`, `CRC ON` ou `ML-KEM ativo` sem evidência real.
-- O dashboard é a superfície da apresentação ao vivo. Mantenha como blocos
-  clicáveis apenas os comandos do roteiro didático e manual: `"ENVIAR MSG"`,
-  `"CLÁSSICA"`, `"PQC"`, `"PQC+CRC"` e `"FALHA"`. A simulação automatizada
-  (`DEMO`), controle de pausa (`PAUSA`) e exportação direta (`EXPORT`) foram
-  removidos do painel visual. O terminal textual do painel pode encaminhar
-  comandos avançados de firmware quando a placa estiver conectada, inclusive
-  bancada, inventário, debug e PQC técnico, desde que isso não vire botão ou
-  fluxo principal da apresentação.
-- O botão superior `RESULTADOS` e o onboarding fazem parte da apresentação:
-  eles devem resumir a bateria real, conclusões e próximos passos, sem iniciar
-  coletas demoradas nem adicionar comandos técnicos ao menu lateral.
-- `STRESS PQC_LOOP 500 CONFIRM` é um fechamento opcional e protegido dentro de
-  `RESULTADOS`, com confirmação explícita. Ele demonstra carga extrema de
-  ML-KEM no hardware, mas não deve virar botão lateral nem substituir as
-  métricas oficiais da bateria longa.
-- `ENVIAR MSG` e `MISSION ...` não podem simular/reproduzir métricas
-  consolidadas quando a placa não estiver conectada. A demo principal deve
-  usar resposta serial real da Wisdom; modo `--simulated` é apenas ensaio
-  visual/layout.
+- `dashboard.py` é a única superfície pública: a busca sai automaticamente por
+  `HELLO`; na abertura, `INICIAR MISSÃO` ou D27 avançam; no jogo, cartão
+  seleciona e o controle contextual ou D27 confirmam.
+  Não reintroduza painel manual, console visual, onboarding paralelo, segundo
+  entrypoint ou seletor de fluxo.
+- Produção exige a Wisdom. Não adicione fallback, fixture, tecla de D27 ou
+  métricas simuladas ao parser/CLI público.
 - Todo comando útil que não pertença à apresentação deve continuar registrado
   para uso técnico em outro lugar: `docs/hardware_command_reference.md`,
   `tools/serial_console.py --all-commands`, documentação de etapa ou scripts de
   bancada. Não apague capacidade técnica só porque ela não aparece no
   conjunto de botões; apenas separe a superfície visual da demo da superfície
   textual de engenharia.
+- Fixtures podem ser usadas somente por testes e ferramentas offline
+  explicitamente rotuladas; nunca pelo composition root em `pqc_sat/cli.py`.
 - Os logs oficiais e métricas consolidadas do projeto devem ser registrados e
   coletados exclusivamente através de baterias de testes longas e controladas
   no terminal (como `tools/final_metrics_battery.py` para resultados finais e
@@ -207,8 +243,8 @@ ML-KEM/FIPS 203.
   `aead_failures=0` e `non_aes_gcm_records=0`.
   Para repetir o aceite longo deste projeto, indique ao operador:
   `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 tools/stage8_acceptance.py --port /dev/ttyUSB0 --timeout 12 --duration 1800 --interval 30`.
-  O resumo esperado é `ok=true`, `failed=0`, `dashboard_demo_ok=true` e
-  `pqc_bench_runs=2`; depois do comando `MISSION`, também deve haver
+  O resumo esperado é `ok=true`, `failed=0` e `pqc_bench_runs=2`; depois do
+  comando `MISSION`, também deve haver
   `mission_runs>=6`.
 - Preserve alterações locais do usuário que não pertençam à tarefa.
 
@@ -272,6 +308,7 @@ Comandos mínimos antes de concluir uma alteração:
 
 ```bash
 python3 -m py_compile dashboard.py
+python3 -m compileall -q pqc_sat
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -c "import dashboard"
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -m unittest discover
 git diff --check
@@ -288,8 +325,11 @@ compilação.
 
 ## 8. Próxima ordem de trabalho
 
-1. Repetir a observação assistida do botão físico no modo estande.
-2. Executar pelo operador o gate longo descrito em `docs/stand/RUNBOOK.md`.
-3. Testar compreensão com cinco visitantes e fechar a validação final.
+1. Flashar o firmware candidato e confirmar `HELLO game=STAGED_V1` na Wisdom.
+2. Executar diagnóstico curto, observar `BUTTON_PING` com A39 e validar ordem/ID.
+3. Percorrer uma partida física completa, inclusive retry, somente com D27.
+4. Provar permanência sem avanço em cada estado e ensaiar no monitor definitivo.
+5. Executar pelo operador o gate longo descrito em `docs/stand/RUNBOOK.md`.
+6. Testar compreensão com cinco visitantes e fechar a validação final.
 
-Última revisão: 2026-07-20.
+Última revisão: 2026-07-22.

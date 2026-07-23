@@ -1,198 +1,173 @@
-# Runbook do estande SBPC — PQC-SAT
+# Runbook do jogo PQC-SAT
 
-Este guia permite montar, testar, operar e recuperar a experiência sem
-conhecer o código.
+## 1. Pré-requisitos
 
-## Material
+- notebook com Python, pygame-ce e pyserial instalados;
+- BlackBoard Wisdom conectada por USB;
+- firmware candidato com `game=STAGED_V1` já gravado;
+- D27 em repouso como `button=0` e pressionado como `button=1`;
+- A39 variando de forma observável;
+- suspensão de tela e do sistema desabilitada pelo operador.
 
-- notebook e fonte;
-- monitor externo, se disponível;
-- BlackBoard Wisdom/ESP32 com o firmware desta branch;
-- cabo USB principal e reserva;
-- filtro de linha/extensão;
-- suporte transparente para deixar botão e potenciômetro visíveis;
-- etiqueta do botão: `INICIAR / VIRAR BIT`;
-- etiqueta do potenciômetro: `ESCOLHA O BIT`;
-- velcro ou abraçadeira para aliviar tração do cabo;
-- mouse e teclado guardados, mas acessíveis ao operador;
-- cópia offline deste repositório e do vídeo de contingência.
+Não existe fallback simulado no programa do evento. Se a placa não estiver
+presente e validada, a interface não abre.
 
-Não dependa de internet, som, login, Bluetooth, celular ou rede do evento.
+Se o diagnóstico reconhecer a Wisdom mas informar firmware sem `STAGED_V1`, o
+operador deve compilar sem gravação e, depois de revisar o resultado, autorizar
+o upload explicitamente:
 
-## Checklist de abertura
+```text
+python3 tools/firmware_deploy.py
+python3 tools/firmware_deploy.py --upload
+```
 
-1. Conecte fonte e monitor.
-2. Conecte a Wisdom por USB e proteja o cabo contra tração.
-3. Desative manualmente suspensão/bloqueio de tela no sistema operacional.
-4. Confirme a porta sem abrir a aplicação:
+O segundo comando identifica a placa por `HELLO`, grava o binário e só termina
+com sucesso após o novo firmware responder `game=STAGED_V1`.
 
-   ```bash
-   python3 tools/stand_diagnostics.py --check-only --port /dev/ttyUSB0
-   ```
+## 2. Identificar a placa
 
-5. Execute o diagnóstico curto completo:
+Na raiz do repositório:
 
-   ```bash
-   python3 tools/stand_diagnostics.py --port /dev/ttyUSB0 --full
-   ```
+```text
+python3 -m serial.tools.list_ports -v
+python3 tools/stand_diagnostics.py --check-only
+```
 
-6. Confirme no relatório: `HELLO`, `STATUS`, `ANALOG POT`, duas missões e o
-   par `FAULT` com status `OK`.
-7. Inicie em tela cheia:
+O segundo comando sonda todas as portas por `HELLO`. O esperado é:
 
-   ```bash
-   ./scripts/run_stand.sh --port /dev/ttyUSB0 --restart-on-crash
-   ```
+```text
+porta selecionada: /dev/ttyUSB0
+```
 
-8. Confirme o selo verde `HARDWARE REAL — BLACKBOARD WISDOM CONECTADA`.
-9. Faça um ciclo: botão, comparação, potenciômetro, botão, conclusão.
-10. Confira que a tela volta à atração e que surgiu um JSONL em
-    `logs/stand/AAAAMMDD/`.
-11. Limpe a mesa, esconda teclado/mouse e deixe botão/potenciômetro acessíveis.
+e retorno zero após confirmar `node=PQC-SAT-WISDOM`,
+`board=BlackBoard-Wisdom`, `proto=V1`, `game=STAGED_V1` e `uptime_ms` válido.
 
-Nunca use `--simulated` por engano na abertura. O script não migra para a
-fixture automaticamente se a Wisdom faltar.
+Se houver duas Wisdoms, use:
 
-## Operação normal
+```text
+python3 tools/stand_diagnostics.py --check-only --port /dev/ttyUSB0
+```
 
-- O visitante pressiona o botão físico para iniciar.
-- O fluxo de 240/80 MHz é automático.
-- Na tela `BIT`, o visitante gira o potenciômetro e pressiona o botão.
-- O segundo ensaio usa automaticamente a mesma seleção.
-- A conclusão reinicia após 18 s ou quando o botão é pressionado.
-- Ajude verbalmente o visitante a manter o ciclo dentro de 75–100 s.
+## 3. Diagnóstico curto
 
-Fala curta:
+Sem executar bateria longa:
 
-> O baseline usa AES-GCM. No caminho pós-quântico, ML-KEM estabelece a chave e
-> AES-GCM continua cifrando. Depois você muda um bit por software: sem o
-> guardião ele passa silenciosamente neste harness; com CRC32, a mesma mudança
-> fica observável.
+```text
+python3 tools/stand_diagnostics.py --port /dev/ttyUSB0 --wait-button-seconds 30
+```
 
-## Controles administrativos
+Confirme fisicamente o D27 durante a janela. Para validar também a sequência
+transacional e rejeição de ordem:
 
-| Controle | Ação |
+```text
+python3 tools/stand_diagnostics.py --port /dev/ttyUSB0 --full --wait-button-seconds 30
+```
+
+Esse comando altera temporariamente o perfil, executa operações curtas e
+restaura o baseline. O relatório deve registrar `active_game_a39` entre
+`GAME_PROTECT` e `GAME_TRANSMIT`, com o mesmo ID chegando a `TRANSMIT`; isso
+detecta a regressão em que `ANALOG POT` apagava a sessão. O diagnóstico não
+substitui o gate longo.
+
+## 4. Abrir a interface única
+
+Tela cheia com descoberta automática:
+
+```text
+python3 dashboard.py
+```
+
+Ou com porta explícita e reinício Python após crash inesperado:
+
+```text
+python3 dashboard.py --port /dev/ttyUSB0 --restart-on-crash
+```
+
+Não há launcher Bash. O próprio Python faz descoberta, logging, loop visual e
+reinício opcional.
+
+Controles:
+
+| Entrada | Efeito |
 |---|---|
-| `Esc` | alterna tela cheia/janela |
-| `Ctrl+Q` | encerra a interface |
-| `F12` | mostra/oculta diagnóstico técnico |
-| `Home` | volta à atração sem apagar o log |
-| `R` na tela de erro | reinicia a sessão visual |
-| Espaço/Enter | representa o botão para ensaio do operador |
-| setas/PageUp/PageDown | alteram o potenciômetro apenas em `--simulated` |
+| toque/clique em cartão | seleciona ou troca a opção atual |
+| faixa verde | confirma e pode avançar a fase; em `PROTECT`, lê `ANALOG POT` antes |
+| D27 | confirma e pode avançar a fase |
+| A39 | escolhe o bit capturado no checkpoint de transmissão |
+| `Home` | aborta a sessão inteira |
+| `F12` | mostra/oculta diagnóstico administrativo |
+| `Esc` | alterna janela/tela cheia |
+| `Ctrl+Q` | encerra o programa |
 
-O visitante não precisa usar esses controles.
+O standby não possui confirmação: ele avança automaticamente após validar a
+Wisdom. A tela narrativa seguinte aceita `INICIAR MISSÃO` ou D27 e abre
+diretamente a escolha da missão em todas as partidas. Espaço e Enter não
+substituem os dois controles autorizados.
 
-## Recuperação rápida
+## 5. Smoke físico de uma partida
 
-### A interface travou ou fechou
+O script pré-seleciona cartões, mas todas as transições continuam dependendo
+do D27 físico:
 
-1. preserve o JSONL atual;
-2. encerre somente a aplicação com `Ctrl+Q` ou pelo terminal;
-3. execute novamente `./scripts/run_stand.sh --port /dev/ttyUSB0`;
-4. faça um ciclo rápido antes de chamar outro visitante.
-
-Com `--restart-on-crash`, somente saídas não zero reiniciam automaticamente;
-um encerramento normal não entra em loop.
-
-### A placa desconectou
-
-1. a tela deve ir para `ERROR` e parar de aceitar novos valores;
-2. reconecte o cabo principal ou o reserva;
-3. aguarde novo handshake; use `F12` para conferir `ready=True`;
-4. volte ao início e refaça o ciclo;
-5. não apresente resultados antigos como leitura atual.
-
-### O firmware não responde
-
-1. pressione reset físico da Wisdom;
-2. encerre a interface;
-3. rode `python3 tools/stand_diagnostics.py --port /dev/ttyUSB0 --full`;
-4. troque cabo/porta se necessário;
-5. se não recuperar, use conscientemente o fallback abaixo.
-
-### A tela externa falhou
-
-Execute em janela no notebook:
-
-```bash
-./scripts/run_stand.sh --port /dev/ttyUSB0 --windowed
+```text
+python3 tools/stand_hardware_smoke.py --port /dev/ttyUSB0 --cycles 1 --production-timings
 ```
 
-### Fallback sem hardware
+Resultado esperado: `result=PASS`, `completed_cycles=1`, transições cobrindo
+`ATTRACT` até `DEBRIEF`, respostas `GAME_*` reais e confirmações D27 no log.
+Esse smoke continua intencionalmente físico; depois dele, percorra manualmente
+outra partida pela faixa verde e confirme `ANALOG POT` no JSONL.
 
-O modo visual de contingência usa a fixture oficial e fica permanentemente
-marcado como simulado:
+## 6. Falhas comuns
 
-```bash
-./scripts/run_stand.sh --simulated
+### Nenhuma porta serial
+
+Reconecte o USB e confira:
+
+```text
+ls -l /dev/ttyUSB* /dev/ttyACM* /dev/serial/by-id/*
 ```
 
-Para exibir o vídeo offline já gerado:
+### Permissão negada
 
-```bash
-ffplay -autoexit -fs docs/stand/evidence/stand_backup_simulated.mp4
+Confira o grupo do dispositivo e do usuário. A correção persistente usual é
+adicionar o usuário ao grupo responsável pela serial e iniciar nova sessão. Não
+execute o dashboard como root.
+
+### Porta existe, mas não é aceita
+
+O programa agora mostra o motivo da sondagem. Se o retorno indicar firmware sem
+`STAGED_V1`, compile e grave o candidato conforme `firmware/README.md`; não
+mascare o problema com uma porta fixa.
+
+### Desconexão durante uma partida
+
+A missão entra em `ERROR`, descarta resultados e exige novo handshake. Reconecte
+a placa; depois use D27 ou a faixa verde para a recuperação autorizada pela
+tela. `Home` aborta administrativamente.
+
+## 7. Evidência offline, somente testes
+
+As ferramentas abaixo não fazem parte da execução pública:
+
+```text
+python3 tools/stand_soak.py --cycles 50
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 tools/capture_stand_evidence.py
+python3 tools/generate_game_evidence.py
 ```
 
-O vídeo e a fixture não são leitura atual da placa. Diga isso ao público.
+Elas usam fixture determinística e devem permanecer rotuladas como teste.
 
-## Validação longa antes do evento — executar pelo operador
+## 8. Gate longo
 
-Não execute esta validação durante atendimento ao público.
+O agente nunca inicia baterias longas. O operador executa conscientemente:
 
-1. Abra uma sessão exclusiva para o aceite, sem misturar logs de smoke ou
-   simulação:
+```text
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 tools/stage8_acceptance.py --port /dev/ttyUSB0 --timeout 12 --duration 1800 --interval 30
+```
 
-   ```bash
-   ./scripts/run_stand.sh --port /dev/ttyUSB0 \
-     --stand-log-dir logs/stand/acceptance
-   ```
-
-2. Mantenha essa mesma sessão por pelo menos 3 h: 2 h em atração contínua e
-   1 h com ciclos periódicos.
-3. Complete pelo menos 30 ciclos sem reiniciar a aplicação. Mire 34 ciclos e
-   use o botão também em `SUMMARY` para recomeçar; assim as três ações físicas
-   por ciclo alcançam naturalmente mais de 100 pressões.
-4. Registre pelo menos 100 mudanças distintas do potenciômetro. O validador
-   conta somente transições da posição de bit destacada; leituras repetidas e
-   a primeira amostra da sessão não contam como movimento.
-5. Faça dez desconexões/reconexões USB controladas entre ciclos, aguardando o
-   novo handshake antes de continuar.
-6. Encerre normalmente com `Ctrl+Q`, para registrar `session_end`.
-7. Convide cinco pessoas externas e preencha
-   `docs/stand/evidence/AUDIENCE_TEST_TEMPLATE.csv`.
-8. Valide apenas os JSONL de hardware desse diretório:
-
-   ```bash
-   python3 tools/validate_stand_logs.py \
-     logs/stand/acceptance/AAAAMMDD/*_stand_hardware_*.jsonl
-   ```
-
-O gate padrão exige modo hardware, handshake, 30 ciclos, 100 ações de botão,
-100 mudanças do potenciômetro, dez recuperações USB, três horas contínuas,
-zero erros e todos os invariantes de payload/falha. O resultado deve ser
-`PASS` em `docs/stand/evidence/hardware_acceptance_summary.json`.
-
-## Teste de compreensão
-
-Pergunte, sem induzir:
-
-1. O que o ML-KEM fez?
-2. O que o AES-GCM fez?
-3. O que o CRC32 fez?
-4. Houve radiação real?
-5. Qual foi o principal custo observado?
-
-Aceite: pelo menos 4/5 dizem que ML-KEM estabelece chave; 4/5 não atribuem
-segurança contra atacante ao CRC; 4/5 entendem que a falha foi simulada; e a
-mediana dos ciclos fica abaixo de 100 s.
-
-## Checklist de encerramento
-
-1. Encerre com `Ctrl+Q`.
-2. Confirme `session_end` no último JSONL.
-3. Copie os logs do dia para a mídia de backup.
-4. Registre incidentes e ações tomadas.
-5. Desconecte a Wisdom e guarde placa/cabos.
-6. Carregue o notebook.
-7. Antes do dia seguinte, rode novamente o diagnóstico completo.
+Depois, execute 30 partidas físicas, três horas de exposição, mais de 100
+confirmações D27, 100 mudanças A39 e dez reconexões. Inclua ciclos pelo verde,
+mas preserve a contagem física exigida. Registre zero transições sem
+confirmação e zero resultados reaproveitados. O teste de compreensão exige cinco
+visitantes e os critérios de `FINAL_VALIDATION.md`.

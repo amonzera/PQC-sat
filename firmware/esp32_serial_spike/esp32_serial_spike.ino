@@ -6,7 +6,7 @@
   - expose a reproducible inventory of the Wisdom board;
   - test every onboard feature;
   - run a small payload fault/CRC32 experiment;
-  - deliver a small mission message in CLASSIC, PQC and PQC_CRC32 modes;
+  - deliver a small mission message in CLASSIC, CLASSIC_CRC32, PQC and PQC_CRC32 modes;
   - run ML-KEM-512 through a vendored C-only mlkem-native backend.
 */
 
@@ -29,7 +29,9 @@ SET_LOOP_TASK_STACK_SIZE(32768);
 
 // ---- Protocol ---------------------------------------------------------------
 static constexpr uint32_t SERIAL_BAUD = 115200;
-static constexpr size_t MAX_FRAME_LEN = 256;
+// INVESTIGATE carries up to 96 payload bytes as hex plus the reproducible
+// incident vector. Keep this below the host's 1024-char response limit.
+static constexpr size_t MAX_FRAME_LEN = 384;
 static constexpr size_t MAX_FIELDS = 14;
 static constexpr size_t MAX_EXPERIMENT_PAYLOAD = 96;
 
@@ -148,6 +150,66 @@ static uint8_t pqc_fault_tag_dec[PQC_CONFIRM_TAG_BYTES];
 static bool pqc_keypair_ready = false;
 static bool pqc_ciphertext_ready = false;
 static bool pqc_shared_secret_ready = false;
+
+enum StagedGameState : uint8_t {
+  GAME_IDLE = 0,
+  GAME_PREPARED,
+  GAME_PROTECTED,
+  GAME_TRANSMITTED,
+  GAME_VERIFIED,
+  GAME_RETRIED,
+};
+
+struct StagedGameSession {
+  bool active;
+  StagedGameState state;
+  char id[32];
+  char profile[24];
+  char key_mode[8];
+  char guard[8];
+  char incident[20];
+  bool use_pqc;
+  bool use_app_crc;
+  uint8_t payload[MAX_EXPERIMENT_PAYLOAD];
+  size_t payload_len;
+  uint8_t protected_payload[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
+  size_t protected_len;
+  uint8_t ciphertext[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
+  uint8_t decrypted[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
+  uint8_t aes_key_enc[AES128_KEY_BYTES];
+  uint8_t aes_key_dec[AES128_KEY_BYTES];
+  uint8_t nonce[AES_GCM_NONCE_BYTES];
+  uint8_t gcm_tag[AES_GCM_TAG_BYTES];
+  uint32_t app_crc_tx;
+  uint32_t frame_crc_tx;
+  uint32_t frame_crc_rx;
+  uint8_t byte_index;
+  uint8_t bit_mask;
+  uint8_t before_byte;
+  uint8_t after_byte;
+  bool key_match;
+  bool frame_crc_match;
+  bool aead_checked;
+  bool aead_match;
+  bool app_crc_checked;
+  bool app_crc_match;
+  bool accepted;
+  char final_result[24];
+  uint32_t keygen_us;
+  uint32_t encap_us;
+  uint32_t decap_us;
+  uint32_t kdf_us;
+  uint32_t rng_us;
+  uint32_t encrypt_us;
+  uint32_t decrypt_us;
+  uint32_t protect_elapsed_us;
+  uint32_t nonce_crc32;
+  uint32_t session_key_crc32;
+};
+
+static StagedGameSession staged_game = {};
+
+static void clear_staged_game(bool restore_profile);
 
 static uint8_t pqc_kat_pk[CRYPTO_PUBLICKEYBYTES];
 static uint8_t pqc_kat_sk[CRYPTO_SECRETKEYBYTES];
@@ -1005,7 +1067,9 @@ static void poll_button_ping_event() {
   button_stable_pressed = pressed;
   if (pressed) {
     Serial.print("V1|0|EVENT|BUTTON_PING|button=1|uptime_ms=");
-    Serial.println(now);
+    Serial.print(now);
+    Serial.print("|pot=");
+    Serial.println(analogRead(PIN_POT));
   }
 }
 
@@ -1033,16 +1097,19 @@ static bool apply_profile(const char *profile_name) {
 }
 
 static void send_hello(const char *request_id) {
+  clear_staged_game(true);
   begin_result(request_id, "OK");
   print_kv("node", "PQC-SAT-WISDOM");
   print_kv("board", "BlackBoard-Wisdom");
   print_kv("proto", "V1");
+  print_kv_u32("uptime_ms", millis());
   print_kv("transport", "uart");
   print_kv("crypto", PQC_TARGET);
   print_kv("pqc", PQC_STATUS);
   print_kv("pqc_target", PQC_TARGET);
   print_kv("fault", "payload_crc32");
-  print_kv("mission", "CLASSIC,PQC,PQC_CRC32");
+  print_kv("mission", "CLASSIC,CLASSIC_CRC32,PQC,PQC_CRC32");
+  print_kv("game", "STAGED_V1");
   end_result();
 }
 
@@ -1067,7 +1134,7 @@ static void send_status(const char *request_id) {
   print_kv("pqc", PQC_STATUS);
   print_kv("pqc_target", PQC_TARGET);
   print_kv("pqc_backend", PQC_BACKEND);
-  print_kv("mission", "CLASSIC,PQC,PQC_CRC32");
+  print_kv("mission", "CLASSIC,CLASSIC_CRC32,PQC,PQC_CRC32");
   end_result();
 }
 
@@ -1135,6 +1202,30 @@ static void secure_wipe(uint8_t *data, size_t len) {
   while (len-- > 0) {
     *p++ = 0;
   }
+}
+
+static void clear_staged_game(bool restore_profile) {
+  secure_wipe(reinterpret_cast<uint8_t *>(&staged_game), sizeof(staged_game));
+  staged_game.state = GAME_IDLE;
+  // The staged flow reuses the legacy ML-KEM work buffers while it owns the
+  // serial transaction. Public material is kept only until retry/end; a full
+  // session clear removes it together with every secret-bearing buffer.
+  secure_wipe(pqc_pk, sizeof(pqc_pk));
+  secure_wipe(pqc_sk, sizeof(pqc_sk));
+  secure_wipe(pqc_ct, sizeof(pqc_ct));
+  secure_wipe(pqc_ss_enc, sizeof(pqc_ss_enc));
+  secure_wipe(pqc_ss_dec, sizeof(pqc_ss_dec));
+  secure_wipe(pqc_fault_ct, sizeof(pqc_fault_ct));
+  secure_wipe(pqc_fault_tag_enc, sizeof(pqc_fault_tag_enc));
+  secure_wipe(pqc_fault_tag_dec, sizeof(pqc_fault_tag_dec));
+  pqc_keypair_ready = false;
+  pqc_ciphertext_ready = false;
+  pqc_shared_secret_ready = false;
+  if (restore_profile && boot_cpu_mhz > 0) {
+    apply_profile("BASELINE");
+  }
+  set_main_led_rgb(0, 0, 0);
+  set_bar_percent(0);
 }
 
 static bool fill_random_bytes(uint8_t *out, size_t len) {
@@ -1248,6 +1339,268 @@ static bool mission_payload_from_fields(size_t field_count, char *fields[], uint
   memcpy(payload, MISSION_DEFAULT_PAYLOAD, default_len);
   *payload_len = default_len;
   return true;
+}
+
+static void staged_game_error(const char *request_id, const char *code, const char *detail) {
+  print_error(request_id, code, detail);
+  clear_staged_game(true);
+}
+
+static bool staged_game_matches(const char *game_id, StagedGameState expected) {
+  return staged_game.active && staged_game.state == expected && strcmp(staged_game.id, game_id) == 0;
+}
+
+static bool is_staged_game_control_command(const char *command) {
+  return strcmp(command, "GAME_BEGIN") == 0 ||
+         strcmp(command, "GAME_PROTECT") == 0 ||
+         strcmp(command, "GAME_TRANSMIT") == 0 ||
+         strcmp(command, "GAME_VERIFY") == 0 ||
+         strcmp(command, "GAME_RETRY") == 0 ||
+         strcmp(command, "GAME_END") == 0 ||
+         strcmp(command, "GAME_ABORT") == 0;
+}
+
+static bool is_staged_game_safe_read_command(
+    const char *command,
+    size_t field_count,
+    char *fields[]) {
+  // The green on-screen confirmation needs a fresh A39 sample between
+  // GAME_PROTECT and GAME_TRANSMIT. This read is side-effect free and must not
+  // clear the active transactional game or its ML-KEM/AES-GCM buffers.
+  if (strcmp(command, "ANALOG") != 0 || field_count != 4) {
+    return false;
+  }
+  uppercase_ascii(fields[3]);
+  return strcmp(fields[3], "POT") == 0;
+}
+
+static const char *staged_game_scenario() {
+  if (staged_game.use_pqc) {
+    return staged_game.use_app_crc ? "PQC_CRC32" : "PQC";
+  }
+  return staged_game.use_app_crc ? "CLASSIC_CRC32" : "CLASSIC";
+}
+
+static uint32_t staged_game_bytes_total() {
+  return static_cast<uint32_t>(staged_game.protected_len) + AES_GCM_NONCE_BYTES + AES_GCM_TAG_BYTES +
+         (staged_game.use_pqc ? CRYPTO_CIPHERTEXTBYTES : 0U) + 4U;
+}
+
+static void staged_game_aad(char *out, size_t out_len) {
+  snprintf(
+      out,
+      out_len,
+      "PQC-SAT|GAME|%s|%s|%s|v1",
+      staged_game.id,
+      staged_game.key_mode,
+      staged_game.guard);
+}
+
+static void print_staged_game_common(const char *stage, const char *result, uint32_t elapsed_us) {
+  print_kv("game_id", staged_game.id);
+  print_kv("stage", stage);
+  print_kv("profile", staged_game.profile);
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  print_kv("key_mode", staged_game.key_mode);
+  print_kv("guard", staged_game.guard);
+  print_kv("result", result);
+  print_kv_u32("elapsed_us", elapsed_us > 0 ? elapsed_us : 1U);
+  print_kv_u32("bytes_payload", staged_game.payload_len);
+  print_kv_u32("bytes_total", staged_game_bytes_total());
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
+}
+
+static void wipe_staged_game_secrets() {
+  secure_wipe(staged_game.aes_key_enc, sizeof(staged_game.aes_key_enc));
+  secure_wipe(staged_game.aes_key_dec, sizeof(staged_game.aes_key_dec));
+  secure_wipe(pqc_sk, sizeof(pqc_sk));
+  secure_wipe(pqc_ss_enc, sizeof(pqc_ss_enc));
+  secure_wipe(pqc_ss_dec, sizeof(pqc_ss_dec));
+  pqc_keypair_ready = false;
+  pqc_shared_secret_ready = false;
+}
+
+static bool build_staged_game_protection() {
+  memset(staged_game.ciphertext, 0, sizeof(staged_game.ciphertext));
+  memset(staged_game.decrypted, 0, sizeof(staged_game.decrypted));
+  memset(staged_game.aes_key_enc, 0, sizeof(staged_game.aes_key_enc));
+  memset(staged_game.aes_key_dec, 0, sizeof(staged_game.aes_key_dec));
+  memset(staged_game.nonce, 0, sizeof(staged_game.nonce));
+  memset(staged_game.gcm_tag, 0, sizeof(staged_game.gcm_tag));
+  staged_game.keygen_us = 0;
+  staged_game.encap_us = 0;
+  staged_game.decap_us = 0;
+  staged_game.kdf_us = 0;
+  staged_game.rng_us = 0;
+  staged_game.encrypt_us = 0;
+  staged_game.decrypt_us = 0;
+  staged_game.key_match = true;
+  const uint32_t started = micros();
+
+  if (staged_game.use_pqc) {
+    uint32_t op_started = micros();
+    int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
+    staged_game.keygen_us = micros() - op_started;
+    if (rc != 0) {
+      return false;
+    }
+    op_started = micros();
+    rc = crypto_kem_enc(pqc_ct, pqc_ss_enc, pqc_pk);
+    staged_game.encap_us = micros() - op_started;
+    if (rc != 0) {
+      return false;
+    }
+    op_started = micros();
+    rc = crypto_kem_dec(pqc_ss_dec, pqc_ct, pqc_sk);
+    staged_game.decap_us = micros() - op_started;
+    if (rc != 0) {
+      return false;
+    }
+    staged_game.key_match = pqc_shared_secrets_match(pqc_ss_enc, pqc_ss_dec);
+    op_started = micros();
+    const char *scenario = staged_game_scenario();
+    const bool key_a = derive_mission_aes128_key(pqc_ss_enc, CRYPTO_BYTES, scenario, staged_game.aes_key_enc);
+    const bool key_b = derive_mission_aes128_key(pqc_ss_dec, CRYPTO_BYTES, scenario, staged_game.aes_key_dec);
+    staged_game.kdf_us = micros() - op_started;
+    if (!key_a || !key_b || !staged_game.key_match) {
+      return false;
+    }
+    pqc_keypair_ready = true;
+    pqc_ciphertext_ready = true;
+    pqc_shared_secret_ready = true;
+  } else {
+    const uint32_t op_started = micros();
+    if (!fill_random_bytes(staged_game.aes_key_enc, sizeof(staged_game.aes_key_enc))) {
+      return false;
+    }
+    memcpy(staged_game.aes_key_dec, staged_game.aes_key_enc, sizeof(staged_game.aes_key_dec));
+    staged_game.rng_us += micros() - op_started;
+  }
+
+  const uint32_t nonce_started = micros();
+  if (!fill_random_bytes(staged_game.nonce, sizeof(staged_game.nonce))) {
+    return false;
+  }
+  staged_game.rng_us += micros() - nonce_started;
+  staged_game.nonce_crc32 = crc32_bytes(staged_game.nonce, sizeof(staged_game.nonce));
+  staged_game.session_key_crc32 = crc32_bytes(staged_game.aes_key_enc, sizeof(staged_game.aes_key_enc));
+
+  char aad[112];
+  staged_game_aad(aad, sizeof(aad));
+  const uint32_t encrypt_started = micros();
+  const bool encrypt_ok = aes128_gcm_encrypt(
+      staged_game.aes_key_enc,
+      staged_game.nonce,
+      reinterpret_cast<const uint8_t *>(aad),
+      strlen(aad),
+      staged_game.protected_payload,
+      staged_game.protected_len,
+      staged_game.ciphertext,
+      staged_game.gcm_tag);
+  staged_game.encrypt_us = micros() - encrypt_started;
+  staged_game.protect_elapsed_us = micros() - started;
+  return encrypt_ok;
+}
+
+static bool transmit_staged_game_incident(const char *incident) {
+  char aad[112];
+  staged_game_aad(aad, sizeof(aad));
+  uint8_t frame[112 + CRYPTO_CIPHERTEXTBYTES + AES_GCM_NONCE_BYTES + MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES + AES_GCM_TAG_BYTES];
+  size_t frame_len = 0;
+  memcpy(&frame[frame_len], aad, strlen(aad));
+  frame_len += strlen(aad);
+  if (staged_game.use_pqc) {
+    memcpy(&frame[frame_len], pqc_ct, CRYPTO_CIPHERTEXTBYTES);
+    frame_len += CRYPTO_CIPHERTEXTBYTES;
+  }
+  memcpy(&frame[frame_len], staged_game.nonce, sizeof(staged_game.nonce));
+  frame_len += sizeof(staged_game.nonce);
+  const size_t cipher_offset = frame_len;
+  memcpy(&frame[frame_len], staged_game.ciphertext, staged_game.protected_len);
+  frame_len += staged_game.protected_len;
+  memcpy(&frame[frame_len], staged_game.gcm_tag, sizeof(staged_game.gcm_tag));
+  frame_len += sizeof(staged_game.gcm_tag);
+
+  staged_game.frame_crc_tx = crc32_bytes(frame, frame_len);
+  staged_game.frame_crc_rx = staged_game.frame_crc_tx;
+  staged_game.before_byte = staged_game.ciphertext[staged_game.byte_index];
+  staged_game.after_byte = staged_game.before_byte;
+  const bool mutate_frame = strcmp(incident, "CHANNEL_BITFLIP") == 0 || strcmp(incident, "TAMPER") == 0;
+  if (mutate_frame) {
+    staged_game.ciphertext[staged_game.byte_index] ^= staged_game.bit_mask;
+    staged_game.after_byte = staged_game.ciphertext[staged_game.byte_index];
+    frame[cipher_offset + staged_game.byte_index] ^= staged_game.bit_mask;
+    staged_game.frame_crc_rx = crc32_bytes(frame, frame_len);
+    if (strcmp(incident, "TAMPER") == 0) {
+      staged_game.frame_crc_tx = staged_game.frame_crc_rx;
+    }
+  }
+  staged_game.frame_crc_match = staged_game.frame_crc_tx == staged_game.frame_crc_rx;
+  return true;
+}
+
+static bool verify_staged_game_incident(const char *incident) {
+  char aad[112];
+  staged_game_aad(aad, sizeof(aad));
+  memset(staged_game.decrypted, 0, sizeof(staged_game.decrypted));
+  const uint32_t decrypt_started = micros();
+  const bool decrypt_ok = aes128_gcm_decrypt(
+      staged_game.aes_key_dec,
+      staged_game.nonce,
+      reinterpret_cast<const uint8_t *>(aad),
+      strlen(aad),
+      staged_game.ciphertext,
+      staged_game.protected_len,
+      staged_game.gcm_tag,
+      staged_game.decrypted);
+  staged_game.decrypt_us = micros() - decrypt_started;
+  staged_game.aead_checked = true;
+  staged_game.aead_match = decrypt_ok;
+
+  if (strcmp(incident, "RX_MEMORY") == 0 && decrypt_ok) {
+    staged_game.before_byte = staged_game.decrypted[staged_game.byte_index];
+    staged_game.decrypted[staged_game.byte_index] ^= staged_game.bit_mask;
+    staged_game.after_byte = staged_game.decrypted[staged_game.byte_index];
+  }
+  staged_game.app_crc_checked = staged_game.use_app_crc && decrypt_ok;
+  staged_game.app_crc_match = false;
+  if (staged_game.app_crc_checked) {
+    const uint32_t calculated = crc32_bytes(staged_game.decrypted, staged_game.payload_len);
+    const uint32_t stored = read_u32_be(&staged_game.decrypted[staged_game.payload_len]);
+    staged_game.app_crc_match = calculated == stored;
+  }
+  staged_game.accepted = staged_game.frame_crc_match && staged_game.aead_match &&
+                         (!staged_game.use_app_crc || staged_game.app_crc_match);
+  if (strcmp(incident, "CHANNEL_BITFLIP") == 0) {
+    snprintf(staged_game.final_result, sizeof(staged_game.final_result), "FRAME_REJECT");
+  } else if (strcmp(incident, "TAMPER") == 0) {
+    snprintf(staged_game.final_result, sizeof(staged_game.final_result), "AUTH_REJECT");
+  } else if (strcmp(incident, "RX_MEMORY") == 0) {
+    snprintf(
+        staged_game.final_result,
+        sizeof(staged_game.final_result),
+        "%s",
+        staged_game.use_app_crc ? "APP_REJECT" : "SILENT_CORRUPTION");
+  } else {
+    snprintf(staged_game.final_result, sizeof(staged_game.final_result), "DELIVERED");
+  }
+  const bool expected_acceptance = strcmp(incident, "NORMAL") == 0 ||
+                                   (strcmp(incident, "RX_MEMORY") == 0 && !staged_game.use_app_crc);
+  return staged_game.accepted == expected_acceptance;
+}
+
+static void print_staged_game_verification(const char *stage, uint32_t elapsed_us) {
+  print_staged_game_common(stage, staged_game.final_result, elapsed_us);
+  print_kv_u32("byte_index", staged_game.byte_index);
+  print_kv_hex_u8("bit_mask", staged_game.bit_mask);
+  print_kv_bool("frame_crc_match", staged_game.frame_crc_match);
+  print_kv_bool("aead_checked", staged_game.aead_checked);
+  print_kv_bool("aead_match", staged_game.aead_match);
+  print_kv_bool("app_crc_present", staged_game.use_app_crc);
+  print_kv_bool("app_crc_checked", staged_game.app_crc_checked);
+  print_kv_bool("app_crc_match", staged_game.app_crc_match);
+  print_kv_bool("accepted", staged_game.accepted);
 }
 
 static void print_pqc_sizes() {
@@ -1666,7 +2019,7 @@ static void handle_stress(const char *request_id, size_t field_count, char *fiel
 
 static void handle_mission(const char *request_id, size_t field_count, char *fields[]) {
   if (field_count < 4 || field_count > 5) {
-    print_error(request_id, "BAD_ARGS", "expected_CLASSIC_PQC_PQC_CRC32_payloadhex");
+    print_error(request_id, "BAD_ARGS", "expected_CLASSIC_CLASSIC_CRC32_PQC_PQC_CRC32_payloadhex");
     return;
   }
 
@@ -1676,7 +2029,7 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   const bool scenario_pqc = strcmp(fields[3], "PQC") == 0;
   const bool scenario_pqc_crc = strcmp(fields[3], "PQC_CRC32") == 0 || strcmp(fields[3], "PQC+CRC32") == 0;
   if (!scenario_classic && !scenario_classic_crc && !scenario_pqc && !scenario_pqc_crc) {
-    print_error(request_id, "BAD_SCENARIO", "expected_CLASSIC_PQC_PQC_CRC32");
+    print_error(request_id, "BAD_SCENARIO", "expected_CLASSIC_CLASSIC_CRC32_PQC_PQC_CRC32");
     return;
   }
 
@@ -1902,6 +2255,544 @@ static void handle_mission(const char *request_id, size_t field_count, char *fie
   print_kv_u32("min_heap", ESP.getMinFreeHeap());
   print_kv("profile", active_profile);
   print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  end_result();
+}
+
+static void handle_game_begin(const char *request_id, size_t field_count, char *fields[]) {
+  clear_staged_game(true);
+  if (field_count != 9) {
+    staged_game_error(request_id, "BAD_ARGS", "expected_id_profile_keymode_guard_incident_payloadhex");
+    return;
+  }
+  uppercase_ascii(fields[4]);
+  uppercase_ascii(fields[5]);
+  uppercase_ascii(fields[6]);
+  uppercase_ascii(fields[7]);
+  if (!is_token_safe(fields[3]) || strlen(fields[3]) >= sizeof(staged_game.id)) {
+    staged_game_error(request_id, "BAD_GAME_ID", "expected_safe_id_up_to_31_chars");
+    return;
+  }
+  const bool key_classic = strcmp(fields[5], "CLASSIC") == 0;
+  const bool key_pqc = strcmp(fields[5], "PQC") == 0;
+  const bool guard_none = strcmp(fields[6], "NONE") == 0;
+  const bool guard_crc = strcmp(fields[6], "CRC32") == 0;
+  const bool incident_valid = strcmp(fields[7], "NORMAL") == 0 ||
+                              strcmp(fields[7], "CHANNEL_BITFLIP") == 0 ||
+                              strcmp(fields[7], "TAMPER") == 0 ||
+                              strcmp(fields[7], "RX_MEMORY") == 0;
+  if ((!key_classic && !key_pqc) || (!guard_none && !guard_crc) || !incident_valid) {
+    staged_game_error(request_id, "BAD_ARGS", "expected_CLASSIC_or_PQC_NONE_or_CRC32_valid_incident");
+    return;
+  }
+  if (!apply_profile(fields[4])) {
+    staged_game_error(request_id, "BAD_PROFILE", "unsupported_or_rejected");
+    return;
+  }
+  const uint32_t started = micros();
+  if (!parse_hex_payload(
+          fields[8],
+          staged_game.payload,
+          sizeof(staged_game.payload),
+          &staged_game.payload_len)) {
+    staged_game_error(request_id, "BAD_PAYLOAD", "expected_even_hex_payload_up_to_96_bytes");
+    return;
+  }
+  snprintf(staged_game.id, sizeof(staged_game.id), "%s", fields[3]);
+  snprintf(staged_game.profile, sizeof(staged_game.profile), "%s", fields[4]);
+  snprintf(staged_game.key_mode, sizeof(staged_game.key_mode), "%s", fields[5]);
+  snprintf(staged_game.guard, sizeof(staged_game.guard), "%s", fields[6]);
+  snprintf(staged_game.incident, sizeof(staged_game.incident), "%s", fields[7]);
+  staged_game.use_pqc = key_pqc;
+  staged_game.use_app_crc = guard_crc;
+  staged_game.protected_len = staged_game.payload_len + (guard_crc ? MISSION_CRC_BYTES : 0U);
+  memcpy(staged_game.protected_payload, staged_game.payload, staged_game.payload_len);
+  staged_game.app_crc_tx = 0;
+  if (guard_crc) {
+    staged_game.app_crc_tx = crc32_bytes(staged_game.payload, staged_game.payload_len);
+    write_u32_be(&staged_game.protected_payload[staged_game.payload_len], staged_game.app_crc_tx);
+  }
+  staged_game.active = true;
+  staged_game.state = GAME_PREPARED;
+  set_main_led_rgb(0, 80, 255);
+  set_bar_percent(20);
+
+  begin_result(request_id, "OK");
+  print_staged_game_common("PREPARE", "READY", micros() - started);
+  print_kv_u32("bytes_protected", staged_game.protected_len);
+  print_kv_bool("app_crc_present", staged_game.use_app_crc);
+  print_kv_hex_u32("app_crc_tx", staged_game.app_crc_tx);
+  print_kv_hex_u32("payload_crc32", crc32_bytes(staged_game.payload, staged_game.payload_len));
+  end_result();
+}
+
+static void handle_game_protect(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 4 || !staged_game_matches(fields[3], GAME_PREPARED)) {
+    staged_game_error(request_id, "BAD_GAME_STATE", "GAME_PROTECT_requires_matching_PREPARE");
+    return;
+  }
+  set_main_led_rgb(staged_game.use_pqc ? 180 : 0, 0, staged_game.use_pqc ? 255 : 220);
+  set_bar_percent(45);
+  if (!build_staged_game_protection()) {
+    staged_game_error(request_id, "GAME_PROTECT_FAILED", "key_or_aes_gcm_setup");
+    return;
+  }
+  staged_game.state = GAME_PROTECTED;
+  set_main_led_rgb(0, 220, 255);
+  set_bar_percent(60);
+  begin_result(request_id, "OK");
+  print_staged_game_common("PROTECT", "PROTECTED", staged_game.protect_elapsed_us);
+  print_kv_bool("key_match", staged_game.key_match);
+  print_kv_bool("aead_ready", true);
+  print_kv_hex_u32("nonce_crc32", staged_game.nonce_crc32);
+  print_kv_hex_u32("session_key_crc32", staged_game.session_key_crc32);
+  print_kv_u32("keygen_us", staged_game.keygen_us);
+  print_kv_u32("encap_us", staged_game.encap_us);
+  print_kv_u32("decap_us", staged_game.decap_us);
+  print_kv_u32("kdf_us", staged_game.kdf_us);
+  print_kv_u32("rng_us", staged_game.rng_us);
+  print_kv_u32("encrypt_us", staged_game.encrypt_us);
+  end_result();
+}
+
+static void handle_game_transmit(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 6 || !staged_game_matches(fields[3], GAME_PROTECTED)) {
+    staged_game_error(request_id, "BAD_GAME_STATE", "GAME_TRANSMIT_requires_matching_PROTECT");
+    return;
+  }
+  int byte_index = 0;
+  uint8_t bit_mask = 0;
+  if (!parse_int_range(fields[4], 0, static_cast<int>(staged_game.payload_len) - 1, &byte_index) ||
+      !parse_u8_auto(fields[5], &bit_mask) || !is_single_bit_mask(bit_mask)) {
+    staged_game_error(request_id, "BAD_FAULT_VECTOR", "expected_payload_index_and_single_bit_mask");
+    return;
+  }
+  const uint32_t started = micros();
+  staged_game.byte_index = static_cast<uint8_t>(byte_index);
+  staged_game.bit_mask = bit_mask;
+  set_main_led_rgb(255, 255, 255);
+  set_bar_percent(78);
+  if (!transmit_staged_game_incident(staged_game.incident)) {
+    staged_game_error(request_id, "GAME_TRANSMIT_FAILED", "frame_construction");
+    return;
+  }
+  staged_game.state = GAME_TRANSMITTED;
+  begin_result(request_id, "OK");
+  print_staged_game_common("TRANSMIT", "IN_FLIGHT", micros() - started);
+  print_kv_u32("byte_index", staged_game.byte_index);
+  print_kv_hex_u8("bit_mask", staged_game.bit_mask);
+  print_kv_hex_u32("frame_crc_tx", staged_game.frame_crc_tx);
+  print_kv_hex_u32("frame_crc_rx", staged_game.frame_crc_rx);
+  print_kv_bool("frame_crc_match", staged_game.frame_crc_match);
+  end_result();
+}
+
+static void handle_game_verify(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 4 || !staged_game_matches(fields[3], GAME_TRANSMITTED)) {
+    staged_game_error(request_id, "BAD_GAME_STATE", "GAME_VERIFY_requires_matching_TRANSMIT");
+    return;
+  }
+  const uint32_t started = micros();
+  if (!verify_staged_game_incident(staged_game.incident)) {
+    staged_game_error(request_id, "INTERNAL_CONTRADICTION", "verification_truth_table");
+    return;
+  }
+  staged_game.state = GAME_VERIFIED;
+  if (staged_game.accepted) {
+    set_main_led_rgb(0, 255, 100);
+  } else {
+    set_main_led_rgb(255, 20, 40);
+  }
+  set_bar_percent(100);
+  begin_result(request_id, "OK");
+  print_staged_game_verification("VERIFY", micros() - started);
+  print_kv_u32("decrypt_us", staged_game.decrypt_us);
+  end_result();
+  wipe_staged_game_secrets();
+}
+
+static void handle_game_retry(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 4 || !staged_game_matches(fields[3], GAME_VERIFIED)) {
+    staged_game_error(request_id, "BAD_GAME_STATE", "GAME_RETRY_requires_matching_VERIFY");
+    return;
+  }
+  const uint32_t old_nonce_crc32 = staged_game.nonce_crc32;
+  const uint32_t old_key_crc32 = staged_game.session_key_crc32;
+  const uint32_t payload_crc_before = crc32_bytes(staged_game.payload, staged_game.payload_len);
+  const uint32_t started = micros();
+  set_main_led_rgb(0, 130, 255);
+  set_bar_percent(35);
+  if (!build_staged_game_protection()) {
+    staged_game_error(request_id, "GAME_RETRY_FAILED", "fresh_protection");
+    return;
+  }
+  const bool fresh_nonce = staged_game.nonce_crc32 != old_nonce_crc32;
+  const bool fresh_key = staged_game.session_key_crc32 != old_key_crc32;
+  if (!fresh_nonce || !fresh_key || !transmit_staged_game_incident("NORMAL") ||
+      !verify_staged_game_incident("NORMAL")) {
+    staged_game_error(request_id, "GAME_RETRY_FAILED", "freshness_or_delivery");
+    return;
+  }
+  const bool same_payload = payload_crc_before == crc32_bytes(staged_game.payload, staged_game.payload_len);
+  staged_game.state = GAME_RETRIED;
+  set_main_led_rgb(0, 255, 100);
+  set_bar_percent(100);
+  begin_result(request_id, "OK");
+  print_staged_game_verification("RETRY", micros() - started);
+  print_kv_bool("same_payload", same_payload);
+  print_kv_bool("fresh_key", fresh_key);
+  print_kv_bool("fresh_nonce", fresh_nonce);
+  print_kv_hex_u32("nonce_crc32", staged_game.nonce_crc32);
+  print_kv_hex_u32("session_key_crc32", staged_game.session_key_crc32);
+  end_result();
+  wipe_staged_game_secrets();
+}
+
+static void handle_game_end(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 5 || !staged_game.active || strcmp(fields[3], staged_game.id) != 0 ||
+      (staged_game.state != GAME_VERIFIED && staged_game.state != GAME_RETRIED)) {
+    staged_game_error(request_id, "BAD_GAME_STATE", "GAME_END_requires_matching_VERIFY_or_RETRY");
+    return;
+  }
+  uppercase_ascii(fields[4]);
+  const bool accept = strcmp(fields[4], "ACCEPT") == 0;
+  const bool safe_mode = strcmp(fields[4], "SAFE_MODE") == 0;
+  if (!accept && !safe_mode) {
+    staged_game_error(request_id, "BAD_DECISION", "expected_ACCEPT_or_SAFE_MODE");
+    return;
+  }
+  if (accept && staged_game.state == GAME_VERIFIED &&
+      (strcmp(staged_game.final_result, "FRAME_REJECT") == 0 ||
+       strcmp(staged_game.final_result, "AUTH_REJECT") == 0 ||
+       strcmp(staged_game.final_result, "APP_REJECT") == 0)) {
+    staged_game_error(request_id, "BAD_DECISION", "cryptographically_rejected_packet_cannot_be_accepted");
+    return;
+  }
+  char game_id[sizeof(staged_game.id)];
+  char final_result[sizeof(staged_game.final_result)];
+  snprintf(game_id, sizeof(game_id), "%s", staged_game.id);
+  snprintf(final_result, sizeof(final_result), "%s", staged_game.final_result);
+  char decision[12];
+  snprintf(decision, sizeof(decision), "%s", fields[4]);
+  clear_staged_game(true);
+  begin_result(request_id, "OK");
+  print_kv("game_id", game_id);
+  print_kv("stage", "END");
+  print_kv("decision", decision);
+  print_kv("final_result", final_result);
+  print_kv_bool("session_cleared", true);
+  print_kv("restored_profile", active_profile);
+  print_kv_u32("restored_mhz", ESP.getCpuFreqMHz());
+  end_result();
+}
+
+static void handle_game_abort(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 4 || !staged_game.active || strcmp(fields[3], staged_game.id) != 0) {
+    staged_game_error(request_id, "BAD_GAME_STATE", "GAME_ABORT_requires_matching_active_session");
+    return;
+  }
+  char game_id[sizeof(staged_game.id)];
+  snprintf(game_id, sizeof(game_id), "%s", staged_game.id);
+  clear_staged_game(true);
+  begin_result(request_id, "OK");
+  print_kv("game_id", game_id);
+  print_kv("stage", "ABORT");
+  print_kv_bool("session_cleared", true);
+  print_kv("restored_profile", active_profile);
+  print_kv_u32("restored_mhz", ESP.getCpuFreqMHz());
+  end_result();
+}
+
+static void handle_investigate(const char *request_id, size_t field_count, char *fields[]) {
+  if (field_count != 9) {
+    print_error(request_id, "BAD_ARGS", "expected_scenario_incident_payload_index_mask_incidentid");
+    return;
+  }
+
+  uppercase_ascii(fields[3]);
+  uppercase_ascii(fields[4]);
+  const bool scenario_classic = strcmp(fields[3], "CLASSIC") == 0;
+  const bool scenario_classic_crc = strcmp(fields[3], "CLASSIC_CRC32") == 0;
+  const bool scenario_pqc = strcmp(fields[3], "PQC") == 0;
+  const bool scenario_pqc_crc = strcmp(fields[3], "PQC_CRC32") == 0;
+  if (!scenario_classic && !scenario_classic_crc && !scenario_pqc && !scenario_pqc_crc) {
+    print_error(request_id, "BAD_SCENARIO", "expected_CLASSIC_CLASSIC_CRC32_PQC_PQC_CRC32");
+    return;
+  }
+  const bool incident_normal = strcmp(fields[4], "NORMAL") == 0;
+  const bool incident_channel = strcmp(fields[4], "CHANNEL_BITFLIP") == 0;
+  const bool incident_tamper = strcmp(fields[4], "TAMPER") == 0;
+  const bool incident_memory = strcmp(fields[4], "RX_MEMORY") == 0;
+  if (!incident_normal && !incident_channel && !incident_tamper && !incident_memory) {
+    print_error(request_id, "BAD_INCIDENT", "expected_NORMAL_CHANNEL_BITFLIP_TAMPER_RX_MEMORY");
+    return;
+  }
+  if (!is_token_safe(fields[8]) || strlen(fields[8]) > 63U) {
+    print_error(request_id, "BAD_INCIDENT_ID", "expected_safe_token_up_to_63_chars");
+    return;
+  }
+
+  uint8_t payload[MAX_EXPERIMENT_PAYLOAD];
+  size_t payload_len = 0;
+  if (!parse_hex_payload(fields[5], payload, sizeof(payload), &payload_len)) {
+    print_error(request_id, "BAD_PAYLOAD", "expected_even_hex_payload");
+    return;
+  }
+  int byte_index = 0;
+  if (!parse_int_range(fields[6], 0, static_cast<int>(payload_len) - 1, &byte_index)) {
+    print_error(request_id, "BAD_INDEX", "outside_payload");
+    return;
+  }
+  uint8_t bit_mask = 0;
+  if (!parse_u8_auto(fields[7], &bit_mask) || !is_single_bit_mask(bit_mask)) {
+    print_error(request_id, "BAD_MASK", "expected_single_bit");
+    return;
+  }
+
+  const bool use_pqc = scenario_pqc || scenario_pqc_crc;
+  const bool use_app_crc = scenario_classic_crc || scenario_pqc_crc;
+  const char *scenario = scenario_pqc_crc ? "PQC_CRC32" :
+                         (scenario_pqc ? "PQC" : (scenario_classic_crc ? "CLASSIC_CRC32" : "CLASSIC"));
+  const char *incident = fields[4];
+  const size_t protected_len = payload_len + (use_app_crc ? MISSION_CRC_BYTES : 0U);
+  const uint32_t started = micros();
+  set_main_led_rgb(0, 80, 255);
+  set_bar_percent(10);
+
+  uint8_t protected_payload[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
+  uint8_t ciphertext[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
+  uint8_t decrypted[MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES];
+  uint8_t aes_key_enc[AES128_KEY_BYTES];
+  uint8_t aes_key_dec[AES128_KEY_BYTES];
+  uint8_t nonce[AES_GCM_NONCE_BYTES];
+  uint8_t gcm_tag[AES_GCM_TAG_BYTES];
+  uint8_t frame[112 + CRYPTO_CIPHERTEXTBYTES + AES_GCM_NONCE_BYTES + MAX_EXPERIMENT_PAYLOAD + MISSION_CRC_BYTES + AES_GCM_TAG_BYTES];
+  memset(protected_payload, 0, sizeof(protected_payload));
+  memset(ciphertext, 0, sizeof(ciphertext));
+  memset(decrypted, 0, sizeof(decrypted));
+  memset(aes_key_enc, 0, sizeof(aes_key_enc));
+  memset(aes_key_dec, 0, sizeof(aes_key_dec));
+  memset(nonce, 0, sizeof(nonce));
+  memset(gcm_tag, 0, sizeof(gcm_tag));
+  memcpy(protected_payload, payload, payload_len);
+
+  uint32_t app_crc_tx = 0;
+  uint32_t app_crc_rx = 0;
+  if (use_app_crc) {
+    set_main_led_rgb(255, 180, 0);
+    app_crc_tx = crc32_bytes(payload, payload_len);
+    write_u32_be(&protected_payload[payload_len], app_crc_tx);
+  }
+
+  bool key_match = true;
+  uint32_t keygen_us = 0;
+  uint32_t encap_us = 0;
+  uint32_t decap_us = 0;
+  uint32_t kdf_us = 0;
+  uint32_t rng_us = 0;
+  if (use_pqc) {
+    set_main_led_rgb(180, 0, 255);
+    set_bar_percent(35);
+    uint32_t op_started = micros();
+    int rc = crypto_kem_keypair(pqc_pk, pqc_sk);
+    keygen_us = micros() - op_started;
+    if (rc != 0) {
+      print_pqc_error_result(request_id, "investigate_keygen", rc, micros() - started);
+      return;
+    }
+    op_started = micros();
+    rc = crypto_kem_enc(pqc_ct, pqc_ss_enc, pqc_pk);
+    encap_us = micros() - op_started;
+    if (rc != 0) {
+      print_pqc_error_result(request_id, "investigate_encap", rc, micros() - started);
+      return;
+    }
+    op_started = micros();
+    rc = crypto_kem_dec(pqc_ss_dec, pqc_ct, pqc_sk);
+    decap_us = micros() - op_started;
+    if (rc != 0) {
+      print_pqc_error_result(request_id, "investigate_decap", rc, micros() - started);
+      return;
+    }
+    key_match = pqc_shared_secrets_match(pqc_ss_enc, pqc_ss_dec);
+    op_started = micros();
+    const bool key_a = derive_mission_aes128_key(pqc_ss_enc, CRYPTO_BYTES, scenario, aes_key_enc);
+    const bool key_b = derive_mission_aes128_key(pqc_ss_dec, CRYPTO_BYTES, scenario, aes_key_dec);
+    kdf_us = micros() - op_started;
+    if (!key_a || !key_b) {
+      secure_wipe(aes_key_enc, sizeof(aes_key_enc));
+      secure_wipe(aes_key_dec, sizeof(aes_key_dec));
+      print_error(request_id, "AEAD_KDF_FAILED", "investigation_key_derivation");
+      return;
+    }
+  } else {
+    uint32_t op_started = micros();
+    if (!fill_random_bytes(aes_key_enc, sizeof(aes_key_enc))) {
+      print_error(request_id, "RNG_FAILED", "classic_session_key");
+      return;
+    }
+    memcpy(aes_key_dec, aes_key_enc, sizeof(aes_key_dec));
+    rng_us += micros() - op_started;
+  }
+
+  uint32_t op_started = micros();
+  if (!fill_random_bytes(nonce, sizeof(nonce))) {
+    secure_wipe(aes_key_enc, sizeof(aes_key_enc));
+    secure_wipe(aes_key_dec, sizeof(aes_key_dec));
+    print_error(request_id, "RNG_FAILED", "gcm_nonce");
+    return;
+  }
+  rng_us += micros() - op_started;
+
+  char aad[112];
+  snprintf(aad, sizeof(aad), "PQC-SAT|INVESTIGATE|%s|%s|v1", scenario, incident);
+  set_main_led_rgb(0, 220, 255);
+  set_bar_percent(60);
+  op_started = micros();
+  const bool encrypt_ok = aes128_gcm_encrypt(
+      aes_key_enc,
+      nonce,
+      reinterpret_cast<const uint8_t *>(aad),
+      strlen(aad),
+      protected_payload,
+      protected_len,
+      ciphertext,
+      gcm_tag);
+  const uint32_t encrypt_us = micros() - op_started;
+  if (!encrypt_ok) {
+    secure_wipe(aes_key_enc, sizeof(aes_key_enc));
+    secure_wipe(aes_key_dec, sizeof(aes_key_dec));
+    print_error(request_id, "AEAD_ENCRYPT_FAILED", "investigation_encrypt");
+    return;
+  }
+
+  size_t frame_len = 0;
+  memcpy(&frame[frame_len], aad, strlen(aad));
+  frame_len += strlen(aad);
+  if (use_pqc) {
+    memcpy(&frame[frame_len], pqc_ct, CRYPTO_CIPHERTEXTBYTES);
+    frame_len += CRYPTO_CIPHERTEXTBYTES;
+  }
+  memcpy(&frame[frame_len], nonce, sizeof(nonce));
+  frame_len += sizeof(nonce);
+  const size_t frame_cipher_offset = frame_len;
+  memcpy(&frame[frame_len], ciphertext, protected_len);
+  frame_len += protected_len;
+  memcpy(&frame[frame_len], gcm_tag, sizeof(gcm_tag));
+  frame_len += sizeof(gcm_tag);
+  const uint32_t frame_crc_original = crc32_bytes(frame, frame_len);
+  uint32_t frame_crc_tx = frame_crc_original;
+  uint32_t frame_crc_rx = frame_crc_original;
+  uint8_t before_byte = payload[byte_index];
+  uint8_t after_byte = before_byte;
+
+  set_main_led_rgb(255, 255, 255);
+  set_bar_percent(78);
+  if (incident_channel || incident_tamper) {
+    before_byte = ciphertext[byte_index];
+    ciphertext[byte_index] ^= bit_mask;
+    after_byte = ciphertext[byte_index];
+    frame[frame_cipher_offset + static_cast<size_t>(byte_index)] ^= bit_mask;
+    frame_crc_rx = crc32_bytes(frame, frame_len);
+    if (incident_tamper) {
+      frame_crc_tx = frame_crc_rx;
+    }
+  }
+  const bool frame_crc_match = frame_crc_tx == frame_crc_rx;
+
+  op_started = micros();
+  const bool decrypt_ok = aes128_gcm_decrypt(
+      aes_key_dec,
+      nonce,
+      reinterpret_cast<const uint8_t *>(aad),
+      strlen(aad),
+      ciphertext,
+      protected_len,
+      gcm_tag,
+      decrypted);
+  const uint32_t decrypt_us = micros() - op_started;
+  const bool aead_checked = true;
+  const bool aead_match = decrypt_ok;
+
+  if (incident_memory && decrypt_ok) {
+    before_byte = decrypted[byte_index];
+    decrypted[byte_index] ^= bit_mask;
+    after_byte = decrypted[byte_index];
+  }
+
+  const bool app_crc_present = use_app_crc;
+  const bool app_crc_checked = use_app_crc && decrypt_ok;
+  bool app_crc_match = false;
+  if (app_crc_checked) {
+    app_crc_rx = crc32_bytes(decrypted, payload_len);
+    const uint32_t stored_crc = read_u32_be(&decrypted[payload_len]);
+    app_crc_match = app_crc_rx == stored_crc;
+  }
+
+  const bool accepted = frame_crc_match && aead_match && (!app_crc_present || app_crc_match);
+  const char *result = "DELIVERED";
+  if (incident_channel) {
+    result = "FRAME_REJECT";
+  } else if (incident_tamper) {
+    result = "AUTH_REJECT";
+  } else if (incident_memory) {
+    result = use_app_crc ? "APP_REJECT" : "SILENT_CORRUPTION";
+  }
+  const bool expected_acceptance = incident_normal || (incident_memory && !use_app_crc);
+  if (accepted != expected_acceptance) {
+    result = "INTERNAL_CONTRADICTION";
+  }
+
+  secure_wipe(aes_key_enc, sizeof(aes_key_enc));
+  secure_wipe(aes_key_dec, sizeof(aes_key_dec));
+  const uint32_t elapsed_us = micros() - started;
+  const uint32_t bytes_total = static_cast<uint32_t>(frame_len) + 4U;
+  if (accepted) {
+    set_main_led_rgb(0, 255, 100);
+    set_bar_percent(100);
+  } else {
+    set_main_led_rgb(255, 20, 40);
+    set_bar_percent(100);
+  }
+
+  begin_result(request_id, strcmp(result, "INTERNAL_CONTRADICTION") == 0 ? "ERROR" : "OK");
+  print_kv("op", "investigate_message");
+  print_kv("scenario", scenario);
+  print_kv("profile", active_profile);
+  print_kv_u32("cpu_mhz", ESP.getCpuFreqMHz());
+  print_kv("cipher", AEAD_CIPHER);
+  print_kv("incident_id", fields[8]);
+  print_kv("incident", incident);
+  print_kv_u32("byte_index", static_cast<uint32_t>(byte_index));
+  print_kv_hex_u8("bit_mask", bit_mask);
+  print_kv_hex_u8("before_byte", before_byte);
+  print_kv_hex_u8("after_byte", after_byte);
+  print_kv_hex_u32("frame_crc_original", frame_crc_original);
+  print_kv_hex_u32("frame_crc_tx", frame_crc_tx);
+  print_kv_hex_u32("frame_crc_rx", frame_crc_rx);
+  print_kv_bool("frame_crc_match", frame_crc_match);
+  print_kv_bool("aead_checked", aead_checked);
+  print_kv_bool("aead_match", aead_match);
+  print_kv_bool("app_crc_present", app_crc_present);
+  print_kv_bool("app_crc_checked", app_crc_checked);
+  print_kv_bool("app_crc_match", app_crc_match);
+  print_kv_bool("key_match", key_match);
+  print_kv_bool("accepted", accepted);
+  print_kv("result", result);
+  print_kv_u32("bytes_payload", payload_len);
+  print_kv_u32("bytes_total", bytes_total);
+  print_kv_u32("bytes_frame_crc", 4);
+  print_kv_hex_u32("app_crc_tx", app_crc_tx);
+  print_kv_hex_u32("app_crc_rx", app_crc_rx);
+  print_kv_u32("keygen_us", keygen_us);
+  print_kv_u32("encap_us", encap_us);
+  print_kv_u32("decap_us", decap_us);
+  print_kv_u32("kdf_us", kdf_us);
+  print_kv_u32("rng_us", rng_us);
+  print_kv_u32("encrypt_us", encrypt_us);
+  print_kv_u32("decrypt_us", decrypt_us);
+  print_kv_u32("elapsed_us", elapsed_us);
+  print_kv_u32("heap", ESP.getFreeHeap());
+  print_kv_u32("min_heap", ESP.getMinFreeHeap());
   end_result();
 }
 
@@ -2453,8 +3344,32 @@ static void send_help_detail(const char *request_id, const char *command) {
     print_kv("usage", "STRESS PQC_LOOP n CONFIRM");
     print_kv("does", "executa ML-KEM em loop extremo");
   } else if (strcmp(command, "MISSION") == 0) {
-    print_kv("usage", "MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]");
+    print_kv("usage", "MISSION CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32 [payload_hex]");
     print_kv("does", "cifra com AES-GCM e mede custo por cenario");
+  } else if (strcmp(command, "INVESTIGATE") == 0) {
+    print_kv("usage", "INVESTIGATE scenario incident payload_hex index mask incident_id");
+    print_kv("does", "instrumenta CRC de quadro GCM e CRC de aplicacao");
+  } else if (strcmp(command, "GAME_BEGIN") == 0) {
+    print_kv("usage", "GAME_BEGIN id profile CLASSIC|PQC NONE|CRC32 incident payload_hex");
+    print_kv("does", "inicia sessao STAGED_V1 e prepara payload");
+  } else if (strcmp(command, "GAME_PROTECT") == 0) {
+    print_kv("usage", "GAME_PROTECT id");
+    print_kv("does", "estabelece chave e cria envelope AES-GCM");
+  } else if (strcmp(command, "GAME_TRANSMIT") == 0) {
+    print_kv("usage", "GAME_TRANSMIT id byte_index bit_mask");
+    print_kv("does", "aplica incidente oculto e mede CRC de quadro");
+  } else if (strcmp(command, "GAME_VERIFY") == 0) {
+    print_kv("usage", "GAME_VERIFY id");
+    print_kv("does", "verifica quadro GCM e CRC de aplicacao");
+  } else if (strcmp(command, "GAME_RETRY") == 0) {
+    print_kv("usage", "GAME_RETRY id");
+    print_kv("does", "retransmite mesmo payload com chave e nonce novos");
+  } else if (strcmp(command, "GAME_END") == 0) {
+    print_kv("usage", "GAME_END id ACCEPT|SAFE_MODE");
+    print_kv("does", "encerra limpa segredos e restaura baseline");
+  } else if (strcmp(command, "GAME_ABORT") == 0) {
+    print_kv("usage", "GAME_ABORT id");
+    print_kv("does", "aborta limpa sessao e restaura baseline");
   } else if (strcmp(command, "PERIPHERALS") == 0) {
     print_kv("usage", "PERIPHERALS");
     print_kv("does", "detecta OLED APDS HTU MMA");
@@ -2521,9 +3436,9 @@ static void send_help(const char *request_id, size_t field_count, char *fields[]
   print_kv("usage", "HELP [COMMAND]");
   print_kv("cmd1", "HELLO,PING,STATUS,TELEMETRY,FAULT,PERIPHERALS");
   print_kv("cmd2", "PQC_INFO,PQC_KAT,PQC_KEYGEN,PQC_ENCAP,PQC_DECAP,PQC_FAULT,PQC_BENCH,STRESS");
-  print_kv("cmd3", "MISSION,I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ,ANALOG,DIGITAL");
-  print_kv("cmd4", "RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS");
-  print_kv("cmd5", "HELP");
+  print_kv("cmd3", "MISSION,INVESTIGATE,GAME_BEGIN,GAME_PROTECT,GAME_TRANSMIT,GAME_VERIFY");
+  print_kv("cmd4", "GAME_RETRY,GAME_END,GAME_ABORT,I2C_SCAN,FEATURES,BOARDMAP,SENSOR_READ");
+  print_kv("cmd5", "ANALOG,DIGITAL,RGB,BARGRAPH,LED,RELAY,SERVO,OLED,PROFILE,RESET_STATS,HELP");
   end_result();
 }
 
@@ -2545,6 +3460,20 @@ static void process_frame(char *line) {
   char *command = fields[2];
   uppercase_ascii(command);
   command_count++;
+
+  // A GAME_* session has exclusive ownership of the profile, LEDs and the
+  // global ML-KEM work buffers. HELLO is the reconnect/reset primitive and a
+  // new GAME_BEGIN intentionally replaces the previous session. ANALOG POT is
+  // the sole read-only exception because it captures A39 for GAME_TRANSMIT.
+  if (staged_game.active && strcmp(command, "HELLO") != 0 &&
+      !is_staged_game_control_command(command) &&
+      !is_staged_game_safe_read_command(command, field_count, fields)) {
+    staged_game_error(
+        request_id,
+        "BAD_GAME_STATE",
+        "active_GAME_session_requires_GAME_command_HELLO_or_ANALOG_POT");
+    return;
+  }
 
   if (strcmp(command, "HELLO") == 0) {
     send_hello(request_id);
@@ -2574,6 +3503,22 @@ static void process_frame(char *line) {
     handle_stress(request_id, field_count, fields);
   } else if (strcmp(command, "MISSION") == 0) {
     handle_mission(request_id, field_count, fields);
+  } else if (strcmp(command, "INVESTIGATE") == 0) {
+    handle_investigate(request_id, field_count, fields);
+  } else if (strcmp(command, "GAME_BEGIN") == 0) {
+    handle_game_begin(request_id, field_count, fields);
+  } else if (strcmp(command, "GAME_PROTECT") == 0) {
+    handle_game_protect(request_id, field_count, fields);
+  } else if (strcmp(command, "GAME_TRANSMIT") == 0) {
+    handle_game_transmit(request_id, field_count, fields);
+  } else if (strcmp(command, "GAME_VERIFY") == 0) {
+    handle_game_verify(request_id, field_count, fields);
+  } else if (strcmp(command, "GAME_RETRY") == 0) {
+    handle_game_retry(request_id, field_count, fields);
+  } else if (strcmp(command, "GAME_END") == 0) {
+    handle_game_end(request_id, field_count, fields);
+  } else if (strcmp(command, "GAME_ABORT") == 0) {
+    handle_game_abort(request_id, field_count, fields);
   } else if (strcmp(command, "PERIPHERALS") == 0) {
     send_peripherals(request_id);
   } else if (strcmp(command, "I2C_SCAN") == 0) {
@@ -2649,7 +3594,8 @@ void loop() {
     if (rx_len >= MAX_FRAME_LEN) {
       rx_len = 0;
       error_count++;
-      Serial.println("V1|0|EVENT|RX_OVERFLOW|limit=256");
+      Serial.print("V1|0|EVENT|RX_OVERFLOW|limit=");
+      Serial.println(MAX_FRAME_LEN);
       continue;
     }
 

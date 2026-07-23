@@ -1,72 +1,84 @@
-# Rastreabilidade de requisitos do handover SBPC
+# Rastreabilidade — jogo por etapas `STAGED_V1`
 
-Data da auditoria: 2026-07-21
+Estados: `PASS` significa validado na camada indicada; `PARCIAL` exige
+evidência adicional; `FAIL` é gate ainda não executado. Um `PASS` de software
+não é automaticamente um `PASS` de hardware.
 
-Este documento confronta os critérios do
-`HANDOVER_ESTANDE_SBPC_PQC_SAT.md` com evidência verificável da branch
-`sbpc-stand-demo`. `PASS` significa requisito comprovado no escopo indicado;
-`PARCIAL` ou `FAIL` mantém a release final bloqueada.
+## Interação e jornada
 
-## P0 obrigatório
-
-| # | Requisito | Estado | Evidência atual | Fechamento restante |
-|---:|---|---|---|---|
-| 1 | versão original preservada | PASS | `main` e `game` permanecem em `abd65a3`; ZIP local não foi alterado | nenhum |
-| 2 | auditoria técnica concluída | PASS | `docs/stand/AUDIT_EXISTING.md` | nenhum |
-| 3 | AES-128/256 resolvido pelo código | PASS | firmware usa chave de 16 B e retorna `cipher=AES-128-GCM`; smoke real aceito pelo parser | nenhum |
-| 4 | baseline nomeado corretamente | PASS | UI usa `BASELINE AES-GCM`; `SCIENTIFIC_ACCURACY.md` proíbe chamá-lo de ECDH | nenhum |
-| 5 | localização da falha CRC descrita corretamente | PASS | tela `FAULT_NONE`, tela `FAULT_CRC` e documentação identificam harness de payload separado de AES-GCM | nenhum |
-| 6 | modo estande em tela cheia | PARCIAL | apresentação agora é overlay nativo do `DashboardPanel`; fullscreen, `Esc` e renderização 1366×768/1920×1080 testados | ensaiar tela cheia no monitor definitivo |
-| 7 | fluxo de até 100 segundos | PASS | ciclo real com configuração de produção: 51,55 s até `SUMMARY`; teste automatizado limita o pior caso visual a 100 s | nenhum |
-| 8 | botão físico inicia e avança | FAIL | parser e firmware estão testados; duas janelas, de 30 s e 45 s, não observaram `BUTTON_PING` | repetir com acionamento físico observado |
-| 9 | potenciômetro seleciona bit | PASS | smoke real: A39=2884 → byte 28, máscara `0x40`, bit global 230 | resistência física pendente, sem invalidar o ciclo curto |
-| 10 | CLASSIC e PQC usam mesmo payload | PASS | JSONL real contém o mesmo payload hexadecimal nas três missões | nenhum |
-| 11 | comparação 240/80 ao vivo ou campanha identificada | PASS | smoke real confirmou `BASELINE/240` e `OBC-1U-LIMITED/80`; fixture mantém selo de campanha | nenhum |
-| 12 | mesma falha em NONE e CRC32 | PASS | JSONL real repete payload, byte 28, máscara `0x40`, `0x34 → 0x74` | nenhum |
-| 13 | métricas de hardware ou fixture identificada | PASS | fontes tipadas `hardware-live` e `official-campaign-fixture`; UI mantém selo persistente | nenhum |
-| 14 | modo simulado explicitamente rotulado | PASS | screenshots, vídeo e testes contêm `MODO VISUAL SIMULADO` | nenhum |
-| 15 | reset automático | PASS | teste automatizado e temporizador de 18 s; perfil 240 MHz é restaurado | nenhum |
-| 16 | funcionamento offline | PASS | inicializador e fluxo completo passaram sem rede usando fixture local vinculada por SHA-256 | testar também no notebook definitivo |
-| 17 | 30 ciclos sem crash | FAIL | 20/20 ciclos reais administrativos e 50/50 offline passaram | executar 30+ ciclos físicos na campanha longa |
-| 18 | runbook pronto | PASS | `docs/stand/RUNBOOK.md` isola logs de aceite e documenta abertura, operação e recuperação | revisão por segundo operador ainda recomendada |
-| 19 | vídeo de backup pronto | PASS | `docs/stand/evidence/stand_backup_simulated.mp4`, 36 s, 1366×768, rótulo de simulação | testar reprodução no monitor definitivo |
-| 20 | ensaio geral concluído | FAIL | smoke real administrativo não é ensaio completo de montagem e público | executar ensaio no conjunto físico final |
-
-Resultado P0: **16 PASS, 1 PARCIAL e 3 FAIL**. A implementação permanece
-release candidate e não deve receber tag final.
-
-## Gates adicionais das etapas
-
-| Gate | Estado | Evidência | Limitação |
+| Requisito | Estado | Evidência atual | Fechamento restante |
 |---|---|---|---|
-| parser, estados, timeout e ordem | PASS | 124 testes Python, incluindo encaminhamento de `BUTTON_PING` pelo dashboard | nenhum conhecido nos casos cobertos |
-| 20 repetições coerentes do bit flip | PASS | 20/20 ciclos reais administrativos, zero divergências nos pares `NONE`/`CRC32` | ações físicas continuam no gate longo separado |
-| recuperação USB | PARCIAL | cliente reconecta, handshake antigo é invalidado e há teste lógico | dez recuperações físicas pendentes |
-| resistência de 3 h | FAIL | não executada | operador deve executar 2 h de atração + 1 h de ciclos |
-| 100 ações de botão | FAIL | zero eventos físicos no JSONL de smoke | realizar pelo menos 100 ações físicas |
-| 100 mudanças do potenciômetro | FAIL | sessão de 20 ciclos: 20 amostras, 6 transições e 2 posições sem giro deliberado | realizar pelo menos 100 mudanças físicas de posição |
-| teste com cinco pessoas | FAIL | somente template CSV | coletar respostas e verificar os critérios 4/5 |
+| busca sai somente por `HELLO` válido | PASS software / FAIL hardware | dashboard permanece aberto sem porta e busca avança automaticamente no modelo após `STAGED_V1` | observar busca e handshake na montagem real |
+| narrativa preservada e confirmada | PASS software / FAIL hardware | Terra/CubeSat e chamada mínima vêm após a busca; `INICIAR MISSÃO` e D27 abrem diretamente as escolhas | confirmar sequência pelos dois controles |
+| toque em cartão apenas seleciona | PASS software | controlador e teste de clique mantêm o estado e alteram `pending_choice` | confirmar em tela sensível ao toque final |
+| verde ou D27 confirmam transição | PASS software / FAIL hardware | log v2 exige `button_seq` e origem; verde percorre todos os estados; teclado bloqueado | uma partida real por cada controle |
+| resposta/animação não avançam | PASS software | testes mantêm estágio após resposta e após deadline da animação | deixar cada estado parado na Wisdom |
+| D27 inválido não consome debounce | PASS software | cobertos comando pendente, animação, guarda, evento antigo e repetido | smoke físico com rebote/pressões prematuras |
+| sem timeout ou reset público | PASS software | flags v3 desabilitadas e teste com relógio avançado | permanência física nos 14 estados |
+| incidente oculto até debrief | PASS software | UI só renderiza causa após `GAME_END` aceito | observar fluxo real |
+| sem voltar após confirmação | PASS | não há ação pública de retorno; `Home` aborta a partida | nenhum |
+| duração alvo 120–180 s | PARCIAL | configuração e validador tipam a faixa | medir mediana com cinco visitantes |
 
-## Entregáveis exigidos
+## Escolhas e ciência
 
-| Entregável | Estado | Caminho ou evidência |
+| Requisito | Estado | Evidência atual | Fechamento restante |
+|---|---|---|---|
+| três missões com prazo em ms | PASS | configuração v3 e cartões nas duas resoluções | nenhum |
+| perfis 240/80 MHz | PASS software | parsers exigem perfil/clock correspondentes | repetir ambos em `GAME_*` real |
+| chave e CRC independentes | PASS software | `CLASSIC`, `CLASSIC_CRC32`, `PQC`, `PQC_CRC32` | executar as quatro combinações na Wisdom |
+| todas usam AES-128-GCM | PASS código | parser e firmware exigem `cipher=AES-128-GCM` | confirmar respostas reais |
+| `CLASSIC` não é ECDH | PASS | textos e precisão científica corrigidos | nenhum |
+| ML-KEM estabelece segredo | PASS | UI separa KeyGen/Encaps/Decaps/KDF de AES-GCM | nenhum |
+| CRC não autentica | PASS | cartões, debrief e guia dizem explicitamente | validar compreensão 4/5 |
+| A39 seleciona bit | PASS software / PARCIAL histórico | D27 fornece `pot`; verde usa `ANALOG POT` assíncrono; ambos alimentam o mesmo mapeamento single-bit | observar os dois caminhos no protocolo atual |
+| tabela de quatro incidentes | PASS software | 32 casos automatizados e fixture estrita | matriz curta física e bateria controlada opcional |
+| `RX_MEMORY/NONE` silencioso | PASS software | teste e modelo retornam `SILENT_CORRUPTION` | confirmar na Wisdom |
+| `RX_MEMORY/CRC32` rejeitado | PASS software | teste e modelo retornam `APP_REJECT` | confirmar na Wisdom |
+
+## Firmware e protocolo
+
+| Requisito | Estado | Evidência atual | Fechamento restante |
+|---|---|---|---|
+| `HELLO game=STAGED_V1` | PASS código / FAIL hardware | firmware e fixture anunciam capacidade | flash e handshake reais |
+| sessão única e ordem estrita | PASS software | fixture e testes retornam `BAD_GAME_STATE` | ordem/ID errados na placa |
+| A39 não destrói sessão ativa | PASS código/fixture | `ANALOG POT` preserva `PROTECT` e o `GAME_TRANSMIT` seguinte é aceito | flash e repetir a sequência na Wisdom |
+| `GAME_BEGIN…GAME_END` separados | PASS código | handlers, catálogo, parsers e controlador | smoke real completo |
+| erro/abort/reconexão limpam sessão | PASS software | testes limpam resultados; reconexão exige `HELLO` e retorna automaticamente à narrativa | desconexão controlada na placa |
+| segredos apagados após verify | PASS revisão estática | firmware chama limpeza e mantém contexto não secreto | revisão/ensaio físico não expõe segredos completos |
+| retry usa payload igual e material novo | PASS fixture | parser exige `same_payload=fresh_key=fresh_nonce=1` | confirmação em hardware |
+| `INVESTIGATE` preservado | PASS | comando, parser, ferramentas e testes legados permanecem | nenhuma regressão conhecida |
+| interface visual legada removida | PASS | `dashboard.py` é o único entrypoint e não há seletor de fluxo | nenhum |
+
+## UI, logs e ferramentas
+
+| Requisito | Estado | Evidência atual | Fechamento restante |
+|---|---|---|---|
+| 14 estados renderizados | PASS | 14 PNGs em cada resolução | ensaio no monitor definitivo |
+| escolhas compreensíveis | PASS software | cartões quadrados sem subtítulos internos, com título e arte causal em destaque; detalhes surgem após seleção | testar compreensão com cinco visitantes |
+| replay compreensível e controlável | PASS software | pacote arrastável com entrada, operação, saída e evidência; 18 quadros extras por resolução | testar compreensão com cinco visitantes |
+| animação orientada à resposta | PASS software | bytes, CRC, proteção, A39, verificação, retry e causalidade só depois da resposta aceita | observar timings reais |
+| métricas reais continuam visíveis | PASS design | tempo/bytes/heap vêm de respostas tipadas | hardware atual ainda não executado |
+| log v2 completo | PASS software | seleção/confirmação, origem D27/tela, fonte A39, estágio, decisão, retry e aborto | gerar JSONL físico |
+| validador mantém leitura V1 | PASS | testes e ramo de compatibilidade | nenhum |
+| diagnóstico/smoke/soak/captura/vídeo/bateria atualizados | PASS software | ferramentas compilam; soak/capturas/vídeo executados | diagnóstico e smoke reais |
+| média <16,667 ms | PASS host | interface completa: 7,280 ms e 10,204 ms | não é garantia de todo host/monitor |
+
+## Gates do estande
+
+| Gate | Estado | Critério |
 |---|---|---|
-| código, testes, fixture, scripts e configuração | PASS | UI em `dashboard.py`; controlador em `stand_demo.py`; `tests/test_stand_demo.py`, `fixtures/stand/`, `scripts/`, `config/stand_demo.json` |
-| auditoria, especificação, runbook, precisão, validação e changelog | PASS | `docs/stand/` |
-| screenshot de cada estado | PASS | `docs/stand/evidence/states/` |
-| log de ciclo completo em hardware | PASS | `docs/stand/evidence/hardware_production_timing_cycle.jsonl` |
-| resultado dos testes automatizados | PASS | `docs/stand/evidence/software_validation.json`: 124 testes e demais comandos obrigatórios |
-| vídeo de backup | PASS | `docs/stand/evidence/stand_backup_simulated.mp4` |
-| vídeo do fluxo completo em hardware | FAIL | não capturado | filmar o ensaio com botão físico |
-| resultado dos 30 ciclos | FAIL | não produzido | executar validador sobre a campanha longa |
-| tabela preenchida de cinco avaliações | FAIL | existe apenas `AUDIENCE_TEST_TEMPLATE.csv` | realizar teste de compreensão |
-| hash e tag de release | PARCIAL | hashes de commits existem; tag foi corretamente retida | criar tag somente após todos os gates |
+| firmware atual gravado | FAIL | upload do candidato e hash registrado |
+| D27 observado | FAIL | repouso, pressionado e `BUTTON_PING` válido |
+| duas partidas físicas | FAIL | uma integral por D27 e outra pelo verde, ambas com transições associadas |
+| monitor definitivo | FAIL | legibilidade e toque verificados |
+| 30 partidas / 3 h | FAIL | zero transições sem confirmação e zero dados reaproveitados |
+| >100 D27 e >100 mudanças A39 | FAIL | contadores do validador; delta A39 mínimo de 16 ADC evita contar ruído |
+| dez reconexões | FAIL | dez recuperações após desconexão real |
+| cinco visitantes | FAIL | mediana 120–180 s e critérios 4/5 |
+| tag final | FAIL | somente após todos os gates acima |
 
-## Decisão de release
+## Resultado
 
-O overlay integrado está validado em software; o controlador e o protocolo
-mantêm a evidência do ciclo curto em hardware de 2026-07-20. Como nenhuma porta
-serial estava disponível em 2026-07-21, ainda é preciso repetir o smoke curto
-com o renderer novo. O handover completo também depende de botão físico,
-monitor/montagem, resistência, vídeo real e avaliação com público. O
-procedimento exato está em `docs/stand/RUNBOOK.md`.
+O escopo de software está implementado e verificado. A release pública segue
+bloqueada pelos gates físicos; evidências históricas de `INVESTIGATE` não são
+reclassificadas como evidência do protocolo `STAGED_V1`.

@@ -12,10 +12,14 @@ Este documento fixa a narrativa permitida para a experiência pública.
 
 ## Baseline correto
 
-`MISSION CLASSIC` é um baseline simétrico AES-128-GCM. O firmware gera uma
-chave AES aleatória por mensagem e executa emissor e receptor logicamente na
-mesma Wisdom. Esse caminho não implementa ECDH, RSA, certificado ou uma pilha
-clássica assimétrica completa.
+`MISSION CLASSIC` e `GAME_BEGIN ... CLASSIC ...` são um baseline simétrico
+AES-128-GCM. O firmware gera uma chave AES aleatória por mensagem e executa
+emissor e receptor logicamente na mesma Wisdom. Esse caminho não implementa
+ECDH, RSA, certificado ou uma pilha clássica assimétrica completa.
+
+`CLASSIC_CRC32` usa exatamente esse estabelecimento local de chave e adiciona
+o CRC da aplicação. Portanto modo de chave e guardião são variáveis
+independentes; CRC32 não transforma o baseline em PQC.
 
 A comparação mostrada é:
 
@@ -32,7 +36,7 @@ A comparação mostrada é:
 
 Não há base executável para dizer AES-256-GCM.
 
-## Modelo obrigatório da falha CRC32
+## Modelo legado da falha CRC32
 
 | Elemento | Definição executável |
 |---|---|
@@ -55,6 +59,50 @@ O ensaio não altera o ciphertext de uma transmissão AES-GCM. Por isso a tela
 diz explicitamente que representa corrupção controlada de payload/memória em
 uma etapa de teste de integridade separada.
 
+Esse modelo continua válido para o comando técnico `FAULT`. A interface visual
+legada foi removida; o jogo público usa o modelo integrado abaixo.
+
+## Modelo integrado de investigação
+
+O protocolo `GAME_BEGIN` … `GAME_VERIFY` protege a mensagem, monta um quadro
+experimental, injeta uma mutação single-bit na camada solicitada e devolve
+três observações separadas em estágios. O comando monolítico `INVESTIGATE`
+permanece como implementação compatível do mesmo modelo para bancada.
+
+| Incidente | Objeto/instante | Condição objetiva |
+|---|---|---|
+| `CHANNEL_BITFLIP` | ciphertext depois do CRC de transmissão | CRC do quadro e GCM divergem; pacote rejeitado |
+| `TAMPER` | ciphertext, seguido de recálculo do CRC sem chave | CRC do quadro coincide, tag GCM falha |
+| `RX_MEMORY` | plaintext depois de `mbedtls_gcm_auth_decrypt` | GCM coincide; CRC da aplicação diverge se presente |
+| `NORMAL` | nenhuma mutação | todas as verificações aplicáveis coincidem |
+
+No caso de CRC do quadro inválido, o harness continua a verificação GCM apenas
+para instrumentação; o plaintext nunca é aceito. Sem CRC da aplicação,
+`RX_MEMORY` é classificado `SILENT_CORRUPTION`. Com `CLASSIC_CRC32` ou
+`PQC_CRC32`, a referência fica dentro do plaintext autenticado e o resultado
+é `APP_REJECT`.
+
+Esses padrões localizam uma camada provável. Não atribuem causalidade física
+ou intenção: radiação, ataque e defeito de software continuam indistinguíveis
+sem evidência externa adicional.
+
+No caminho PQC, o dashboard só aceita uma resposta quando o firmware confirma
+`key_match=1` e as verificações GCM previstas estão presentes. Uma chave
+divergente, campo ausente, ordem/ID incorreto ou vetor que não represente um
+único bit é erro de protocolo, não evidência experimental válida.
+
+## Retransmissão e decisão operacional
+
+`GAME_RETRY` não desfaz o pacote anterior nem reaproveita chave/nonce. Ele usa
+o mesmo payload e proteção confirmados, cria chave e nonce novos e não injeta
+falha. O resultado esperado é `DELIVERED`. Isso demonstra uma resposta
+operacional possível; não prova disponibilidade de um enlace real.
+
+Um pacote rejeitado por CRC do quadro, tag GCM ou CRC da aplicação não pode ser
+marcado como aceito pela interface. `SAFE_MODE` é uma decisão didática, não um
+comando de voo certificado. `ACCEPT` em `SILENT_CORRUPTION` ilustra justamente
+que ausência de alarme não garante correção.
+
 ## Perfis e métricas
 
 `BASELINE` restaura o clock de boot, observado como 240 MHz na campanha.
@@ -65,9 +113,10 @@ O perfil de 80 MHz é experimental. Ele não é uma especificação universal de
 CubeSat. A BlackBoard Wisdom é um OBC educacional de bancada inspirado no
 contexto de CubeSats; não é um CubeSat e não possui qualificação para voo.
 
-`elapsed_us` é tempo de processamento e pode ser discutido como proxy de custo
-computacional. Não houve instrumento elétrico externo, portanto watts, joules
-e consumo de energia não foram medidos.
+`elapsed_us` e os tempos de estágio são tempos de processamento e podem ser
+discutidos como proxy de custo computacional. Não houve instrumento elétrico
+externo, portanto watts, joules e consumo de energia não foram medidos. A
+animação ampliada não mede duração: o número recebido da Wisdom é a evidência.
 
 `bytes_total` é um modelo do pacote do experimento. Em PQC, inclui ciphertext
 ML-KEM, nonce, tag GCM, ciphertext do payload e CRC quando aplicável; não inclui
@@ -99,8 +148,10 @@ A campanha oficial vigente é
 `logs/20260702T044907Z_final_metrics_dev-ttyusb0.json`, SHA-256
 `bcf16f1f49f6433ca7bdfde000023af1cb3b72546a3af16d570fe212edd6ce8d`.
 Ela possui 1.038 registros, zero falhas, 600 missões, seis benchmarks PQC e
-400 ensaios de falha. Resultados ao vivo substituem a fixture somente depois
-de aceitos pelo parser; a fixture continua identificada como campanha.
+400 ensaios de falha. Essa campanha continua sendo a fonte dos resultados
+consolidados. Leituras `GAME_*` ao vivo descrevem somente a partida atual;
+sessões de visitantes não substituem a campanha. A fixture permanece
+identificada como referência histórica/modelo offline.
 
 ## Referências normativas e contextuais
 

@@ -28,6 +28,37 @@ from tools.serial_commands import (
 
 
 class SerialProtocolTests(unittest.TestCase):
+    def test_staged_firmware_owns_and_clears_shared_mlkem_buffers(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        source = (repo_root / "firmware" / "esp32_serial_spike" / "esp32_serial_spike.ino").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("is_staged_game_control_command", source)
+        self.assertIn("is_staged_game_safe_read_command", source)
+        self.assertIn('strcmp(fields[3], "POT") == 0', source)
+        self.assertIn("active_GAME_session_requires_GAME_command_HELLO_or_ANALOG_POT", source)
+        for buffer_name in (
+            "pqc_pk",
+            "pqc_sk",
+            "pqc_ct",
+            "pqc_ss_enc",
+            "pqc_ss_dec",
+            "pqc_fault_ct",
+            "pqc_fault_tag_enc",
+            "pqc_fault_tag_dec",
+        ):
+            self.assertIn(f"secure_wipe({buffer_name}, sizeof({buffer_name}));", source)
+
+    def test_full_diagnostic_samples_a39_inside_the_game(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        source = (repo_root / "tools" / "stand_diagnostics.py").read_text(encoding="utf-8")
+
+        self.assertIn('"GAME_PROTECT DIAG-GAME",\n                "ANALOG POT",', source)
+        self.assertIn('"GAME_TRANSMIT DIAG-GAME A39"', source)
+        self.assertIn("fault_selection_from_pot", source)
+        self.assertIn('record["purpose"] = "active_game_a39"', source)
+
     def test_serial_bridge_can_run_as_direct_script(self):
         repo_root = Path(__file__).resolve().parents[1]
         result = subprocess.run(
@@ -99,7 +130,10 @@ class SerialProtocolTests(unittest.TestCase):
         self.assertIn("      muda a cor do indicador principal", rendered)
         full_rendered = "\n".join(command_help_lines(demo_only=False))
         self.assertIn("OLED INIT|CLEAR|TEST|STANDBY", full_rendered)
-        self.assertIn("MISSION CLASSIC|PQC|PQC_CRC32", full_rendered)
+        self.assertIn("MISSION CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32", full_rendered)
+        self.assertIn("GAME_BEGIN id profile CLASSIC|PQC NONE|CRC32", full_rendered)
+        self.assertIn("GAME_RETRY id", full_rendered)
+        self.assertTrue(is_demo_firmware_command("MISSION CLASSIC_CRC32"))
 
     def test_dashboard_led_effect_commands_are_known(self):
         for command in ("LED YELLOW", "LED MAGENTA", "LED GREEN", "LED RED", "LED BLUE"):

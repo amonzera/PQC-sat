@@ -36,6 +36,7 @@ nem ao roteiro principal. A demonstração visual de falha usa payload com
 | ML-KEM real | Funcional na Wisdom com `mlkem-native` v1.1.0, commit `d2cae2b` |
 | AES-128-GCM em MISSION | Implementado no firmware; `CLASSIC` usa chave efêmera, `PQC` deriva chave de ML-KEM |
 | Mensagem CLASSIC/PQC/PQC+CRC | Implementada no firmware por `MISSION CLASSIC|PQC|PQC_CRC32` |
+| Jogo por etapas `STAGED_V1` | Implementado e compilado; ainda não gravado/validado na Wisdom |
 | Interface serial PQC | `PQC_INFO`, `PQC_KAT`, `PQC_KEYGEN`, `PQC_ENCAP`, `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH` funcionais |
 | Medição PQC na placa | `PQC_BENCH 100` medido em `BASELINE` e `OBC-1U-LIMITED`; `PQC_KAT` passou no hardware gravado |
 | Falha em ciphertext ML-KEM | `PQC_FAULT index mask [CONFIRM|NONE]` validado na placa e exportado no JSON |
@@ -271,6 +272,15 @@ projeto sem reconstruir decisões antigas:
   agora têm origem experimental explícita. Os 600 `MISSION` passaram na
   validação AES-GCM, com 600 nonces, ciphertexts e tags distintos. A tela
   `RESULTADOS`, o guia final e a metodologia passaram a usar essa fonte.
+- 2026-07-21: após aprovação explícita para abandonar o monólito, o dashboard
+  foi separado no pacote `pqc_sat`.
+- 2026-07-21: a decisão seguinte consolidou uma única interface de produção.
+  `dashboard.py` passou a iniciar apenas o jogo `STAGED_V1` com Wisdom real;
+  dashboard manual, `stand_demo.py`, launchers Bash e opções públicas de
+  simulação/fluxo foram removidos. A descoberta agora sonda todas as portas por
+  `HELLO`, inclusive fallbacks `/dev/ttyUSB*`, `/dev/ttyACM*` e
+  `/dev/serial/by-id/*`. A revisão atual abre primeiro o standby Pygame e faz
+  essa validação no worker antes de liberar a abertura narrativa.
 
 O dashboard já pode demonstrar entrega de mensagem em `CLASSIC`, `PQC` e
 `PQC_CRC32`, demonstrar `SILENT` versus `DETECTED_GUARD` em payload, executar
@@ -350,30 +360,19 @@ Para comparar mecanismos, a campanha precisa incluir pelo menos um destes:
 
 O MVP pode comparar apenas `NONE` e `CRC32`, mantendo XOR/CRC-16 como extensão.
 
-## 4. Arquitetura alvo
+## 4. Arquitetura implementada
 
 ```text
-Dashboard Pygame
-    |
-    +-- ExperimentEngine
-    |     +-- gera campanha determinística
-    |     +-- muta bytes
-    |     +-- classifica resultados
-    |     +-- produz eventos
-    |
-    +-- visualização / timeline / JSON
-    |
-    +-- SerialBridge opcional
-          |
-          +-- protocolo versionado
-          +-- firmware ESP32
-                +-- backend criptográfico identificado
-                +-- guardião real
-                +-- telemetria e tempos
+dashboard.py -> pqc_sat/cli.py
+                 +-- infrastructure/wisdom.py: descoberta HELLO STAGED_V1
+                 +-- infrastructure/serial_client.py: worker não bloqueante
+                 +-- stand/investigation.py: estados e invariante D27
+                 +-- stand/model.py: tipos e validação GAME_*
+                 +-- ui/game.py + investigation_view.py: interface única
 ```
 
-Por enquanto, as classes Python podem permanecer em `dashboard.py`. O
-firmware terá diretório próprio.
+`dashboard.py` é apenas o entrypoint estável. As regras de dependência estão
+em `docs/DASHBOARD_ARCHITECTURE.md`.
 
 ## 5. Perfil OBC didático
 
@@ -417,8 +416,9 @@ linear rígida.
    clicáveis da demo.
    Eles podem ser digitados no terminal textual avançado quando a placa estiver
    conectada.
-3. Manter `MISSION CLASSIC|PQC|PQC_CRC32` como comando principal da
-   apresentação para entrega de mensagem e comparação de custo.
+3. Manter `MISSION CLASSIC|PQC|PQC_CRC32` como comando principal do dashboard
+   manual, `GAME_*` como protocolo do jogo público e `INVESTIGATE` como
+   compatibilidade de bancada/fluxo legado.
 4. Manter `PQC_INFO` como fonte de alvo, backend, fonte, commit, licença,
    perfil, tempo e memória.
 5. Medição inicial de tempo, heap, heap mínimo e flash nos perfis `BASELINE` e
@@ -737,28 +737,83 @@ falha conhecida nos cenários testados".
 
 ### Etapa 09 - modo estande SBPC
 
-Estado: **release candidate de software; aceite operacional longo pendente**.
+Estado: **jogo `STAGED_V1` em release candidate de software; flash e aceite
+físico pendentes**.
 
 Implementado:
 
-- entrada `dashboard.py --stand` e inicializador `scripts/run_stand.sh`;
-- máquina explícita `ATTRACT → INTRO → RUN_240 → RUN_80 → SELECT_BIT →
-  FAULT_NONE → FAULT_CRC → SUMMARY`, com `ERROR` seguro;
+- entrada única `python3 dashboard.py`, sem launcher Bash;
+- máquina pública de 14 estados: missão, perfil, modo de chave, CRC,
+  preparação, proteção, transmissão, verificação, diagnóstico, decisão,
+  retransmissão e debrief, além de atração e erro;
+- meta de 120–180 s, sem timeout público, avanço automático ou reset do
+  debrief;
+- standby integrado ao loop principal: a descoberta roda no worker e libera
+  automaticamente a abertura narrativa somente após `HELLO game=STAGED_V1`;
+- abertura com Terra/CubeSat preservada após a busca, contendo somente
+  `SALVE A MENSAGEM EM ÓRBITA` e `INICIAR MISSÃO`; clique ou D27 iniciam
+  diretamente todas as partidas;
+- desconexão reapresenta a busca e um novo handshake limpa a partida
+  interrompida e retorna automaticamente à abertura narrativa;
+- toque em cartão altera somente a seleção pendente; depois da abertura, toda
+  transição para a frente exige confirmação explícita pela faixa verde ou D27;
+- quatro combinações independentes: `CLASSIC/NONE`, `CLASSIC/CRC32`,
+  `PQC/NONE` e `PQC/CRC32`; todas usam AES-128-GCM;
+- protocolo transacional `GAME_BEGIN`, `GAME_PROTECT`, `GAME_TRANSMIT`,
+  `GAME_VERIFY`, `GAME_RETRY`, `GAME_END` e `GAME_ABORT`;
+- uma única sessão ativa, ordem e ID estritos, limpeza de segredos depois da
+  verificação e chave/nonce novos na retransmissão;
+- `INVESTIGATE`, `MISSION` e comandos de bancada preservados no firmware e nas
+  ferramentas técnicas; a interface/roteiro visual anterior foi removida;
+- três cartões de missão com prioridade, prazo tipado em ms e consequência;
+- incidentes `NORMAL`, `CHANNEL_BITFLIP`, `TAMPER` e `RX_MEMORY`, com sequência
+  pública balanceada e causa oculta até o encerramento;
 - handshake obrigatório, fila serial não bloqueante, timeout e reconexão do
   cliente existente;
-- botão `BUTTON_PING` aceito somente nos estados permitidos e potenciômetro
-  A39 mapeado para índice/máscara single-bit;
-- mesmo payload em CLASSIC/PQC/240/80 e mesma falha em NONE/CRC32, ambos
-  verificados antes de avançar;
-- separação entre `HardwareMeasurement` e `AnimationModel`;
-- fallback offline por fixture oficial com proveniência e rótulo permanente;
-- logs JSONL por sessão, reset automático e restauração de 240 MHz;
+- A39 capturado junto ao D27 ou lido assincronamente por `ANALOG POT` quando a
+  faixa verde confirma `PROTECT`, sempre antes do mapeamento single-bit;
+- pressões durante comando, animação, guarda ou restauração são ignoradas sem
+  consumir o debounce da próxima ação válida;
+- animações específicas de preparação, proteção, canal, verificação, retry e
+  causalidade, separadas do tempo real recebido;
+- cartões de escolha quadrados e sem subtítulos internos, com título e arte
+  causal em destaque; explicações aparecem após a seleção; a torre sobre a
+  Terra foi removida e o CubeSat móvel recebeu um sorriso angular original;
+- depois da reprodução automática, a própria mensagem pode ser arrastada por
+  estações explicadas; esse estado é somente visual e não toca no gate de confirmação;
+- fixture oficial somente em testes/evidência offline, com proveniência e
+  rótulo permanente;
+- log JSONL v2 com seleção/confirmação, origem D27/tela, fonte A39, estágios,
+  decisão, retry e aborto;
+  leitura de logs V1 preservada;
 - layout em canvas 1366×768 escalável para 1920×1080, sem áudio obrigatório;
-- diagnóstico, soak offline, screenshots, vídeo de contingência e validador
-  de logs de aceite;
+- diagnóstico, smoke, soak, screenshots, vídeo, bateria e validador migrados
+  para o protocolo por etapas;
 - documentação operacional completa em `docs/stand/`.
 
-Validado em 2026-07-20:
+Validado em software novamente em 2026-07-23 após a simplificação da interface:
+
+- parser e fixture cobrem 32 combinações de perfil, modo de chave, guardião e
+  incidente;
+- 97 testes atuais passam, incluindo busca automática, narrativa direta,
+  reconexão limpa, confirmação pela tela em
+  todas as transições, A39 assíncrono, D27, retransmissão, erro, legado,
+  `INVESTIGATE`, fachadas, replay arrastável e preservação da sessão em
+  `GAME_PROTECT -> ANALOG POT -> GAME_TRANSMIT`;
+- soak de 50 partidas conclui 625 confirmações lógicas, 100 mudanças A39, 275
+  comandos `GAME_*`, 25 retries, zero erros e zero crescimento de RSS;
+- por resolução, a busca, os 14 estados e 18 quadros de replay em
+  início/meio/fim, além do vídeo offline rotulado;
+- média headless da interface completa de 7,280 ms e 10,204 ms, abaixo do
+  orçamento de 16,667 ms;
+- firmware candidato compila com 57.332 B de RAM (17,5%) e 932.173 B de flash
+  (71,1%); o binário de 938.752 B tem SHA-256
+  `288d5f4989b56f593a267ccde31f59773a1addb9a2669d1f9fb07ad4c8e5d51e`;
+  essa compilação não é validação na placa;
+- implantação ficou centralizada em `tools/firmware_deploy.py`, sem Bash, com
+  upload opt-in, identidade prévia e verificação pós-reset de `STAGED_V1`.
+
+Evidência física histórica, anterior a `STAGED_V1`:
 
 - 50 ciclos acelerados de fixture, 100 ações lógicas de botão e 100 mudanças
   de potenciômetro sem falha;
@@ -767,14 +822,20 @@ Validado em 2026-07-20:
   de produção e chegou a `SUMMARY` em 51,55 s;
 - 20 ciclos reais administrativos acelerados, com 60 missões, 40 falhas,
   zero erros e pares `NONE`/`CRC32` coerentes em todos os ciclos;
-- o evento físico `BUTTON_PING` não foi observado nas duas janelas de teste e
-  precisa de repetição assistida.
+- firmware `INVESTIGATE` anterior gravado, quatro incidentes e um smoke
+  administrativo concluídos em 2026-07-21;
+- dashboard anterior conectado permaneceu em `ATTRACT` por oito segundos;
+- o evento físico `BUTTON_PING` não foi observado nas janelas assistidas de
+  30 s e 45 s e precisa de confirmação do acionamento/fiação D27.
 
 Gate restante:
 
-- 30 ciclos físicos, três horas de resistência, dez recuperações USB,
-  observação do botão físico, teste no monitor definitivo e avaliação 4/5 com
-  cinco visitantes. Não marcar a etapa como concluída antes do relatório
+- gravar o candidato atual e observar `HELLO game=STAGED_V1`;
+- validar D27, A39, ordem/ID, todas as etapas e uma retransmissão real;
+- provar ausência de avanço em cada estado;
+- executar 30 partidas físicas, três horas, mais de 100 D27, mais de 100
+  mudanças A39, dez recuperações USB, monitor definitivo e avaliação 4/5 com
+  cinco visitantes. Não marcar a etapa como concluída antes de
   `hardware_acceptance_summary.json` retornar `PASS`.
 
 ## 8. Cronograma sugerido

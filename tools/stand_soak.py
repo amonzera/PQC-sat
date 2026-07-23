@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Accelerated offline endurance check for the complete stand state machine."""
+"""Accelerated test-only endurance check for the staged game."""
 
 from __future__ import annotations
 
@@ -16,14 +16,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from stand_demo import (  # noqa: E402
-    DEFAULT_CONFIG_PATH,
-    DEFAULT_FIXTURE_PATH,
-    DemoState,
-    FixtureSerialClient,
-    StandConfig,
-    StandController,
-)
+from pqc_sat.testing.fixture import FixtureSerialClient  # noqa: E402
+from pqc_sat.stand.investigation import InvestigationController  # noqa: E402
+from pqc_sat.stand.model import InvestigationState, StandConfig  # noqa: E402
+from pqc_sat.stand.settings import DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH  # noqa: E402
 
 
 def rss_bytes() -> int:
@@ -43,23 +39,28 @@ def main(argv=None) -> int:
     parser.add_argument("--cycles", type=int, default=50)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE_PATH)
-    parser.add_argument("--output", type=Path, default=ROOT / "docs" / "stand" / "evidence" / "simulated_soak.json")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=ROOT / "docs" / "stand" / "evidence" / "staged_game_soak.json",
+    )
     args = parser.parse_args(argv)
     if args.cycles < 1:
         parser.error("--cycles deve ser positivo")
 
     config = replace(
         StandConfig.load(args.config),
-        intro_seconds=0.01,
-        comparison_hold_seconds=0.01,
-        fault_hold_seconds=0.01,
-        auto_reset_seconds=0.01,
         pot_poll_interval_seconds=0.001,
         button_debounce_seconds=0.001,
-        interaction_timeout_seconds=1.0,
+        screen_input_guard_seconds=0.001,
+        checkpoint_animation_ms=tuple(
+            (stage, 1)
+            for stage in ("PREPARE", "PROTECT", "TRANSMIT", "VERIFY", "RETRY", "DEBRIEF")
+        ),
+        target_max_seconds=2.0,
     )
     client = FixtureSerialClient(args.fixture, config, latency_seconds=0)
-    sent_commands = []
+    sent_commands: list[str] = []
     button_actions = 0
     pot_changes = 0
 
@@ -67,7 +68,7 @@ def main(argv=None) -> int:
         sent_commands.append(command)
         client.send(command, timeout=timeout)
 
-    controller = StandController(config, send, mode="simulated", now=0)
+    controller = InvestigationController(config, send, mode="simulated", now=0)
     client.start()
     synthetic_now = 0.0
     started = time.monotonic()
@@ -82,58 +83,114 @@ def main(argv=None) -> int:
                 controller.handle_serial_event(event_type, payload, now=now)
         raise RuntimeError("fila da fixture não estabilizou")
 
+    def press() -> None:
+        nonlocal button_actions
+        if controller.handle_button(now=synthetic_now, origin="test-fixture"):
+            button_actions += 1
+
     pump(synthetic_now)
     while controller.completed_cycles < args.cycles:
         synthetic_now += 0.02
         pump(synthetic_now)
-        if controller.state == DemoState.ATTRACT and controller.pending is None:
-            value = (controller.completed_cycles * 977) % (config.pot_maximum + 1)
-            client.set_pot(value)
-            pot_changes += 1
-            if controller.handle_button(now=synthetic_now, origin="soak"):
-                button_actions += 1
-        elif controller.state == DemoState.SELECT_BIT and controller.substage == "select_ready":
-            value = (client.pot_value + 613) % (config.pot_maximum + 1)
-            client.set_pot(value)
-            pot_changes += 1
-            if controller.handle_button(now=synthetic_now, origin="soak"):
-                button_actions += 1
+        if controller.input_ready(synthetic_now) and controller.pending is None:
+            state = controller.state
+            if state is InvestigationState.ATTRACT:
+                value = (controller.completed_cycles * 977) % (config.pot_maximum + 1)
+                client.set_pot(value)
+                pot_changes += 1
+                press()
+            elif state is InvestigationState.SELECT_MISSION:
+                if not controller.pending_choice:
+                    mission = config.missions[(controller.cycle_index - 1) % len(config.missions)]
+                    controller.handle_action(f"mission:{mission.mission_id}", now=synthetic_now)
+                else:
+                    press()
+            elif state is InvestigationState.SELECT_PROFILE:
+                mhz = config.baseline_mhz if controller.cycle_index % 2 else config.limited_mhz
+                if not controller.pending_choice:
+                    controller.handle_action(f"profile:{mhz}", now=synthetic_now)
+                else:
+                    press()
+            elif state is InvestigationState.SELECT_KEY_MODE:
+                mode = controller.KEY_MODES[(controller.cycle_index - 1) % len(controller.KEY_MODES)]
+                if not controller.pending_choice:
+                    controller.handle_action(f"key:{mode}", now=synthetic_now)
+                else:
+                    press()
+            elif state is InvestigationState.SELECT_GUARD:
+                guard = controller.GUARDS[((controller.cycle_index - 1) // 2) % len(controller.GUARDS)]
+                if not controller.pending_choice:
+                    controller.handle_action(f"guard:{guard}", now=synthetic_now)
+                else:
+                    press()
+            elif state in {
+                InvestigationState.PREPARE,
+                InvestigationState.PROTECT,
+                InvestigationState.TRANSMIT,
+                InvestigationState.VERIFY,
+                InvestigationState.RETRY,
+            } and controller.stage_ready_for_confirmation:
+                if state is InvestigationState.PROTECT:
+                    value = (client.pot_value + 613) % (config.pot_maximum + 1)
+                    client.set_pot(value)
+                    controller.set_simulated_pot(value)
+                    pot_changes += 1
+                press()
+            elif state is InvestigationState.DIAGNOSE:
+                if not controller.pending_choice:
+                    expected = controller._EXPECTED_DIAGNOSIS[controller.incident]
+                    controller.handle_action(f"diagnosis:{expected}", now=synthetic_now)
+                else:
+                    press()
+            elif state is InvestigationState.SELECT_RESPONSE:
+                if not controller.pending_choice:
+                    decision = "RETRY" if controller.cycle_index % 2 else "SAFE_MODE"
+                    controller.handle_action(f"response:{decision}", now=synthetic_now)
+                else:
+                    press()
+            elif (
+                state is InvestigationState.DEBRIEF
+                and controller.end_receipt is not None
+                and controller.animation_complete
+            ):
+                press()
+
         controller.update(now=synthetic_now)
         pump(synthetic_now)
-        if controller.state == DemoState.ERROR:
+        if controller.state is InvestigationState.ERROR:
             raise RuntimeError(controller.error_message)
         if synthetic_now > args.cycles * 5:
             raise RuntimeError("limite sintético excedido")
 
     elapsed = time.monotonic() - started
-    rss_end = rss_bytes()
-    mission_commands = [command for command in sent_commands if command.startswith("MISSION ")]
-    fault_commands = [command for command in sent_commands if command.startswith("FAULT ")]
+    game_commands = [command for command in sent_commands if command.startswith("GAME_")]
     report = {
-        "schema_version": "pqc-sat-stand-soak-v1",
+        "schema_version": "pqc-sat-stand-soak-v3",
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "mode": "simulated-official-fixture",
+        "mode": "test-only-deterministic-fixture",
+        "flow": "staged_game",
         "result": "PASS",
         "cycles_requested": args.cycles,
         "cycles_completed": controller.completed_cycles,
         "button_actions": button_actions,
         "pot_changes": pot_changes,
         "commands_total": len(sent_commands),
-        "mission_commands": len(mission_commands),
-        "fault_commands": len(fault_commands),
+        "game_commands": len(game_commands),
+        "game_begin_commands": sum(command.startswith("GAME_BEGIN ") for command in game_commands),
+        "game_retry_commands": sum(command.startswith("GAME_RETRY ") for command in game_commands),
         "rejected_events": controller.rejected_events,
+        "ignored_inputs": controller.ignored_inputs,
         "rss_start_bytes": rss_start,
-        "rss_end_bytes": rss_end,
-        "rss_growth_bytes": max(0, rss_end - rss_start),
+        "rss_end_bytes": rss_bytes(),
         "wall_elapsed_seconds": round(elapsed, 3),
         "synthetic_elapsed_seconds": round(synthetic_now, 3),
         "fixture": report_path(args.fixture),
         "limitations": [
-            "Este teste acelera o relógio da máquina de estados.",
-            "Não valida USB, botão físico, potenciômetro físico, heap da placa nem execução contínua em tempo real.",
-            "As métricas de missão vêm da fixture da campanha oficial; FAULT é um modelo determinístico offline.",
+            "Ferramenta exclusiva de teste; não é um modo executável pela aplicação de produção.",
+            "Não valida USB, D27, A39, heap real nem continuidade física.",
         ],
     }
+    report["rss_growth_bytes"] = max(0, report["rss_end_bytes"] - report["rss_start_bytes"])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     client.stop()

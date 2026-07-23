@@ -2,7 +2,7 @@
 """Stage 8 hardware acceptance runner for PQC-SAT.
 
 This script keeps the final presentation checks reproducible without moving
-advanced bench commands into the dashboard's visual button set.
+advanced bench commands into the visitor game interface.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ if __package__ in {None, ""}:
 
 from tools.final_metrics_battery import send_record, utc_now_iso, write_document
 from tools.serial_bridge import SerialBridge, SerialBridgeError, SerialBridgeTimeout
-from tools.serial_console import choose_port
+from pqc_sat.infrastructure.wisdom import discover_wisdom
 
 
 SCHEMA_VERSION = "pqc-sat-stage8-acceptance-v1"
@@ -67,9 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=10.0, help="response timeout in seconds")
     parser.add_argument("--duration", type=float, default=1800.0, help="long-run duration in seconds")
     parser.add_argument("--interval", type=float, default=30.0, help="seconds between long-run commands")
-    parser.add_argument("--attempts", type=int, default=5, help="dashboard demo attempts")
-    parser.add_argument("--skip-long-run", action="store_true", help="run only smoke checks and dashboard demo")
-    parser.add_argument("--skip-dashboard-demo", action="store_true", help="skip headless dashboard DEMO")
+    parser.add_argument("--skip-long-run", action="store_true", help="run only the short serial smoke")
     parser.add_argument("--log-dir", default=str(DEFAULT_LOG_DIR), help="directory for JSON output")
     return parser.parse_args()
 
@@ -93,59 +91,13 @@ def run_long(bridge: SerialBridge, duration: float, interval: float) -> list[dic
     return records
 
 
-def run_dashboard_demo(port: str, baudrate: int, timeout: float, attempts: int) -> dict[str, object]:
-    import dashboard
+def choose_port(explicit: str | None) -> str:
+    """Resolve the port by probing the actual staged-game firmware."""
 
-    client = dashboard.DashboardSerialClient(port=port, baudrate=baudrate, timeout=timeout)
-    panel = dashboard.DashboardPanel(serial_client=client)
-    started = time.monotonic()
-    record: dict[str, object] = {
-        "phase": "dashboard_demo",
-        "attempts": attempts,
-        "started_at": utc_now_iso(),
-        "ok": False,
-    }
-    connect_window = max(20.0, timeout * 2)
-    try:
-        while not panel.serial_connected and time.monotonic() - started < connect_window:
-            panel.update(0.1)
-            time.sleep(0.1)
-
-        if not panel.serial_connected:
-            record["error"] = panel.serial_status
-            return record
-
-        panel._execute_command(f"DEMO {attempts}")
-        command_status = panel.command_history[-1]["status"] if panel.command_history else ""
-        deadline = time.monotonic() + max(40.0, attempts * 4.0)
-        while time.monotonic() < deadline:
-            panel.update(0.1)
-            time.sleep(0.1)
-            if panel.demo_state in {"RESULTS", "IDLE"} and len(panel.experiment_events) >= attempts * 2:
-                break
-
-        summary = panel._demo_result_summary()
-        record.update(
-            {
-                "ok": (
-                    command_status == "DEMO START"
-                    and summary.get("none_silent") == attempts
-                    and summary.get("crc_detected") == attempts
-                ),
-                "status": command_status,
-                "serial_status": panel.serial_status,
-                "demo_state": panel.demo_state,
-                "summary": summary,
-                "event_count": len(panel.experiment_events),
-                "export_path": str(panel.last_export_path) if panel.last_export_path else "",
-            }
-        )
-        return record
-    finally:
-        panel.close()
+    return discover_wisdom(explicit, require_staged_game=True).port
 
 
-def summarize(records: list[dict[str, object]], dashboard_demo: dict[str, object] | None) -> dict[str, object]:
+def summarize(records: list[dict[str, object]]) -> dict[str, object]:
     failed = [record for record in records if not record.get("ok")]
     pqc_bench = [
         record
@@ -160,10 +112,9 @@ def summarize(records: list[dict[str, object]], dashboard_demo: dict[str, object
     return {
         "records": len(records),
         "failed": len(failed),
-        "dashboard_demo_ok": bool(dashboard_demo and dashboard_demo.get("ok")),
         "pqc_bench_runs": len(pqc_bench),
         "mission_runs": len(mission_runs),
-        "ok": not failed and (dashboard_demo is None or bool(dashboard_demo.get("ok"))),
+        "ok": not failed,
     }
 
 
@@ -171,8 +122,6 @@ def main() -> int:
     args = parse_args()
     started = time.monotonic()
     records: list[dict[str, object]] = []
-    dashboard_demo = None
-
     try:
         port = choose_port(args.port)
         with SerialBridge(port, baudrate=args.baud, timeout=args.timeout) as bridge:
@@ -185,9 +134,6 @@ def main() -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    if not args.skip_dashboard_demo:
-        dashboard_demo = run_dashboard_demo(port, args.baud, args.timeout, args.attempts)
-
     document = {
         "schema_version": SCHEMA_VERSION,
         "created_at": utc_now_iso(),
@@ -197,9 +143,9 @@ def main() -> int:
         "requested_duration_s": 0 if args.skip_long_run else args.duration,
         "actual_elapsed_s": round(time.monotonic() - started, 2),
         "records": records,
-        "dashboard_demo": dashboard_demo,
+        "game_preflight": {"ok": True, "port": port, "required_capability": "STAGED_V1"},
     }
-    document["summary"] = summarize(records, dashboard_demo)
+    document["summary"] = summarize(records)
     path = write_document(document, args.log_dir, "stage8_acceptance")
     print(f"stage8_acceptance_json={path}")
     print("summary=" + json.dumps(document["summary"], sort_keys=True))

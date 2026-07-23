@@ -4,8 +4,10 @@ Este diretorio contem o firmware do projeto para a RoboCore BlackBoard Wisdom.
 Ele implementa o bridge serial `V1`, inventário da placa e comandos de bancada
 para exercitar os perifericos integrados. Ele também executa um experimento
 pequeno de payload com bit-flip e CRC32, ML-KEM-512 real com `mlkem-native` e
-o comando `MISSION` para comparar entrega de mensagem em `CLASSIC`, `PQC` e
-`PQC_CRC32`.
+o comando `MISSION` para comparar entrega de mensagem em `CLASSIC`,
+`CLASSIC_CRC32`, `PQC` e `PQC_CRC32`. O jogo público usa o protocolo
+transacional `GAME_*` com capacidade `STAGED_V1`; o comando monolítico
+`INVESTIGATE` permanece para compatibilidade e bancada.
 
 O objetivo desta etapa e dominar a comunicação ESP32/notebook e preservar o
 potencial da Wisdom para a demonstração: sensores, atuadores, OLED, entradas
@@ -29,19 +31,23 @@ Serial Monitor: Newline
 
 Alternativamente, com PlatformIO:
 
-```bash
-python3 -m platformio run -e robocore_wisdom_esp32
+```text
+python3 tools/firmware_deploy.py
 ```
 
 A configuração usa `board = esp32dev`, adequada para a Wisdom identificada como
 ESP32 clássico com conversor CP2102/CP2102N. Se a placa for trocada, revise
 `platformio.ini`.
 
-Para gravar, somente depois de confirmar que o backup da flash original existe:
+Para gravar, somente depois de confirmar que o backup da flash original existe
+e autorizar explicitamente `--upload`:
 
-```bash
-python3 -m platformio run -e robocore_wisdom_esp32 -t upload
+```text
+python3 tools/firmware_deploy.py --upload
 ```
+
+Esse utilitário usa argumentos de processo Python, sem shell/Bash, reaproveita
+a descoberta robusta do dashboard e valida `game=STAGED_V1` depois do reset.
 
 O firmware emite um evento de boot e aceita frames de uma linha:
 
@@ -101,9 +107,8 @@ python3 tools/serial_console.py --port /dev/ttyUSB0 --interactive
 
 Troque `/dev/ttyUSB0` pela porta exibida no seu sistema.
 
-No modo interativo, digite `HELP` para ver a lista completa de comandos no
-terminal. O comando também e enviado ao firmware, que retorna os grupos de
-comandos aceitos pela placa.
+No modo interativo, digite `HELP` para ver localmente a lista completa de
+comandos. Use os comandos individuais para consultar a placa.
 
 Para usar a mesma placa pelo dashboard:
 
@@ -112,8 +117,11 @@ python3 dashboard.py
 python3 dashboard.py --port /dev/ttyUSB0
 ```
 
-O dashboard tenta detectar a Wisdom automaticamente. A arte do satélite só e
-liberada depois do handshake `HELLO`; sem a placa, a órbita fica travada.
+O programa sonda as portas por `HELLO` e só abre a interface após validar a
+Wisdom. Sem placa, ou com firmware sem `game=STAGED_V1`, ele encerra com uma
+mensagem específica. O handshake inclui `uptime_ms`, permitindo rejeitar um
+`BUTTON_PING` enfileirado antes de a interface estar pronta. Um `HELLO` novo
+também limpa qualquer sessão `GAME_*` anterior.
 
 Em Linux, se a porta existir mas abrir com `Permission denied`, confirme:
 
@@ -146,8 +154,19 @@ TELEMETRY
 FAULT NONE 5051432D5341547C54454D503D32342E357C5354415455533D4F4B 0 0x01
 FAULT CRC32 5051432D5341547C54454D503D32342E357C5354415455533D4F4B 0 0x01
 MISSION CLASSIC
+MISSION CLASSIC_CRC32
 MISSION PQC
 MISSION PQC_CRC32
+GAME_BEGIN TEST-STAGED BASELINE PQC CRC32 RX_MEMORY 54454D503D383443
+GAME_PROTECT TEST-STAGED
+GAME_TRANSMIT TEST-STAGED 0 0x01
+GAME_VERIFY TEST-STAGED
+GAME_RETRY TEST-STAGED
+GAME_END TEST-STAGED ACCEPT
+INVESTIGATE PQC NORMAL 54454D503D3834437C5354415455533D435249544943414C7C534146453D52455155455354 0 0x01 TEST-NORMAL
+INVESTIGATE PQC CHANNEL_BITFLIP 54454D503D3834437C5354415455533D435249544943414C7C534146453D52455155455354 0 0x01 TEST-CHANNEL
+INVESTIGATE PQC TAMPER 54454D503D3834437C5354415455533D435249544943414C7C534146453D52455155455354 0 0x01 TEST-TAMPER
+INVESTIGATE PQC_CRC32 RX_MEMORY 54454D503D3834437C5354415455533D435249544943414C7C534146453D52455155455354 0 0x01 TEST-MEMORY
 SENSOR_READ ACCEL
 OLED STANDBY
 LED TEST
@@ -167,9 +186,25 @@ Para a sequência completa de bancada, use
 - A interface PQC real existe: `PQC_INFO` reporta alvo, backend, variante,
   commit, licença, tamanhos e métricas; `PQC_KAT`, `PQC_KEYGEN`,
   `PQC_ENCAP`, `PQC_DECAP`, `PQC_FAULT` e `PQC_BENCH` executam no firmware.
-- O comando `MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]` entrega uma mensagem
+- O comando `MISSION CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32 [payload_hex]` entrega uma mensagem
   curta e retorna tempos, bytes, heap, resultado, confirmação, checksum e
   subtempos de ML-KEM quando aplicável.
+- `GAME_BEGIN`, `GAME_PROTECT`, `GAME_TRANSMIT`, `GAME_VERIFY`, `GAME_RETRY`,
+  `GAME_END` e `GAME_ABORT` dividem a partida em etapas reais, mantêm uma única
+  sessão, rejeitam ordem/ID incorreto e restauram o baseline ao encerrar.
+- Enquanto a sessão está ativa, somente sua continuação `GAME_*`, um novo
+  `GAME_BEGIN`, o reset transacional `HELLO` e a consulta somente-leitura
+  `ANALOG POT` são aceitos. A exceção captura A39 entre `GAME_PROTECT` e
+  `GAME_TRANSMIT` sem limpar a sessão; outros comandos de bancada concorrentes
+  retornam `BAD_GAME_STATE` e limpam o contexto para não reutilizar perfil nem
+  buffers ML-KEM globais.
+- `GAME_VERIFY` apaga chaves e segredos; `GAME_RETRY` usa o mesmo payload e
+  cria chave/nonce novos sem injetar falha. Respostas expõem somente métricas e
+  fingerprints curtas.
+- `INVESTIGATE scenario incident payload_hex index mask incident_id` executa
+  mutação single-bit em canal ou memória e retorna as três verificações do
+  diagnóstico em uma resposta legada. O frame de entrada suporta o payload
+  hexadecimal máximo de 96 B.
 - A injecao de falhas existe em dois caminhos: payload serial com
   `FAULT NONE|CRC32 ...` e ciphertext ML-KEM com
   `PQC_FAULT index mask [CONFIRM|NONE]`.
@@ -184,11 +219,12 @@ Para a sequência completa de bancada, use
 
 ## Manutenção
 
-O MVP do firmware está concluído. Novas mudanças devem preservar
-`MISSION CLASSIC`, `MISSION PQC`, `MISSION PQC_CRC32`, `PQC_KAT`,
-`PQC_FAULT`, `PQC_BENCH 100`, `FAULT CRC32` e `BUTTON_PING` como testes de
-regressão, sem expor chave privada, segredo compartilhado completo ou material
-suficiente para reconstruir a sessão.
+O MVP original do firmware está concluído. A extensão `STAGED_V1` está
+compilada, mas ainda depende de flash e smoke na Wisdom. Novas mudanças devem
+preservar `MISSION`, `INVESTIGATE`, todos os `GAME_*`, `PQC_KAT`, `PQC_FAULT`,
+`PQC_BENCH 100`, `FAULT CRC32` e `BUTTON_PING` como regressão, sem expor chave
+privada, segredo compartilhado completo ou material suficiente para reconstruir
+a sessão.
 
 Sequência minima de bancada:
 
@@ -201,8 +237,15 @@ PQC_DECAP
 PQC_FAULT 0 0x01 CONFIRM
 PQC_BENCH n
 MISSION CLASSIC
+MISSION CLASSIC_CRC32
 MISSION PQC
 MISSION PQC_CRC32
+GAME_BEGIN TEST-STAGED BASELINE PQC CRC32 RX_MEMORY 54454D503D383443
+GAME_PROTECT TEST-STAGED
+GAME_TRANSMIT TEST-STAGED 0 0x01
+GAME_VERIFY TEST-STAGED
+GAME_RETRY TEST-STAGED
+GAME_END TEST-STAGED ACCEPT
 ```
 
 Validação real em placa após upload:
@@ -217,13 +260,17 @@ PQC_BENCH 100 OBC-1U-LIMITED  ok=100 keygen_avg_us=10045 encap_avg_us=11769 deca
 FAULT CRC32 ... 0 0x01        result=DETECTED_GUARD crc_before=0xDFFEC3A1 crc_after=0x7989C815
 ```
 
-Validação funcional do novo fluxo de apresentação:
+Validação funcional histórica de `MISSION`:
 
 ```text
 MISSION CLASSIC      result=DELIVERED crypto=AES-128-GCM cipher=AES-128-GCM checksum=NONE aead_match=1 elapsed_us=<medido>
 MISSION PQC          result=DELIVERED crypto=ML-KEM-512 cipher=AES-128-GCM checksum=NONE key_match=1 aead_match=1 elapsed_us=<medido>
 MISSION PQC_CRC32    result=DELIVERED crypto=ML-KEM-512 cipher=AES-128-GCM checksum=CRC32 key_match=1 aead_match=1 crc_match=1 elapsed_us=<medido>
 ```
+
+O smoke físico `STAGED_V1` ainda precisa produzir respostas reais para a
+sequência `GAME_BEGIN` … `GAME_END`; não reutilize as linhas acima como prova
+desse protocolo.
 
 Medição comparativa registrada em 2026-06-17:
 

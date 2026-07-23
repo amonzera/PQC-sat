@@ -29,7 +29,18 @@ FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PQC_FAULT index mask [CONFIRM|NONE]", "aplica bit-flip em ciphertext ML-KEM e testa confirmação"),
     CommandInfo("PQC_BENCH n", "executa n rodadas keygen/encap/decap, 1..100"),
     CommandInfo("STRESS PQC_LOOP n CONFIRM", "executa ML-KEM em loop extremo, 1..500, com confirmação explícita"),
-    CommandInfo("MISSION CLASSIC|PQC|PQC_CRC32 [payload_hex]", "envia mensagem curta e mede custo/bytes/segurança por cenário"),
+    CommandInfo("MISSION CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32 [payload_hex]", "envia mensagem curta e mede custo/bytes/segurança por cenário"),
+    CommandInfo(
+        "INVESTIGATE scenario incident payload_hex index mask incident_id",
+        "executa incidente em camadas e reporta CRC de quadro, GCM e CRC da aplicação",
+    ),
+    CommandInfo("GAME_BEGIN id profile CLASSIC|PQC NONE|CRC32 incident payload_hex", "inicia uma sessão transacional STAGED_V1"),
+    CommandInfo("GAME_PROTECT id", "estabelece a chave e monta o envelope AES-GCM"),
+    CommandInfo("GAME_TRANSMIT id byte_index bit_mask", "aplica o incidente oculto no vetor escolhido"),
+    CommandInfo("GAME_VERIFY id", "verifica CRC de quadro, tag GCM e CRC da aplicação"),
+    CommandInfo("GAME_RETRY id", "retransmite o mesmo payload com chave e nonce novos"),
+    CommandInfo("GAME_END id ACCEPT|SAFE_MODE", "encerra a sessão e restaura o baseline"),
+    CommandInfo("GAME_ABORT id", "aborta e apaga a sessão ativa"),
     CommandInfo("PERIPHERALS", "detecta OLED, APDS-9960, HTU21D e MMA8452 no I2C"),
     CommandInfo("I2C_SCAN", "varre o barramento I2C SDA21/SCL22"),
     CommandInfo("FEATURES [CORE|I2C|GPIO|ANALOG|EXPANSION]", "lista grupos de recursos conhecidos"),
@@ -64,7 +75,7 @@ DASHBOARD_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("SET_PRESET_PQC_CRC32", "seleciona preset visual PQC+CRC antes de ENVIAR MSG"),
     CommandInfo("SEND_MESSAGE", "envia mensagem usando o preset visual selecionado"),
     CommandInfo("TOGGLE_LIVE_PAYLOAD", "liga/desliga payload de missão gerado por sensores da Wisdom"),
-    CommandInfo("MISSION CLASSIC|PQC|PQC_CRC32", "executa entrega de mensagem nos cenários da apresentação"),
+    CommandInfo("MISSION CLASSIC|CLASSIC_CRC32|PQC|PQC_CRC32", "executa entrega de mensagem nos quatro cruzamentos de chave e guardião pelo terminal"),
     CommandInfo("CRC_CHECK", "aplica bit-flip e verifica CRC32 real"),
     CommandInfo("EXPORT_JSON", "salva eventos e métricas em JSON"),
     CommandInfo("SAVE_SESSION", "alias de EXPORT_JSON"),
@@ -81,6 +92,7 @@ DEMO_FIRMWARE_COMMANDS: tuple[CommandInfo, ...] = (
     CommandInfo("PING", "confirma que a placa respondeu ao painel"),
     CommandInfo("STATUS", "mostra perfil, CPU, memória e rádio"),
     CommandInfo("MISSION CLASSIC", "envia mensagem cifrada com AES-128-GCM e chave efêmera"),
+    CommandInfo("MISSION CLASSIC_CRC32", "usa chave AES efêmera local, AES-GCM e CRC32 protegido"),
     CommandInfo("MISSION PQC", "usa ML-KEM-512 para chave e AES-128-GCM para cifrar"),
     CommandInfo("MISSION PQC_CRC32", "usa ML-KEM-512, AES-GCM e CRC32 protegido no payload"),
     CommandInfo("TELEMETRY", "atualiza telemetria real da Wisdom"),
@@ -112,7 +124,7 @@ def is_demo_firmware_command(command_line: str) -> bool:
     if name in {"PING", "STATUS", "TELEMETRY"}:
         return len(parts) == 1
     if name == "MISSION":
-        return len(parts) == 2 and parts[1] in {"CLASSIC", "PQC", "PQC_CRC32"}
+        return len(parts) == 2 and parts[1] in {"CLASSIC", "CLASSIC_CRC32", "PQC", "PQC_CRC32"}
     if name == "SENSOR_READ":
         return len(parts) == 2 and parts[1] in {"TEMP_HUM", "ACCEL", "APDS"}
     if name == "OLED":

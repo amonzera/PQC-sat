@@ -6,7 +6,10 @@ o documento separado de algoritmos. O objetivo é permitir que um aluno leia do
 começo ao fim, compreenda o projeto com profundidade, ensaie a demonstração e
 responda perguntas sem superestimar o que foi implementado.
 
-Estado documental: 2026-07-02.
+Estado documental: 2026-07-21. Os resultados oficiais continuam sendo os da
+bateria de 2026-07-02. O jogo `STAGED_V1` está validado em software, mas o
+firmware desta revisão ainda precisa ser gravado e validado fisicamente; não o
+apresente como concluído antes dos gates de `docs/stand/FINAL_VALIDATION.md`.
 
 ## 1. Como estudar este documento
 
@@ -22,8 +25,9 @@ Se houver pouco tempo, leia nesta ordem:
 2. seção 8, os três cenários;
 3. seção 11, resultados oficiais;
 4. seção 17, roteiro de 20 minutos;
-5. seção 18, perguntas difíceis;
-6. seção 22, folha de consulta rápida.
+5. seção 17.5, roteiro externo do jogo por fases;
+6. seção 18, perguntas difíceis;
+7. seção 22, folha de consulta rápida.
 
 ## 2. O projeto em um minuto
 
@@ -167,10 +171,10 @@ medida. Tempo de CPU é indicador de custo computacional, não watts ou joules.
 ```text
 ┌──────────────────────── notebook ────────────────────────┐
 │ dashboard.py                                             │
-│  - onboarding e visualização                             │
-│  - comandos da demo                                      │
-│  - popups e RESULTADOS                                   │
-│  - exportação JSON                                       │
+│  - jogo público em 14 estados                            │
+│  - cartão seleciona; controle contextual ou D27 confirmam│
+│  - métricas GAME_* e log JSONL v2                        │
+│  - sem simulação de produção                             │
 │             │                                            │
 │             └── bridge serial V1, não bloqueante ────────┼──┐
 └──────────────────────────────────────────────────────────┘  │ USB serial
@@ -190,43 +194,34 @@ medida. Tempo de CPU é indicador de custo computacional, não watts ou joules.
 O dashboard não calcula ML-KEM. Ele envia comandos, recebe resultados e
 visualiza os dados. O firmware é quem executa criptografia e medições.
 
-Sem handshake válido da Wisdom, `ENVIAR MSG` deve ser recusado. O modo
-`--simulated` existe para ensaio visual e não deve reproduzir métricas oficiais
-como se viessem do hardware.
+Sem handshake válido da Wisdom, o programa mantém somente o standby de busca;
+a abertura narrativa e o jogo não são liberados.
+A execução pública não possui modo simulado; fixtures existem apenas nos
+testes e nunca produzem métricas oficiais.
 
-### 5.2 Payload vivo
+### 5.2 Payload da missão
 
-Com `Payload vivo` ligado, o dashboard solicita leituras à placa, monta uma
-mensagem ASCII compacta e envia seu hexadecimal no comando `MISSION`.
+O visitante escolhe um dos três payloads ASCII fixos e reproduzíveis. A Wisdom
+recebe o hexadecimal correspondente em `GAME_BEGIN`; não há editor de texto ou
+payload sintético criado pelo dashboard.
 
-Exemplo:
-
-```text
-PQC-SAT|S=42|T=2450|H=5530|X=12|Y=-34|Z=1001|L=321|P=2048|B=0|OK
-```
-
-Campos:
-
-- `S`: sequência;
-- `T`, `H`: temperatura e umidade em escala inteira;
-- `X`, `Y`, `Z`: aceleração;
-- `L`: luz/proximidade;
-- `P`: potenciômetro;
-- `B`: botão;
-- `OK`: marcador de estado.
-
-Se um sensor falha, o payload pode usar `NA`. Isso evita travar a demonstração
-por um periférico secundário.
+Os cartões atuais são telemetria crítica, comando de emergência e atualização
+de configuração. Prioridade, prazo e consequência pertencem ao contexto
+didático; não são dados de uma missão em voo.
 
 ### 5.3 Evento do botão físico
 
 O firmware possui debounce e emite `BUTTON_PING` quando o botão da Wisdom é
-pressionado. O dashboard desenha apenas um feixe curto do satélite até a Terra.
-Esse easter egg funciona como um ping visual e não reativa polling automático
-de telemetria.
+pressionado. O standby não usa botão e sai automaticamente pelo handshake. Na
+abertura narrativa, `INICIAR MISSÃO` ou D27 abrem diretamente as escolhas. No
+jogo iniciado por `python3 dashboard.py`, cartão seleciona e o controle
+contextual ou D27 confirmam. A resposta serial e a animação apenas liberam a
+próxima confirmação.
 
-Antes da apresentação, confirme que a revisão de firmware com `BUTTON_PING`
-foi gravada e validada na placa. Compilar o código não equivale a gravá-lo.
+Antes do jogo, confirme que a revisão anuncia `game=STAGED_V1`, inclui a
+leitura `pot` no evento e foi gravada/validada na placa. Compilar o código não
+equivale a gravá-lo. Confirme o D27 físico na abertura narrativa e durante a
+partida; não use teclado ou fixture para fingir hardware.
 
 ## 6. Fundamentos de criptografia
 
@@ -677,76 +672,69 @@ Uma bateria ainda mais antiga usava composição de pacote sem AES-GCM. Números
 como 511 us, 13.234 us, 73 B e 841 B são históricos pré-AES e não devem ser
 misturados com a coleta atual.
 
-## 12. Como ler o dashboard
+## 12. Como ler a interface única
 
-### 12.1 Onboarding
+### 12.1 Cabeçalho e progresso
 
-As cinco telas cobrem:
+Depois do handshake, a interface pública não repete marca, conexão ou atos. O
+único cabeçalho identifica a tela ativa, por exemplo `ESCOLHA 2/4 • CPU` ou
+`CHECKPOINT 3/4 • TRANSMITIR`.
 
-1. cenário de segurança embarcada em órbita;
-2. problema da migração para PQC;
-3. overview da mensagem até a entrega;
-4. cenários e hipóteses;
-5. projeções, limites e roteiro da demonstração.
+A Terra em rotação e o satélite sorridente em órbita formam um mundo
+procedural persistente; a torre sobre o planeta foi removida. Nas escolhas,
+cada cartão quadrado tem um desenho próprio e um título em destaque, sem
+subtítulo interno; a explicação aparece somente depois que o visitante
+seleciona a opção. A faixa de loadout mostra missão, CPU, chave e CRC somente
+depois de cada confirmação.
 
-### 12.2 Centro
+### 12.2 Cartões de escolha
 
-Terra procedural, continentes, satélite e órbita contextualizam a narrativa. O
-feixe acionado pelo botão físico é apenas um ping visual.
+Em `SELECT_MISSION`, `SELECT_PROFILE`, `SELECT_KEY_MODE`, `SELECT_GUARD`,
+`DIAGNOSE` e `SELECT_RESPONSE`, toque no cartão apenas o destaca. A seleção
+pode ser trocada até a confirmação. O cartão mantém somente arte e título; o
+efeito científico da opção selecionada surge abaixo do conjunto e o botão
+contextual aparece quando a escolha está pronta. Depois da confirmação não
+existe “voltar”.
 
-### 12.3 Faixa superior
+### 12.3 Checkpoints reais
 
-- título do projeto;
-- `RESULTADOS`;
-- retorno ao onboarding;
-- relógio e estado `SAT CONECTADO`;
-- CPU e RAM.
+`PREPARE`, `PROTECT`, `TRANSMIT`, `VERIFY` e `RETRY` mostram resposta real da
+Wisdom e uma animação didática ampliada. Enquanto comando ou animação estiver
+pendente, verde e D27 não avançam. Tempo, bytes e heap não vêm da animação.
 
-### 12.4 Painel esquerdo
+Antes de a resposta serial passar pelo parser, não há encenação do trabalho:
+a interface mostra uma espera estática. Só depois da validação ela reconstrói
+didaticamente o que ocorreu. Em `PROTECT`, os subtimings reais distribuem as
+etapas visuais quando estão presentes; em `VERIFY`, cada portal recebe o valor
+real de `GameResult`.
 
-- estado da sessão;
-- ML-KEM ativo somente em `PQC` e `PQC+CRC`;
-- guardião `NONE` ou `CRC32`.
+Depois de completar a reprodução automática, a mensagem recebe contorno verde
+e vira o controle da explicação. Segure-a e arraste para a entrada ou para uma
+estação. Cada parada mostra o que entra, o que acontece, o que sai e a evidência
+real. Voltar a mensagem só volta a explicação: não desfaz operação, não altera
+resultado e não bloqueia novamente a confirmação.
 
-### 12.5 Painel direito
-
-Botões principais:
-
-- `ENVIAR MSG`;
-- `CLÁSSICA`;
-- `PQC`;
-- `PQC+CRC`;
-- `FALHA`.
-
-Comandos técnicos continuam disponíveis no terminal textual e em
-`tools/serial_console.py`, mas não devem dominar a apresentação.
-
-### 12.6 Popups de mensagem
-
-Cada cenário abre um popup arrastável. A animação mostra entrada, operação,
-saída, composição do pacote, explicação e linha do tempo. Use a barra para
-pausar/revisar e `VER DADOS` para abrir métricas.
-
-Ordem lógica de PQC:
+Ordem lógica do caminho PQC:
 
 ```text
-PAYLOAD -> CRC opcional -> KEYGEN -> ENCAP -> KDF -> AES-GCM
-        -> DECAP -> VERIFICA -> RESULTADO
+PAYLOAD -> CRC opcional -> KEYGEN -> ENCAP -> DECAP -> KDF -> AES-GCM
+        -> CRC DO QUADRO -> CANAL -> GCM -> CRC DA APLICAÇÃO -> RESULTADO
 ```
 
-### 12.7 `RESULTADOS`
+### 12.4 Encerramento
 
-O resumo de apresentação mostra bateria, desempenho, detecção e conclusões. A
-visão `DADOS TÉCNICOS` tem duas páginas. `MÉTRICAS` compara os três cenários
-em 240 e 80 MHz, mostra gráficos de tempo, fases internas, composição do
-pacote, benchmark, validade AES-GCM e falhas. `TEORIA E FONTES` explica o que
-cada número mede, por que a redução de clock não escala tudo exatamente por
-três, por que `PQC+CRC` pode ter média total menor mesmo com `crc_us` positivo,
-o significado de heap/min-heap e a função de cada referência bibliográfica.
-As barras comparam cenários apenas dentro do perfil indicado. A tela lê dados
-consolidados do projeto; não inicia nova coleta.
+`DEBRIEF` revela a causa, compara a hipótese do visitante, separa entrega,
+detecção, custo e diagnóstico e oferece um contrafactual qualitativo. Não há
+nota ou ranking. A mensagem pode ser arrastada pela revisão completa de
+preparar, proteger, transmitir, verificar e eventual retransmissão. Os
+resultados oficiais da bateria continuam neste guia e em
+`docs/METRICAS_CONSOLIDADAS.md`; a partida pública não atualiza estatísticas.
 
-`STRESS PQC 500` é fechamento opcional de carga, não fonte estatística.
+### 12.5 Superfície técnica separada
+
+Comandos de inventário, sensores, `MISSION`, `FAULT`, `INVESTIGATE`, benchmark
+e stress permanecem em `tools/serial_console.py` e scripts de bancada. Eles não
+possuem console visual, botões ou segundo dashboard.
 
 ## 13. O que cada métrica significa
 
@@ -848,8 +836,8 @@ entre dispositivos independentes.
 python3 dashboard.py --port /dev/ttyUSB0
 ```
 
-5. Aguarde `SAT CONECTADO`.
-6. Mantenha `Payload vivo` ligado.
+5. Aguarde o standby desaparecer e a abertura narrativa surgir.
+6. Confirme D27 e A39 antes da entrada do público.
 7. Não inicie bateria longa durante a apresentação.
 
 ### 17.2 Distribuição de tempo
@@ -873,71 +861,52 @@ Pergunte:
 
 Explique que a resposta será observada na placa, não apenas estimada.
 
-### 17.4 Use o onboarding
+### 17.4 Condução da interface única
 
-Passe pelas cinco telas sem ler palavra por palavra. Em cada tela, dê uma
-mensagem:
+Faça uma partida de 2–3 minutos com o roteiro abaixo. Depois da partida, use os
+resultados oficiais deste documento para contextualizar custo: 23,2x no tempo
+e 12,1x nos bytes a 240 MHz na coleta controlada. Não trate uma partida pública
+como nova amostra estatística.
 
-1. hardware limitado e bit-flip;
-2. ameaça a mecanismos de chave pública;
-3. ML-KEM estabelece e AES-GCM protege;
-4. os três cenários mudam uma camada por vez;
-5. hipóteses, limites e sequência da demo.
-
-### 17.5 Demonstração das mensagens
-
-1. Selecione `CLÁSSICA` e clique `ENVIAR MSG`.
-   - diga: “baseline AES-GCM, sem ML-KEM”;
-   - pause no RNG e AES-GCM;
-   - mostre tempo e 69 B como referência oficial, não como valor obrigatório do
-     envio ao vivo.
-2. Selecione `PQC` e clique `ENVIAR MSG`.
-   - pause em KEYGEN, ENCAP e DECAP;
-   - mostre o ciphertext ML-KEM de 768 B;
-   - destaque que AES-GCM ainda cifra.
-3. Selecione `PQC+CRC` e clique `ENVIAR MSG`.
-   - destaque CRC antes da cifragem;
-   - mostre +4 B;
-   - explique que não é autenticação contra atacante.
-
-Se desejar comparar popups, mantenha-os abertos e arraste-os. Em resolução
-menor, compare sequencialmente para preservar legibilidade.
-
-### 17.6 Demonstração de falha
-
-1. Selecione `PQC`, gire o potenciômetro e clique `FALHA`.
-2. Mostre `SILENT`.
-3. Pergunte: “Os bytes mudaram; quem percebeu?”
-4. Selecione `PQC+CRC`, gire o potenciômetro e clique `FALHA`.
-5. Mostre `DETECTED_GUARD`.
-
-Frase correta:
-
-> Mantivemos o tipo de falha e mudamos a presença do guardião. Sem referência,
-> a corrupção foi silenciosa. Com CRC salvo antes da falha, a divergência ficou
-> visível.
-
-### 17.7 Ping físico opcional
-
-Pressione o botão da Wisdom uma vez. O feixe visual representa um ping do
-satélite para a Terra. Não associe esse efeito a rádio real ou medição de
-latência de rede.
-
-### 17.8 Resultados
-
-Abra `RESULTADOS` e conduza três conclusões:
-
-1. **segurança:** ML-KEM-512 real e AES-GCM validado;
-2. **custo:** 23,2x em tempo e 12,1x em bytes a 240 MHz;
-3. **integridade:** 200/200 silenciosas sem CRC e 200/200 detectadas com CRC.
-
-Depois diga os limites antes que a banca os cobre.
-
-### 17.9 Fechamento
+Feche com:
 
 > PQC não foi inviável: funcionou. Mas segurança altera o orçamento do sistema.
 > Em hardware limitado, tempo e tráfego precisam ser decisões de arquitetura,
 > não detalhes adicionados no final.
+
+### 17.5 Roteiro externo do jogo por fases (2–3 minutos)
+
+Este roteiro pertence ao apresentador. A tela mantém textos públicos curtos e
+não deve receber notas F12. Abra com:
+
+```bash
+python3 dashboard.py --port /dev/ttyUSB0 --restart-on-crash
+```
+
+Em hardware, toque no cartão somente destaca uma opção; espere a tela liberar
+e use a faixa verde ou peça um novo D27 em cada linha. Não antecipe o incidente.
+
+| Fase | Frase do apresentador | Pergunta ao visitante | Conceito teórico | Animação esperada | Resposta segura | Afirmação proibida |
+|---|---|---|---|---|---|---|
+| `ATTRACT` | “Vamos acompanhar uma mensagem real processada pela Wisdom.” | “Pronto para assumir a missão?” | busca automática; abertura por `INICIAR MISSÃO` ou D27 | Terra, CubeSat e chamada mínima; segue direto às escolhas | “Ainda não há resultado; o `HELLO` só confirmou a capacidade.” | “A placa está online” sem `game=STAGED_V1` |
+| `SELECT_MISSION` | “Escolha qual consequência você quer proteger.” | “Qual mensagem tolera menos erro?” | payload, prioridade e prazo | desenhos de telemetria, comando e configuração; o selecionado pulsa | “O prazo é contexto didático, não deadline de voo certificado.” | “A missão representa um satélite real em operação.” |
+| `SELECT_PROFILE` | “Agora escolha o ritmo de CPU do experimento.” | “80 MHz deve aumentar qual custo?” | perfil controlado e tempo de CPU | chips ilustrados mostram ritmos distintos, sem ícone de energia | “80 MHz é um perfil experimental; não medimos energia.” | “Todo CubeSat opera a 80 MHz” ou “economizamos energia.” |
+| `SELECT_KEY_MODE` | “Escolha como a chave AES será obtida.” | “ML-KEM cifra a mensagem ou estabelece um segredo?” | KEM, KDF e cifra simétrica | chave local e cápsula ML-KEM percorrem caminhos visuais distintos | “ML-KEM estabelece; AES-GCM cifra e autentica.” | “ML-KEM criptografa o payload” ou “CLASSIC é ECDH.” |
+| `SELECT_GUARD` | “Decida se o plaintext leva um CRC da aplicação.” | “Um CRC válido prova autenticidade?” | checksum e região coberta | blocos do payload recebem ou não o bloco verde de +4 B | “CRC detecta corrupção acidental; não autentica.” | “CRC impede ataque” ou “CRC substitui GCM.” |
+| `PREPARE` | “A Wisdom está serializando exatamente a mensagem escolhida.” | “Onde o CRC entra quando ligado?” | representação em bytes e referência anterior à falha | bytes só surgem durante serialização; CRC muda de previsto para calculando e anexado; depois arraste a mensagem | “A animação está ampliada; o tempo numérico vem da resposta.” | “Esses segundos são o tempo real da placa.” |
+| `PROTECT` | “Agora o segredo é obtido e o AES-GCM protege o pacote.” | “Qual parte muda entre CLASSIC e PQC?” | KeyGen, Encaps, Decaps, KDF, nonce e tag | entrada, operação ativa e saída ainda apagada; depois arraste por cada subtiming | “Todas as opções usam AES-128-GCM; PQC muda o estabelecimento.” | “PQC substitui o AES” ou “a tag é um CRC.” |
+| `TRANSMIT` | “Gire A39: ele escolhe o bit; a causa continua escondida.” | “Qual byte e máscara foram selecionados?” | vetor single-bit reproduzível e camada do incidente | a mensagem atravessa as estações; o bit aparece somente no ponto A39 e a revisão não revela a causa | “A falha é injetada por software e ainda não revela sua causa.” | “Observamos radiação real” ou “o potenciômetro mede radiação.” |
+| `VERIFY` | “Leia as três camadas na ordem: quadro, GCM e aplicação.” | “Qual foi a primeira evidência que falhou?” | integridade de transporte, autenticação e integridade pós-GCM | indicadores reais são revelados em ordem e podem ser revistos arrastando a mensagem | “O padrão sugere uma camada; não prova a causa física.” | “CRC distingue ataque de radiação.” |
+| `DIAGNOSE` | “Forme sua hipótese sem ver a resposta.” | “Canal, adulteração ou memória: qual combina com o padrão?” | inferência por evidências | hipótese apenas recebe destaque | “Você pode mudar a seleção até confirmar no verde ou D27.” | “A tela já identificou definitivamente a origem.” |
+| `SELECT_RESPONSE` | “Escolha o que o sistema deveria fazer com este pacote.” | “Aceitar, retransmitir ou pedir modo seguro?” | decisão operacional condicionada à verificação | `ACCEPT` fica bloqueado em rejeição criptográfica | “Pacote criptograficamente rejeitado não pode ser aceito aqui.” | “Modo seguro é uma política universal” ou “retry garante disponibilidade.” |
+| `RETRY` | “Vamos retransmitir a mesma mensagem sem repetir material criptográfico.” | “O que precisa mudar e o que precisa permanecer?” | mesmo payload, chave/nonce novos, sem falha injetada | arraste por payload igual, chave nova, nonce novo, proteção e entrega | “O harness confirma fingerprints novos e `DELIVERED`.” | “Reutilizamos o nonce” ou “corrigimos o pacote antigo.” |
+| `DEBRIEF` | “Agora podemos revelar a cadeia completa.” | “Seu diagnóstico e sua ação protegeram a missão?” | causalidade, contrafactual e limites | arraste a mensagem pela revisão completa; só aqui o incidente é revelado | “Tempo, bytes e heap são desta partida; não há nota ou ranking.” | “Um acerto prova causalidade física” ou “a demo vira resultado oficial.” |
+| `ERROR` | “A partida foi interrompida e nenhum resultado anterior será usado.” | “Podemos repetir depois de um handshake novo?” | falha segura, limpeza de sessão e recuperação | erro estático; sem números reaproveitados | “Reconecte, aguarde `HELLO` novo e confirme pelo controle contextual ou D27.” | “O último resultado ainda vale” ou “clique para pular o erro.” |
+
+No debrief, conduza os quatro blocos nesta ordem: entrega da missão;
+detecção/segurança; tempo, bytes e heap; diagnóstico. Leia o contrafactual como
+qualitativo — por exemplo, “com CRC ligado esta corrupção pós-GCM seria
+detectada” — e não como uma nova medição.
 
 ## 18. Perguntas prováveis e respostas
 
@@ -1106,17 +1075,19 @@ compartilhado completo. Ele guarda tamanhos, tempos, estados e CRCs curtos
 buffers e comparações em tempo constante em pontos relevantes, mas isso não é
 uma avaliação completa de tempo, cache, potência ou emissão eletromagnética.
 
-**O que significa `SAT CONECTADO`?**  O dashboard recebeu handshake válido da
-Wisdom e pode encaminhar comandos reais.
+**O que o handshake `STAGED_V1` significa?**  O programa validou identidade,
+protocolo e capacidade do jogo e pode encaminhar comandos reais.
 
-**O que significa `AGUARDANDO SAT` ou `SAT OFF`?**  Não há sessão serial
-validada. A interface deve recusar a missão em vez de inventar métricas.
+**E se o standby de busca não desaparecer?**  Não há sessão serial validada. O
+programa permanece procurando a Wisdom, em vez de inventar métricas.
 
 **O que significam `GUARD: NONE` e `GUARD: CRC32`?**  Indicam qual guardião
-será usado no ensaio manual de bit-flip do payload.
+foi selecionado para a partida.
 
-**Por que os popups são arrastáveis?**  Para permitir comparação lado a lado
-em tela grande. Em resolução menor, a comparação sequencial é mais legível.
+**Por que tocar no cartão não avança?** Para separar escolha de confirmação:
+o cartão muda `pending_choice`; o controle contextual ou D27 confirmam a fase.
+Em `PROTECT`, o controle da tela ainda solicita uma leitura A39 real antes de
+avançar.
 
 **O que a faixa de RAM mostra?**  Consumo observado de heap em relação ao total
 disponível. `heap` é o livre após a operação; `min_heap` é o menor livre desde
@@ -1219,38 +1190,32 @@ dominaram; não elimina outras restrições de sistemas embarcados.
 1. confira cabo e `/dev/ttyUSB0`;
 2. feche console serial concorrente;
 3. confirme permissão do dispositivo;
-4. reinicie o dashboard;
-5. não finja métricas reais em `--simulated`.
+4. rode `python3 tools/stand_diagnostics.py --check-only`;
+5. reinicie `python3 dashboard.py`; sem Wisdom a demonstração ao vivo fica
+   indisponível.
 
 ### 19.2 `AGUARDANDO SAT`
 
-O handshake não foi aceito. Mostre onboarding e resultados consolidados, mas
-declare que a demo ao vivo está indisponível.
+O handshake não foi aceito. Leia a mensagem de sondagem, corrija porta,
+permissão ou firmware e declare que a demo ao vivo está indisponível.
 
-### 19.3 Sensor retorna `NA`
-
-Explique operação degradada. Use payload fixo se necessário.
-
-### 19.4 Popup cobre conteúdo
-
-Arraste pelo topo, pause a animação ou feche cenários anteriores. Em 1366×768,
-prefira comparação sequencial.
-
-### 19.5 Comando demora
+### 19.3 Comando demora
 
 Não clique repetidamente. Aguarde a resposta serial. `STRESS` pode demorar e é
 opcional.
 
-### 19.6 Ping físico não aparece
+### 19.4 Ping físico não aparece
 
-O evento requer firmware atualizado. Não interrompa a narrativa; o ping é
-easter egg, não evidência científica.
+No jogo por fases, D27 é um gate obrigatório: aborte a partida, confirme
+`HELLO game=STAGED_V1`, `DIGITAL BUTTON` e o evento com `pot`. Se não recuperar,
+interrompa a demonstração; não há fallback simulado e teclado não substitui o
+D27.
 
 ## 20. Checklist de ensaio e operação
 
 ### 20.1 Validação de software
 
-```bash
+```text
 python3 -m py_compile dashboard.py
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -c "import dashboard"
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -m unittest discover
@@ -1259,14 +1224,14 @@ git diff --check
 
 ### 20.2 Compilação de firmware
 
-```bash
-pio run
+```text
+python3 tools/firmware_deploy.py
 ```
 
 Compilar não grava a placa. Upload é uma operação separada:
 
-```bash
-pio run -t upload --upload-port /dev/ttyUSB0
+```text
+python3 tools/firmware_deploy.py --upload
 ```
 
 ### 20.3 Preflight da apresentação
@@ -1274,16 +1239,19 @@ pio run -t upload --upload-port /dev/ttyUSB0
 - projetor em 1920×1080 ou 1366×768;
 - fonte legível à distância;
 - Wisdom reconhecida;
-- firmware correto gravado;
-- `SAT CONECTADO`;
+- firmware correto gravado e `HELLO game=STAGED_V1` confirmado;
 - perfil `BASELINE` para a demo principal;
-- payload vivo testado;
-- três cenários testados uma vez;
-- `FALHA` com e sem CRC testada;
-- botão físico/ping testado, se for usado;
+- três cartões de missão legíveis;
+- quatro combinações CLASSIC/PQC × NONE/CRC32 testadas;
+- D27 físico e leitura A39 no `BUTTON_PING` testados;
+- standby liberado automaticamente somente por `HELLO STAGED_V1`;
+- abertura narrativa preservada e confirmada por `INICIAR MISSÃO` e D27;
+- uma partida pelo verde com `ANALOG POT` validado em `PROTECT`;
+- uma partida `GAME_BEGIN` … `GAME_END` com retry testada;
+- uma tela de cada checkpoint deixada parada sem avançar sozinha;
 - JSON oficial disponível localmente;
 - sem terminal concorrendo pela serial;
-- modo de contingência ensaiado.
+- procedimento de interrupção sem hardware ensaiado.
 
 ### 20.4 Ensaio oral
 
@@ -1357,8 +1325,8 @@ O resumo esperado é `ok=true`, `failed=0`, `mission_runs=600`,
 AES-GCM executam `BASELINE` a 240 MHz e `OBC-1U-LIMITED` a 80 MHz; não é
 necessário iniciar uma bateria separada por frequência.
 
-Depois da coleta, atualize primeiro `docs/METRICAS_CONSOLIDADAS.md`, depois os
-números deste guia e, por fim, as constantes de `RESULTADOS` no dashboard.
+Depois da coleta, atualize primeiro `docs/METRICAS_CONSOLIDADAS.md` e depois os
+números deste guia. A interface pública não embute nem altera a bateria oficial.
 
 ## 22. Folha de consulta rápida
 

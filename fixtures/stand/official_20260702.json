@@ -1,5 +1,5 @@
 {
-  "schema_version": "pqc-sat-stand-fixture-v1",
+  "schema_version": "pqc-sat-stand-fixture-v2",
   "source_kind": "official-campaign",
   "source_path": "logs/20260702T044907Z_final_metrics_dev-ttyusb0.json",
   "source_sha256": "bcf16f1f49f6433ca7bdfde000023af1cb3b72546a3af16d570fe212edd6ce8d",
@@ -8,6 +8,8 @@
   "failed": 0,
   "mission_runs": 600,
   "fault_runs": 400,
+  "investigation_model": "deterministic-offline-staged-v1",
+  "game_protocol": "STAGED_V1",
   "payload": "PQC-SAT|MSG=HELLO_UFF|TEMP=24.5|STATUS=OK",
   "profiles": {
     "BASELINE": {

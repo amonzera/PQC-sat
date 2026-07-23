@@ -1,0 +1,13 @@
+"""Runtime constants for the single staged-game application."""
+
+FPS = 60
+SERIAL_RECONNECT_DELAY = 1.5
+SERIAL_TIMEOUT_SECONDS = 8.0
+LIVE_PAYLOAD_REQUEST_TIMEOUT_SECONDS = 10.0
+
+__all__ = (
+    "FPS",
+    "SERIAL_RECONNECT_DELAY",
+    "SERIAL_TIMEOUT_SECONDS",
+    "LIVE_PAYLOAD_REQUEST_TIMEOUT_SECONDS",
+)

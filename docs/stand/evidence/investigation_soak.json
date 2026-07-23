@@ -1,0 +1,28 @@
+{
+  "schema_version": "pqc-sat-stand-soak-v1",
+  "created_at": "2026-07-21T20:13:35.947580+00:00",
+  "mode": "simulated-official-fixture",
+  "flow": "investigation",
+  "result": "PASS",
+  "cycles_requested": 50,
+  "cycles_completed": 50,
+  "button_actions": 150,
+  "pot_changes": 100,
+  "commands_total": 199,
+  "mission_commands": 0,
+  "fault_commands": 0,
+  "investigation_commands": 50,
+  "rejected_events": 0,
+  "ignored_inputs": 0,
+  "rss_start_bytes": 33984512,
+  "rss_end_bytes": 33984512,
+  "rss_growth_bytes": 0,
+  "wall_elapsed_seconds": 0.011,
+  "synthetic_elapsed_seconds": 8.98,
+  "fixture": "fixtures/stand/official_20260702.json",
+  "limitations": [
+    "Este teste acelera o relógio da máquina de estados.",
+    "Não valida USB, botão físico, potenciômetro físico, heap da placa nem execução contínua em tempo real.",
+    "As métricas de referência vêm da fixture oficial; os incidentes INVESTIGATE são um modelo determinístico offline."
+  ]
+}

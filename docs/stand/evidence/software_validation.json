@@ -1,117 +1,209 @@
 {
-  "schema_version": "pqc-sat-stand-software-validation-v1",
-  "created_at": "2026-07-21T18:00:00Z",
-  "tested_revision": "03b2a4efd0625ebb168b41608a2f1aec6e40f90d",
-  "result": "PASS_FOR_INTEGRATED_SOFTWARE_SCOPE_HARDWARE_RECHECK_PENDING",
+  "schema_version": "pqc-sat-stand-software-validation-v3",
+  "created_at": "2026-07-23T03:43:16Z",
+  "tested_revision": "ac03dac7ad7fd37a287df2cd858a49def66015ed",
+  "tested_worktree": "uncommitted single-interface implementation and simplified public UI included",
+  "result": "PASS_SOFTWARE_HARDWARE_NOT_CONNECTED",
   "environment": {
     "python": "3.14.6",
     "pygame_ce": "2.5.7",
-    "hardware_port": null,
-    "prior_hardware_port": "/dev/ttyUSB0"
+    "platformio_platform": "Espressif 32 7.0.1",
+    "board": "esp32dev",
+    "hardware_hello_probe_executed": true,
+    "staged_game_executed_on_hardware": false
   },
   "checks": [
     {
       "command": "SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -m unittest discover",
       "result": "PASS",
-      "tests": 124,
+      "tests": 97,
       "failures": 0
     },
     {
-      "command": "python3 -m py_compile dashboard.py stand_demo.py tools/capture_stand_evidence.py tools/stand_diagnostics.py tools/stand_hardware_smoke.py tools/stand_soak.py tools/validate_stand_logs.py",
+      "command": "python3 -m py_compile dashboard.py",
       "result": "PASS"
     },
     {
-      "command": "SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 -c 'import dashboard; import stand_demo'",
+      "command": "python3 -m compileall -q pqc_sat",
       "result": "PASS"
     },
     {
-      "command": "bash -n scripts/run_stand.sh scripts/generate_stand_backup.sh",
-      "result": "PASS"
-    },
-    {
-      "command": "git diff --check",
-      "result": "PASS"
-    },
-    {
-      "command": "pio run",
+      "command": "find . -type f matching *.sh or *.bash",
       "result": "PASS",
-      "ram_used_bytes": 56556,
+      "files_found": 0
+    },
+    {
+      "command": "production parser rejects --simulated, --stand-flow, --stand, --presentation and --stand-fixture",
+      "result": "PASS"
+    },
+    {
+      "command": "parse config/game.json and fixtures/stand/official_20260702.json",
+      "result": "PASS",
+      "config_schema": "pqc-sat-stand-config-v3",
+      "fixture_schema": "pqc-sat-stand-fixture-v2",
+      "fixture_scope": "tests-only"
+    },
+    {
+      "command": "fixture regression: GAME_PROTECT -> ANALOG POT -> GAME_TRANSMIT",
+      "result": "PASS",
+      "a39_value": 1469,
+      "session_preserved": true,
+      "next_stage": "TRANSMIT"
+    },
+    {
+      "command": "python3 tools/firmware_deploy.py",
+      "result": "PASS",
+      "ram_used_bytes": 57332,
       "ram_total_bytes": 327680,
-      "ram_percent": 17.3,
-      "flash_used_bytes": 921693,
+      "ram_percent": 17.5,
+      "flash_used_bytes": 932173,
       "flash_total_bytes": 1310720,
-      "flash_percent": 70.3
+      "flash_percent": 71.1,
+      "firmware_bin_bytes": 938752,
+      "firmware_bin_sha256": "288d5f4989b56f593a267ccde31f59773a1addb9a2669d1f9fb07ad4c8e5d51e",
+      "upload_performed": false
     },
     {
-      "command": "SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 dashboard.py --presentation --simulated --windowed --no-splash --max-runtime-seconds 2",
-      "result": "PASS",
-      "renderer": "dashboard-native"
+      "command": "python3 tools/stand_diagnostics.py --check-only",
+      "result": "EXPECTED_BLOCK",
+      "device_recognized": false,
+      "reason": "no serial port was present during the final probe"
+    },
+    {
+      "command": "SDL dummy python3 dashboard.py --windowed --max-runtime-seconds 1",
+      "result": "PASS_SEARCH_STANDBY",
+      "device_recognized": false,
+      "pygame_interface_opened": true,
+      "narrative_opened": false,
+      "reason": "the interface remained in automatic Wisdom search and exited only at the test runtime limit"
     },
     {
       "command": "python3 tools/stand_soak.py --cycles 50",
       "result": "PASS",
+      "mode": "test-only-deterministic-fixture",
       "cycles_completed": 50,
+      "button_actions": 625,
+      "pot_changes": 100,
+      "game_commands": 275,
+      "game_begin_commands": 50,
+      "game_retry_commands": 25,
       "rejected_events": 0,
+      "ignored_inputs": 0,
       "rss_growth_bytes": 0
     },
     {
-      "command": "scripts/generate_stand_backup.sh",
+      "command": "python3 tools/generate_game_evidence.py plus 1920x1080 capture",
       "result": "PASS",
-      "screenshots": 9,
-      "resolution": "1366x768",
-      "video_duration_seconds": 36
+      "screenshots_1366x768": 15,
+      "screenshots_1920x1080": 15,
+      "separate_search_and_narrative": true,
+      "tutorial_screen_present": false,
+      "replay_frames_1366x768": 18,
+      "replay_frames_1920x1080": 18,
+      "replay_positions": ["inicio", "meio", "fim"],
+      "video_duration_seconds": 60,
+      "video_label": "fixture de teste, sem hardware"
     },
     {
-      "command": "python3 tools/serial_console.py --list-ports",
-      "result": "BLOCKED",
-      "detail": "No serial ports found on 2026-07-21; integrated hardware smoke was not repeated"
+      "command": "SDL dummy python3 tools/benchmark_dashboard.py --width 1366 --height 768 --frames 300 --warmup 60",
+      "result": "PASS",
+      "scope": "host_headless_render_only",
+      "flow": "staged_game",
+      "mean_frame_ms": 7.28,
+      "median_frame_ms": 7.536,
+      "p95_frame_ms": 8.766,
+      "max_frame_ms": 25.72,
+      "within_60fps_mean_budget": true
     },
     {
-      "command": "tools/stand_hardware_smoke.py --production-timings",
-      "result": "PRIOR_PASS_NOT_REPEATED",
-      "validated_at": "2026-07-20",
-      "cycle_duration_seconds": 51.545521326996095,
-      "evidence": "docs/stand/evidence/hardware_production_timing.json"
-    },
-    {
-      "command": "tools/validate_stand_logs.py hardware_production_timing_cycle.jsonl com limiares de ciclo curto",
-      "result": "PRIOR_PASS_NOT_REPEATED",
-      "validated_at": "2026-07-20",
-      "cycle_errors": 0
-    },
-    {
-      "command": "tools/stand_hardware_smoke.py --cycles 20",
-      "result": "PRIOR_PASS_NOT_REPEATED",
-      "validated_at": "2026-07-20",
-      "completed_cycles": 20,
-      "mission_runs": 60,
-      "fault_runs": 40,
-      "rejected_events": 0,
-      "evidence": "docs/stand/evidence/hardware_20_cycle_smoke.json"
-    },
-    {
-      "command": "tools/validate_stand_logs.py hardware_20_cycle_smoke.jsonl com limiares de repetibilidade",
-      "result": "PRIOR_PASS_NOT_REPEATED",
-      "validated_at": "2026-07-20",
-      "cycle_errors": 0,
-      "pot_samples": 20,
-      "pot_changes": 6,
-      "pot_unique_positions": 2
+      "command": "SDL dummy python3 tools/benchmark_dashboard.py --width 1920 --height 1080 --frames 300 --warmup 60",
+      "result": "PASS",
+      "scope": "host_headless_render_only",
+      "flow": "staged_game",
+      "mean_frame_ms": 10.204,
+      "median_frame_ms": 10.257,
+      "p95_frame_ms": 12.559,
+      "max_frame_ms": 28.361,
+      "within_60fps_mean_budget": true
     }
   ],
+  "scientific_matrix": {
+    "profiles": 2,
+    "key_modes": 2,
+    "guards": 2,
+    "incidents": 4,
+    "cases": 32,
+    "rx_memory_without_crc": "SILENT_CORRUPTION",
+    "rx_memory_with_crc": "APP_REJECT"
+  },
   "artifact_hashes": {
     "official_metrics_sha256": "bcf16f1f49f6433ca7bdfde000023af1cb3b72546a3af16d570fe212edd6ce8d",
-    "backup_video_sha256": "e9c745191551ffdc5fe5040223ebbebd2e1e0c6f8a5b37f42f372c3b573b5bff",
-    "integrated_attract_sha256": "c1b7e19d8b143991559d0f5162f449e3db4cd11af796fe3fc5b3c496ced81634",
-    "integrated_summary_sha256": "2446c9447260d5fc0a4db575c741bd730d37b298d2ff771d1d1ddea255581098",
-    "hardware_20_cycle_report_sha256": "322f17995f53fc00d334c447256332c3a33718a39852bdc1683a2a2a7d1781cb",
-    "hardware_20_cycle_jsonl_sha256": "40a113c6a3b7c37a2e2f909d80d623c5f97b13864e76a5c59aa20de5c8d680cb",
-    "hardware_20_cycle_validation_sha256": "15984b00e8b53036b43f56b8a2ebc1d04f1da2378093e758715743f24a702bbb"
+    "test_video_sha256": "52bbc135c8b1c6ce7c58ef016f7ad57edd163f0aaf67ec3a294616c42fb551b3",
+    "wisdom_search_1366_sha256": "c78c3f9a63a59a56809b63dc47684d2dc6f33e88d1c0d44feaadc050db303450",
+    "wisdom_search_1920_sha256": "3363609f71bb8b9c4c570dc293ae4a6264c03488d362bbd319fe3ae04eb285af",
+    "staged_attract_1366_sha256": "c537e8fe3a5a91e681ab096a3a37d97e4d3de086c7b16f2cf7bac1f0da08f223",
+    "staged_attract_1920_sha256": "b08e29e8ea6d6cb5b44830975d8e465fe2dbd5541a72e88fff3736735b951394",
+    "selection_cards_1366_sha256": "fb5ef4b94edfde78ca6205c4982f4e39be63486feb9a3733d1e978d7b16783c6",
+    "selection_cards_1920_sha256": "64599829baeb6e04740839e46b37e2ae88f44e7e9d337c4343640e2636b23f39",
+    "staged_debrief_1366_sha256": "0b5604b85983620c6d0beac0b2923c2e40041888002114f264fa5b3d8a7acf51",
+    "staged_debrief_1920_sha256": "58eae331ae5b9a570ebca92e7db504a5b569604f0e09cc3e8fe4a1e0bc51a5e4",
+    "replay_protect_mid_1366_sha256": "9a6d66b54792f54185e85dfadac5927e3eef0ef95dd4c1c4fde2f198cb5ef703",
+    "replay_protect_mid_1920_sha256": "a1e9eccb3d3ebee09d854a23703fd148334fba3509ea154c203afaa7e8f53540",
+    "game_art_source_sha256": "e88e3847ba22af2efba619d96d76adc38612c8689afd503c84ab6e677b993cbc",
+    "replay_interaction_source_sha256": "246a4bbb1290b854533ec3228e82be109878fdabb593dc4b9dc463873824340f",
+    "mission_world_source_sha256": "e393fccde75ca43f2c8a773dc5271c4ae51e828223f7c5fd90ed056fecb11943",
+    "game_view_source_sha256": "930e72ec56b3dfa657bc3d06ae82eb538cfdb4913bc0fa13fe96c364159c1844",
+    "game_panel_source_sha256": "e1f26802fe090bc5c4a4d24301044100ffad6c229b643c90b7f0698523b1dfb4",
+    "search_view_source_sha256": "28dd40e3e0525a77358b48b00779d6f6db11c38ead540eedaaef5c4c1ac6fa20",
+    "capture_view_source_sha256": "fae12a18b9511694929af4dea511523bb63a10b8322fc18d2122e2ad39f829e7",
+    "controller_source_sha256": "8a7f9d915a27b4da8e0eb49ef60f44271a447033c39481e776b739747e8451d9",
+    "serial_client_source_sha256": "6cca856675a7c8a421909050b518ef75724d98b487b62ff933c01a086b8c0e50",
+    "cli_source_sha256": "1462d7f13fd2ae309cfa4d97787d0de1e53ef70882a2e590b9ff05180583c0c6",
+    "capture_tool_sha256": "b32ff5a286e73ef25c51f5905be419754b535bc4d8bf351c74d8db9e54a3cfbc",
+    "evidence_generator_sha256": "38b0baa8315b0c63e1af7045759d0fbcae59c813805f9f617ee77dd5557b20d3",
+    "log_validator_source_sha256": "67622b57840214b78f6ea0c442bf698a4719d3278730caa0d6fd2e3c1d711107",
+    "staged_soak_sha256": "2d1f62e82f500201a3b9bc5cdada3075f5f56e26896e6ea5756fc6b076b6d3c7",
+    "fixture_v2_sha256": "5e22254f15fb1c894569b3e9769e769af745656255766423fbd2e5fccc0b3384",
+    "config_v3_sha256": "40fc0d31f9e6cf193df41202db538840d9c5d05cf6f1b1fccaf18cf048c593b3",
+    "fixture_transport_source_sha256": "ac537352457d047d0cd4417ed4c4441601c58d52eca69da1d9c93a79663a4bd3",
+    "a39_bug_log_sha256": "61478df4fd3251feb31be972e217cd52a73ad40d51faa3cbcfc24df6f470df31",
+    "stand_diagnostics_source_sha256": "d20af3c4f2e197d0af44d4accda6df96ae69b8040c83c540a5cf83c106f7702c",
+    "firmware_source_sha256": "1e152235acad21fa48f691ecb1248bf04ef5718edd4833793dd240f7de4d46f5",
+    "firmware_deploy_sha256": "fa07b71b151416332ba6d0d8c28dcfdb237a7c15866015d9167f8303b56ba239"
   },
+  "a39_bug_regression": {
+    "observed_log": "logs/stand/20260723/20260723T012621Z_stand_hardware_f96d6ce1.jsonl",
+    "observed_error": "BAD_GAME_STATE active_GAME_session_requires_GAME_command_or_HELLO",
+    "root_cause": "firmware rejected ANALOG POT while a staged GAME session owned the shared buffers and cleared the session",
+    "software_fix": "allow only ANALOG POT as a read-only command during an active GAME session",
+    "fixture_regression_passed": true,
+    "corrected_firmware_uploaded": false
+  },
+  "hardware_probe": {
+    "device_recognized": false,
+    "identity": null,
+    "current_game_capability": null,
+    "required_game_capability": "STAGED_V1",
+    "conclusion": "no serial port was connected during the final probe; firmware upload and real-game validation remain pending"
+  },
+  "pending_hardware_gates": [
+    "upload the compiled candidate with explicit operator authorization and observe HELLO game=STAGED_V1",
+    "repeat GAME_PROTECT -> ANALOG POT -> GAME_TRANSMIT and prove the same game ID remains active",
+    "observe physical BUTTON_PING with a current A39 pot value",
+    "observe automatic search-to-narrative and disconnect-to-search behavior on the real display",
+    "exercise GAME_* ordering, wrong ID rejection and real retry",
+    "complete one visible game with every forward transition caused by D27",
+    "complete one visible game through the green control, including a fresh ANALOG POT sample",
+    "prove every state remains static without explicit confirmation",
+    "run the definitive monitor, 30-game/3-hour and five-visitor gates"
+  ],
   "limitations": [
-    "Este resultado não aprova o gate físico de 30 ciclos e 3 horas.",
-    "A Wisdom não apareceu em nenhuma porta serial em 2026-07-21; o novo renderer integrado ainda requer repetição do smoke curto em hardware.",
-    "As transições do smoke foram acionadas pelo driver administrativo, não pelo botão físico.",
-    "Monitor definitivo, vídeo em hardware e avaliação com cinco pessoas permanecem pendentes."
+    "No Wisdom was connected during the final probe; the firmware candidate was not flashed or executed on hardware.",
+    "The physical log proves the previous A39 failure; the corrected firmware compiles and passes the fixture regression but has not yet been flashed.",
+    "The no-port standby opened and remained active on the host; automatic handoff and reconnection still require a real Wisdom test.",
+    "The 50-game soak, screenshots, video and matrix use a deterministic test fixture and are not board measurements.",
+    "Mean host rendering below 16.667 ms does not guarantee every host or display.",
+    "Visitor sessions do not replace the official 2026-07-02 controlled metrics campaign.",
+    "The long hardware gate must be executed by the operator."
   ]
 }
