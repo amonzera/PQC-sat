@@ -36,7 +36,7 @@ from pqc_sat.ui.theme import (
 )
 
 STEP_LABELS = {
-    "ATTRACT": "CHAMADO PARA A MISSÃO",
+    "ATTRACT": "SALVE A MENSAGEM EM ÓRBITA",
     "SELECT_MISSION": "ESCOLHA 1/4 • MENSAGEM",
     "SELECT_PROFILE": "ESCOLHA 2/4 • CPU",
     "SELECT_KEY_MODE": "ESCOLHA 3/4 • ABORDAGEM",
@@ -170,7 +170,7 @@ class InvestigationPresentationMixin:
     @staticmethod
     def _confirmation_label(controller):
         return {
-            "SELECT_MISSION": "CONFIRMAR ESCOLHA",
+            "SELECT_MISSION": "AVANÇAR",
             "SELECT_PROFILE": "CONFIRMAR ESCOLHA",
             "SELECT_KEY_MODE": "CONFIRMAR ESCOLHA",
             "SELECT_GUARD": "CONFIRMAR ESCOLHA",
@@ -244,7 +244,19 @@ class InvestigationPresentationMixin:
         }
         return f"{prefixes[controller.pending_choice_kind]}:{controller.pending_choice}"
 
-    def _draw_choice_cards(self, surface, body, controller, title, choices, t, *, columns=None):
+    def _draw_choice_cards(
+        self,
+        surface,
+        body,
+        controller,
+        title,
+        choices,
+        t,
+        *,
+        columns=None,
+        show_card_descriptions=False,
+        show_selected_detail=True,
+    ):
         choices = tuple(choices)
         self._draw_stand_centered(surface, FONT_TITLE, title, C_TEXT_PRIMARY, body.centerx, body.y, body.width - 50)
 
@@ -252,8 +264,8 @@ class InvestigationPresentationMixin:
         rows = math.ceil(len(choices) / columns)
         gap = 14
         hint_top = body.bottom - 58
-        detail_h = 52
-        detail_y = hint_top - detail_h - 8
+        detail_h = 52 if show_selected_detail else 0
+        detail_y = hint_top - detail_h - (8 if show_selected_detail else 0)
         cards_y = body.y + 40
         card_area_h = max(118, detail_y - cards_y - 8)
         max_card_w = (body.width - 42 - gap * (columns - 1)) // columns
@@ -293,7 +305,7 @@ class InvestigationPresentationMixin:
                     1,
                     border_radius=7,
                 )
-            icon_h = min(190, max(64, int(card.height * 0.52)))
+            icon_h = min(190, max(64, int(card.height * (0.34 if show_card_descriptions else 0.52))))
             icon_rect = pygame.Rect(card.x + 18, card.y + 18, card.width - 36, icon_h)
             draw_game_icon(
                 surface,
@@ -307,6 +319,40 @@ class InvestigationPresentationMixin:
             heading_y = icon_rect.bottom + 12
             heading = self._render_clipped(FONT_TITLE, choice.title, accent, card.width - 28)
             surface.blit(heading, (card.centerx - heading.get_width() // 2, heading_y))
+            if show_card_descriptions:
+                description_y = heading_y + heading.get_height() + 8
+                if choice.card_frequency:
+                    frequency = FONT_BODY.render(choice.card_frequency, True, accent)
+                    surface.blit(frequency, (card.centerx - frequency.get_width() // 2, description_y))
+                    description_y += frequency.get_height() + 6
+                description_y = self._draw_stand_centered(
+                    surface,
+                    FONT_SMALL,
+                    choice.summary,
+                    C_TEXT_PRIMARY,
+                    card.centerx,
+                    description_y,
+                    card.width - 30,
+                    line_gap=2,
+                )
+                if choice.card_payload:
+                    payload_top = description_y + 7
+                    row_h = FONT_LABEL.get_height() + 2
+                    payload = pygame.Rect(
+                        card.x + 15,
+                        payload_top,
+                        card.width - 30,
+                        len(choice.card_payload) * row_h + 12,
+                    )
+                    pygame.draw.rect(surface, (7, 25, 43), payload, border_radius=5)
+                    pygame.draw.rect(surface, accent, payload, 1, border_radius=5)
+                    for row_index, entry in enumerate(choice.card_payload):
+                        field, separator, value = entry.partition("=")
+                        row_y = payload.y + 6 + row_index * row_h
+                        key = FONT_LABEL.render(field, True, accent)
+                        rendered_value = FONT_LABEL.render(f"{separator}{value}", True, C_TEXT_PRIMARY)
+                        surface.blit(key, (payload.x + 8, row_y))
+                        surface.blit(rendered_value, (payload.right - rendered_value.get_width() - 8, row_y))
             if selected:
                 tag = FONT_LABEL.render("SELECIONADO", True, C_ACCENT_GREEN)
                 surface.blit(tag, (card.right - tag.get_width() - 8, card.y + 7))
@@ -314,13 +360,13 @@ class InvestigationPresentationMixin:
                 self._investigation_action(choice.action, card)
 
         detail = pygame.Rect(body.x + 22, detail_y, body.width - 44, detail_h)
-        if selected_choice:
+        if selected_choice and show_selected_detail:
             pygame.draw.rect(surface, (4, 15, 31), detail, border_radius=6)
             pygame.draw.rect(surface, selected_choice.color, detail, 1, border_radius=6)
             self._draw_stand_centered(
                 surface,
                 FONT_SMALL,
-                f"ISSO MUDA: {selected_choice.detail}",
+                selected_choice.detail,
                 C_TEXT_PRIMARY,
                 detail.centerx,
                 detail.y + 9,
@@ -335,27 +381,13 @@ class InvestigationPresentationMixin:
         )
 
     def _draw_game_attract(self, surface, body, controller, t):
-        card_w = min(610, int(body.width * 0.48))
-        card_h = min(230, max(190, body.height // 2))
-        card = pygame.Rect(
-            body.right - card_w - 20,
-            body.centery - card_h // 2,
-            card_w,
-            card_h,
+        button_w = min(330, max(250, int(body.width * 0.28)))
+        button = pygame.Rect(
+            body.right - button_w - max(28, int(body.width * 0.06)),
+            body.centery - 24,
+            button_w,
+            48,
         )
-        pygame.draw.rect(surface, (4, 16, 34), card, border_radius=12)
-        pygame.draw.rect(surface, C_ACCENT_CYAN, card, 2, border_radius=12)
-        self._draw_stand_centered(
-            surface,
-            FONT_LARGE,
-            "SALVE A MENSAGEM EM ÓRBITA",
-            C_TEXT_PRIMARY,
-            card.centerx,
-            card.y + 38,
-            card.width - 50,
-        )
-        button_w = min(330, card.width - 80)
-        button = pygame.Rect(card.centerx - button_w // 2, card.bottom - 78, button_w, 48)
         ready = controller.ready_for_start
         color = C_ACCENT_CYAN if ready else C_TEXT_DIM
         pygame.draw.rect(surface, (7, 34, 47) if ready else (16, 24, 34), button, border_radius=10)
@@ -378,42 +410,62 @@ class InvestigationPresentationMixin:
         icons = {"TELEMETRY": "telemetry", "SAFE_COMMAND": "safe_command", "CONFIG_UPDATE": "config"}
         choices = []
         for mission, color in zip(controller.config.missions, colors):
-            payload = mission.payload.replace("|", " • ")
+            payload = tuple(mission.payload.split("|"))
             choices.append(
                 ChoiceVisual(
                     f"mission:{mission.mission_id}",
                     mission.title,
                     mission.description,
-                    f"PAYLOAD: {payload}  |  CONSEQUÊNCIA: {mission.consequence}",
-                    f"{mission.priority} • {mission.deadline} • {len(mission.payload_bytes)} B",
+                    mission.consequence,
+                    "",
                     color,
                     icons.get(mission.mission_id, "packet"),
+                    card_payload=payload,
                 )
             )
-        self._draw_choice_cards(surface, body, controller, "QUAL MENSAGEM PRECISA CHEGAR INTACTA?", choices, t)
+        self._draw_choice_cards(
+            surface,
+            body,
+            controller,
+            "Qual mensagem você quer enviar? Ela vai precisar chegar intacta!",
+            choices,
+            t,
+            show_card_descriptions=True,
+        )
 
     def _draw_game_profiles(self, surface, body, controller, t):
         choices = (
             ChoiceVisual(
                 f"profile:{controller.config.baseline_mhz}",
-                "CPU NOMINAL",
-                "Ritmo integral do ESP32.",
-                "Baseline da campanha controlada. A animação representa ritmo de CPU; não mede energia.",
-                f"{controller.config.baseline_mhz} MHz • PERFIL NOMINAL",
+                "CPU Normal",
+                "Opera na frequência normal da Wisdom.",
+                "",
+                "",
                 C_ACCENT_CYAN,
                 "cpu_fast",
+                card_frequency=f"{controller.config.baseline_mhz} MHz",
             ),
             ChoiceVisual(
                 f"profile:{controller.config.limited_mhz}",
-                "CPU LIMITADA",
-                "Perfil experimental mais lento.",
-                "OBC-1U-LIMITED aumenta o tempo de execução; não é especificação universal de CubeSat.",
-                f"{controller.config.limited_mhz} MHz • PERFIL EXPERIMENTAL",
+                "CPU Limitada",
+                "Opera em ritmo reduzido.",
+                "",
+                "",
                 C_ACCENT_PURPLE,
                 "cpu_limited",
+                card_frequency=f"{controller.config.limited_mhz} MHz",
             ),
         )
-        self._draw_choice_cards(surface, body, controller, "EM QUE RITMO A WISDOM VAI TRABALHAR?", choices, t)
+        self._draw_choice_cards(
+            surface,
+            body,
+            controller,
+            "Em que ritmo a Wisdom vai trabalhar?",
+            choices,
+            t,
+            show_card_descriptions=True,
+            show_selected_detail=False,
+        )
 
     def _draw_game_key_modes(self, surface, body, controller, t):
         choices = (
@@ -433,7 +485,7 @@ class InvestigationPresentationMixin:
                 "KeyGen, Encaps e Decaps usam chave pública e cápsula para chegar ao mesmo segredo; HKDF deriva a chave do AES-GCM.",
                 "ML-KEM-512 • WOLFCRYPT",
                 C_ACCENT_PURPLE,
-                "capsule",
+                "quantum_atom",
             ),
         )
         self._draw_choice_cards(surface, body, controller, "QUAL ABORDAGEM VAI ESTABELECER O SEGREDO?", choices, t)

@@ -772,9 +772,9 @@ Implementado:
 - standby integrado ao loop principal: a descoberta roda no worker e libera
   automaticamente a abertura narrativa somente após
   `HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`;
-- abertura com Terra/CubeSat preservada após a busca, contendo somente
-  `SALVE A MENSAGEM EM ÓRBITA` e `INICIAR MISSÃO`; clique ou D27 iniciam
-  diretamente todas as partidas;
+- abertura com Terra/CubeSat preservada após a busca: o cabeçalho contém
+  `SALVE A MENSAGEM EM ÓRBITA` e a área principal somente `INICIAR MISSÃO`;
+  clique ou D27 iniciam diretamente todas as partidas;
 - desconexão reapresenta a busca e um novo handshake limpa a partida
   interrompida e retorna automaticamente à abertura narrativa;
 - toque em cartão altera somente a seleção pendente; depois da abertura, toda
@@ -799,9 +799,12 @@ Implementado:
   consumir o debounce da próxima ação válida;
 - animações específicas de preparação, proteção, canal, verificação, retry e
   causalidade, separadas do tempo real recebido;
-- cartões de escolha quadrados e sem subtítulos internos, com título e arte
-  causal em destaque; explicações aparecem após a seleção; a torre sobre a
-  Terra foi removida e o CubeSat móvel recebeu um sorriso angular original;
+- cartões de escolha quadrados, com título e arte causal em destaque; na
+  escolha de missão, descrição e payload em lista compacta aparecem antes da
+  seleção, e somente a consequência aparece depois. A escolha de CPU mostra
+  frequência e descrição curta no próprio cartão, sem detalhe posterior; a
+  torre sobre a Terra foi removida e o CubeSat móvel recebeu um sorriso angular
+  original;
 - depois da reprodução automática, a própria mensagem pode ser arrastada por
   estações explicadas; esse estado é somente visual e não toca no gate de confirmação;
 - fixture oficial somente em testes/evidência offline, com proveniência e

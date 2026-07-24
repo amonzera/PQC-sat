@@ -88,8 +88,9 @@ O jogo possui os estados:
 
 Na abertura, o standby serve somente para procurar a Wisdom: não tem botão e
 desaparece automaticamente após o handshake válido. A tela seguinte preserva
-Terra e CubeSat; ela mostra somente `SALVE A MENSAGEM EM ÓRBITA` e o botão
-`INICIAR MISSÃO`, não avança por tempo e também aceita D27. Essa confirmação
+Terra e CubeSat; o cabeçalho mostra `SALVE A MENSAGEM EM ÓRBITA` e a área
+principal contém apenas o botão `INICIAR MISSÃO`, não avança por tempo e
+também aceita D27. Essa confirmação
 abre diretamente a escolha da missão em todas as partidas. Depois disso, toque
 em cartão altera `pending_choice`, enquanto o controle contextual ou um novo
 D27 confirmam a etapa.
@@ -105,9 +106,12 @@ consulta somente-leitura durante a sessão `GAME_*`, sem apagar o estado
 Visualmente, a busca técnica fica fora dos 14 estados, que formam quatro atos:
 receber a missão, montar o
 sistema, executar a operação e comandar a resposta. Terra, CubeSat, órbita e
-estações são desenhados proceduralmente. Os cartões de escolha são quadrados,
-sem subtítulos internos, e destacam a arte causal e o título; a explicação da
-opção aparece somente após a seleção. Os checkpoints só reproduzem uma
+estações são desenhados proceduralmente. Os cartões de escolha permanecem
+quadrados e destacam a arte causal e o título. Na escolha de missão, cada
+cartão também mostra descrição e o payload em uma lista compacta antes da
+seleção; depois, a tela apresenta somente a consequência da missão. Os perfis
+mostram frequência e uma descrição curta no próprio cartão, sem detalhe após a
+escolha. Os checkpoints só reproduzem uma
 animação didática depois de uma resposta `GAME_*` validada. O tempo real da
 Wisdom permanece separado do replay ampliado.
 

@@ -59,7 +59,7 @@ não é automaticamente um `PASS` de hardware.
 | Requisito | Estado | Evidência atual | Fechamento restante |
 |---|---|---|---|
 | 14 estados renderizados | PASS | 14 PNGs em cada resolução | ensaio no monitor definitivo |
-| escolhas compreensíveis | PASS software | cartões quadrados sem subtítulos internos, com título e arte causal em destaque; detalhes surgem após seleção | testar compreensão com cinco visitantes |
+| escolhas compreensíveis | PASS software | cartões quadrados com título e arte causal; nas três missões, descrição e payload em lista ficam visíveis antes da seleção, somente a consequência surge depois, e CPU mostra frequência e descrição curta no card | testar compreensão com cinco visitantes |
 | replay compreensível e controlável | PASS software | pacote arrastável com entrada, operação, saída e evidência; 18 quadros extras por resolução | testar compreensão com cinco visitantes |
 | animação orientada à resposta | PASS software | bytes, CRC, proteção, A39, verificação, retry e causalidade só depois da resposta aceita | observar timings reais |
 | métricas da jornada só no debrief | PASS design | etapas mostram causalidade sem números; tempo/bytes/heap da partida aparecem apenas no relatório final | observar no monitor definitivo |

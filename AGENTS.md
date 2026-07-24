@@ -153,9 +153,10 @@ implementar.
 - standby permanece até `HELLO STAGED_V1/FAIR_V1/FAIR_SESSION_V1` e fecha automaticamente; a abertura
   narrativa permanece até clique ou D27, e o controle de tela usa `ANALOG POT` antes
   de confirmar `PROTECT`;
-- cartões de escolha são quadrados, sem subtítulos internos, com títulos e
-  artes causais em destaque; a torre sobre a Terra foi removida e o CubeSat
-  móvel preservado com sorriso angular;
+- cartões de escolha são quadrados, com títulos e artes causais em destaque;
+  na escolha de missão, descrição e payload aparecem antes da seleção, e a
+  torre sobre a Terra foi removida enquanto o CubeSat móvel preserva o sorriso
+  angular;
 - protocolo transacional `GAME_BEGIN`, `GAME_PROTECT`, `GAME_TRANSMIT`,
   `GAME_VERIFY`, `GAME_RETRY`, `GAME_END` e `GAME_ABORT` implementado no
   firmware, preservando `INVESTIGATE` e o fluxo legado; `CLASSIC_CRC32` permite

@@ -75,8 +75,8 @@ bancada; a jornada visual anterior foi removida.
 
 | Estado | Seleção ou evidência | Verde ou D27 confirmado executa |
 |---|---|---|
-| `ATTRACT` | Terra, CubeSat e chamada `SALVE A MENSAGEM EM ÓRBITA` | `INICIAR MISSÃO` ou D27 abrem diretamente uma nova partida |
-| `SELECT_MISSION` | telemetria, comando crítico ou configuração | fixa missão, payload, prioridade e prazo |
+| `ATTRACT` | Terra, CubeSat, cabeçalho `SALVE A MENSAGEM EM ÓRBITA` e botão isolado | `INICIAR MISSÃO` ou D27 abrem diretamente uma nova partida |
+| `SELECT_MISSION` | telemetria, comando crítico ou configuração, cada qual com descrição e payload | fixa missão, payload, prioridade e prazo |
 | `SELECT_PROFILE` | 240 ou 80 MHz | fixa o perfil experimental |
 | `SELECT_KEY_MODE` | `CLÁSSICA — ECDH P-256` ou `PÓS-QUÂNTICA — ML-KEM-512` | fixa como o segredo será estabelecido |
 | `SELECT_GUARD` | CRC da aplicação desligado ou CRC32 ligado | fixa o guardião e envia `GAME_BEGIN` |
@@ -222,8 +222,10 @@ no programa de produção.
 - alto contraste, texto junto às cores e nenhuma dependência de áudio;
 - cartões grandes para toque/mouse;
 - o primeiro handshake abre automaticamente a narrativa mínima; `INICIAR
-  MISSÃO` ou D27 seguem direto às escolhas; os cartões são quadrados, sem
-  subtítulos internos, e mostram detalhes somente após seleção;
+  MISSÃO` ou D27 seguem direto às escolhas; os cartões são quadrados e, na
+  escolha de missão, mostram descrição e payload em lista antes da seleção;
+  a consequência surge sem metadados depois da escolha. Os cartões de CPU
+  mostram frequência e descrição curta, sem detalhe posterior;
 - `Esc` alterna janela/tela cheia, `F12` apenas mostra diagnóstico e `Ctrl+Q`
   encerra;
 - timeout serial e resposta inválida levam a `ERROR`; desconexão mostra a busca

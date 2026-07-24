@@ -1,5 +1,16 @@
 # Changelog do modo estande SBPC
 
+## 2026-07-23 — Iteração 4 das escolhas iniciais
+
+- a missão usa o título em linguagem natural e mostra o payload como lista de
+  campos no centro de cada cartão; depois da seleção, apresenta somente a
+  consequência, sem prioridade, prazo ou rótulo contextual;
+- a CPU passa a usar `CPU Normal` e `CPU Limitada`, com frequência e descrição
+  curta no cartão, sem explicação adicional ao selecionar;
+- o título da CPU deixou a caixa alta e a escolha de abordagem ganhou uma chave
+  reconhecível e um átomo para pós-quântica, sem alterar a cápsula técnica dos
+  replays ML-KEM.
+
 ## 2026-07-23 — comparação FAIR ECDH P-256 versus ML-KEM-512
 
 - superfície pública migrada de `CLASSIC/PQC` para `ECDH/MLKEM`, preservando
@@ -57,6 +68,16 @@
   pesquisa. Baterias longas, partida visual integral, matriz, ensaio e testes
   com visitantes continuam pendentes; o firmware não é ainda uma release
   aprovada para o estande.
+
+## 2026-07-23 — Iteração 3 da abertura e escolha de missão
+
+- `SALVE A MENSAGEM EM ÓRBITA` passou do cartão para o cabeçalho; a abertura
+  conserva somente o botão isolado `INICIAR MISSÃO`;
+- os três cartões de missão passaram a exibir descrição e payload antes da
+  seleção; a Iteração 4 refinou o detalhe para mostrar somente a consequência.
+- o controle posterior à seleção de missão foi reduzido para `AVANÇAR`;
+- os ícones de telemetria, comando de emergência e atualização de configuração
+  foram recentralizados e revisados sem usar assets externos.
 
 ## 2026-07-23 — abertura mínima e fluxo direto
 

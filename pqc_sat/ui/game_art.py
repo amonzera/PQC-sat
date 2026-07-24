@@ -76,6 +76,8 @@ class ChoiceVisual:
     color: tuple[int, int, int]
     icon: str
     disabled_reason: str = ""
+    card_payload: tuple[str, ...] = ()
+    card_frequency: str = ""
 
 
 @dataclass(frozen=True)
@@ -784,19 +786,53 @@ def draw_game_icon(
     elif icon == "ground":
         draw_ground_station(surface, (cx, cy), min(rect.width, rect.height), t)
     elif icon == "telemetry":
-        pygame.draw.circle(surface, color, (cx - inner.width // 5, cy + inner.height // 4), max(7, inner.width // 10), 3)
-        pygame.draw.line(surface, color, (cx - inner.width // 5, inner.y + 6), (cx - inner.width // 5, cy + inner.height // 4), 5)
+        size = min(inner.width, inner.height)
+        sensor_x = int(cx - size * 0.22)
+        bulb_y = int(cy + size * 0.20)
+        stem_top = int(cy - size * 0.25)
+        bulb_radius = max(7, int(size * 0.095))
+        pygame.draw.line(surface, color, (sensor_x, stem_top), (sensor_x, bulb_y), 4)
+        pygame.draw.circle(surface, color, (sensor_x, bulb_y), bulb_radius, 3)
+        signal_center = (int(cx + size * 0.12), int(cy - size * 0.06))
         for index in range(3):
-            pygame.draw.arc(surface, color, (cx, cy - 24 - index * 4, 22 + index * 16, 48 + index * 8), -0.8, 0.8, 2)
-        pygame.draw.polygon(surface, C_ACCENT_RED, [(inner.right - 22, inner.y + 6), (inner.right - 4, inner.y + 38), (inner.right - 40, inner.y + 38)], 3)
+            radius = int(size * (0.13 + index * 0.075))
+            arc = pygame.Rect(signal_center[0] - radius, signal_center[1] - radius, radius * 2, radius * 2)
+            pygame.draw.arc(surface, color, arc, -0.78, 0.78, 2)
+        warning_center = (int(cx + size * 0.20), int(cy + size * 0.27))
+        warning = (
+            (warning_center[0], warning_center[1] - bulb_radius),
+            (warning_center[0] + bulb_radius, warning_center[1] + bulb_radius),
+            (warning_center[0] - bulb_radius, warning_center[1] + bulb_radius),
+        )
+        pygame.draw.polygon(surface, C_ACCENT_RED, warning, 2)
+        pygame.draw.line(
+            surface,
+            C_ACCENT_RED,
+            (warning_center[0], warning_center[1] - bulb_radius // 3),
+            (warning_center[0], warning_center[1] + bulb_radius // 3),
+            2,
+        )
+        pygame.draw.circle(surface, C_ACCENT_RED, (warning_center[0], warning_center[1] + bulb_radius * 2 // 3), 1)
     elif icon in {"safe_command", "safe"}:
-        _draw_shield(surface, inner, color, check=icon == "safe")
+        shield_size = int(min(inner.width, inner.height) * 0.62)
+        shield = pygame.Rect(cx - shield_size // 2, cy - shield_size // 2 + shield_size // 8, shield_size, shield_size)
+        _draw_shield(surface, shield, color, check=icon == "safe")
         if icon == "safe_command":
-            pygame.draw.line(surface, C_ACCENT_ORANGE, (cx + 4, inner.y + 18), (cx - 7, cy + 2), 5)
-            pygame.draw.line(surface, C_ACCENT_ORANGE, (cx - 7, cy + 2), (cx + 6, cy - 1), 5)
-            pygame.draw.line(surface, C_ACCENT_ORANGE, (cx + 6, cy - 1), (cx - 5, inner.bottom - 18), 5)
+            command_start = (cx, shield.y - max(8, shield_size // 5))
+            command_end = (cx, shield.centery - max(3, shield_size // 10))
+            pygame.draw.line(surface, C_ACCENT_ORANGE, command_start, command_end, 4)
+            arrow = max(6, shield_size // 7)
+            pygame.draw.polygon(
+                surface,
+                C_ACCENT_ORANGE,
+                [
+                    (command_end[0], command_end[1] + arrow),
+                    (command_end[0] - arrow, command_end[1] - arrow // 2),
+                    (command_end[0] + arrow, command_end[1] - arrow // 2),
+                ],
+            )
     elif icon == "config":
-        scale = max(12, min(inner.width, inner.height) // 3)
+        scale = max(12, min(inner.width, inner.height) // 5)
         gear_center = (cx - scale, cy)
         clock_center = (cx + scale, cy)
         _draw_gear(surface, gear_center, scale, color, t * 0.45)
@@ -805,13 +841,44 @@ def draw_game_icon(
         pygame.draw.line(surface, C_ACCENT_ORANGE, clock_center, (clock_center[0] + scale - 5, clock_center[1] + scale // 3), 2)
     elif icon in {"cpu_fast", "cpu_limited"}:
         _draw_chip(surface, inner, color, t, limited=icon == "cpu_limited")
-    elif icon in {"classic_key", "kdf"}:
+    elif icon == "classic_key":
+        key_radius = max(10, min(inner.width, inner.height) // 4)
+        key_center = (inner.x + key_radius + 8, cy)
+        shaft_end = inner.right - 8
+        pygame.draw.circle(surface, color, key_center, key_radius, 4)
+        pygame.draw.circle(surface, (7, 24, 42), key_center, max(4, key_radius // 2))
+        pygame.draw.line(surface, color, (key_center[0] + key_radius, cy), (shaft_end, cy), 6)
+        tooth_x = shaft_end - max(12, inner.width // 7)
+        tooth_h = max(9, inner.height // 7)
+        pygame.draw.line(surface, color, (tooth_x, cy), (tooth_x, cy + tooth_h), 5)
+        pygame.draw.line(surface, color, (shaft_end - 5, cy), (shaft_end - 5, cy + tooth_h // 2), 5)
+    elif icon == "kdf":
         key_radius = max(10, min(inner.width, inner.height) // 3)
         key_center = (inner.x + key_radius + 5, cy)
         pygame.draw.circle(surface, color, key_center, key_radius, 4)
         pygame.draw.line(surface, color, (key_center[0] + key_radius, cy), (inner.right - 8, cy), 6)
         pygame.draw.line(surface, color, (inner.right - inner.width // 4, cy), (inner.right - inner.width // 4, cy + inner.height // 6), 5)
-        pygame.draw.rect(surface, C_ACCENT_PURPLE if icon == "kdf" else C_SAT_GOLD, (inner.x + 5, inner.y + 5, inner.width // 4, inner.height // 4), 2, border_radius=3)
+        pygame.draw.rect(surface, C_ACCENT_PURPLE, (inner.x + 5, inner.y + 5, inner.width // 4, inner.height // 4), 2, border_radius=3)
+    elif icon == "quantum_atom":
+        atom_size = min(inner.width, inner.height)
+        orbit_x = max(24, int(atom_size * 0.42))
+        orbit_y = max(12, int(atom_size * 0.16))
+        for angle in (0.0, math.pi / 3, -math.pi / 3):
+            points = []
+            for step in range(33):
+                theta = step * math.tau / 32
+                x = orbit_x * math.cos(theta)
+                y = orbit_y * math.sin(theta)
+                points.append(
+                    (
+                        int(cx + x * math.cos(angle) - y * math.sin(angle)),
+                        int(cy + x * math.sin(angle) + y * math.cos(angle)),
+                    )
+                )
+            pygame.draw.lines(surface, color, True, points, 2)
+        pygame.draw.circle(surface, C_ACCENT_PURPLE, (cx, cy), max(7, min(inner.width, inner.height) // 12))
+        pygame.draw.circle(surface, C_TEXT_PRIMARY, (cx, cy), max(3, min(inner.width, inner.height) // 24))
+        pygame.draw.circle(surface, C_ACCENT_CYAN, (cx + orbit_x // 2, cy - orbit_y // 2), 4)
     elif icon == "capsule":
         left = (inner.x + 12, cy)
         right = (inner.right - 12, cy)

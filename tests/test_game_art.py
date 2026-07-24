@@ -147,6 +147,7 @@ class GameArtTests(unittest.TestCase):
             "cpu_fast",
             "cpu_limited",
             "classic_key",
+            "quantum_atom",
             "pqc_keygen",
             "capsule",
             "pqc_decaps",
@@ -185,6 +186,60 @@ class GameArtTests(unittest.TestCase):
                     progress=0.6,
                 )
                 self.assertGreater(len(set(pygame.image.tobytes(surface, "RGB"))), 3)
+
+    def test_mission_icons_stay_centered_inside_their_viewport(self):
+        viewport = pygame.Rect(5, 5, 170, 110)
+        for icon in ("telemetry", "safe_command", "config"):
+            with self.subTest(icon=icon):
+                surface = pygame.Surface((180, 120))
+                surface.fill((1, 1, 1))
+                draw_game_icon(
+                    surface,
+                    icon,
+                    viewport,
+                    1.25,
+                    color=C_ACCENT_CYAN,
+                    active=True,
+                    progress=0.6,
+                )
+                points = [
+                    (x, y)
+                    for y in range(surface.get_height())
+                    for x in range(surface.get_width())
+                    if surface.get_at((x, y))[:3] != (1, 1, 1)
+                ]
+                bounds = pygame.Rect(
+                    min(x for x, _ in points),
+                    min(y for _, y in points),
+                    max(x for x, _ in points) - min(x for x, _ in points) + 1,
+                    max(y for _, y in points) - min(y for _, y in points) + 1,
+                )
+                self.assertTrue(viewport.contains(bounds))
+                self.assertLessEqual(abs(bounds.centerx - viewport.centerx), viewport.width * 0.12)
+                self.assertLessEqual(abs(bounds.centery - viewport.centery), viewport.height * 0.14)
+
+    def test_key_choice_icons_stay_centered_inside_their_viewport(self):
+        viewport = pygame.Rect(5, 5, 170, 110)
+        for icon in ("classic_key", "quantum_atom"):
+            with self.subTest(icon=icon):
+                surface = pygame.Surface((180, 120))
+                surface.fill((1, 1, 1))
+                draw_game_icon(surface, icon, viewport, 1.25, color=C_ACCENT_CYAN, active=True, progress=0.6)
+                points = [
+                    (x, y)
+                    for y in range(surface.get_height())
+                    for x in range(surface.get_width())
+                    if surface.get_at((x, y))[:3] != (1, 1, 1)
+                ]
+                bounds = pygame.Rect(
+                    min(x for x, _ in points),
+                    min(y for _, y in points),
+                    max(x for x, _ in points) - min(x for x, _ in points) + 1,
+                    max(y for _, y in points) - min(y for _, y in points) + 1,
+                )
+                self.assertTrue(viewport.contains(bounds))
+                self.assertLessEqual(abs(bounds.centerx - viewport.centerx), viewport.width * 0.16)
+                self.assertLessEqual(abs(bounds.centery - viewport.centery), viewport.height * 0.14)
 
     def test_stage_replay_is_not_built_before_a_validated_response(self):
         controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)

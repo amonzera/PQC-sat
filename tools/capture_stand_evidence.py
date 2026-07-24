@@ -266,6 +266,22 @@ def main(argv=None) -> int:
         output = args.output_dir / f"{index:02d}_{state.value.lower()}_{args.width}x{args.height}.png"
         pygame.image.save(frame, output)
         print(output)
+        selected_actions = {
+            InvestigationState.SELECT_MISSION: "mission:TELEMETRY",
+            InvestigationState.SELECT_PROFILE: f"profile:{controller.config.baseline_mhz}",
+            InvestigationState.SELECT_KEY_MODE: "key:MLKEM",
+        }
+        if state in selected_actions:
+            if not controller.handle_action(selected_actions[state], now=2.1):
+                raise RuntimeError(f"captura da escolha selecionada foi rejeitada: {state.value}")
+            selected_frame = render_game_frame(
+                controller,
+                size=(args.width, args.height),
+                now=2.1,
+            )
+            selected_output = args.output_dir / f"{index:02d}b_{state.value.lower()}_selected_{args.width}x{args.height}.png"
+            pygame.image.save(selected_frame, selected_output)
+            print(selected_output)
     if args.replay_output_dir is not None:
         args.replay_output_dir.mkdir(parents=True, exist_ok=True)
         replay_states = (

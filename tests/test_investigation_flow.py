@@ -3,11 +3,13 @@ from dataclasses import asdict, replace
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pygame
 
 from pqc_sat.ui.capture import render_game_frame
 from pqc_sat.ui.game import GamePanel
+from pqc_sat.ui.panel.investigation_view import STEP_LABELS
 from pqc_sat.testing.fixture import FixtureSerialClient
 from pqc_sat.stand.investigation import InvestigationController
 from pqc_sat.stand.model import (
@@ -817,6 +819,50 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
         green = panel.stand_action_rects["confirm"]
         panel.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": green.center}))
         self.assertEqual(harness.controller.state, InvestigationState.SELECT_PROFILE)
+
+    def test_mission_cards_show_payload_rows_and_only_the_consequence_after_selection(self):
+        harness = StagedHarness()
+        harness.assert_press()
+        panel = GamePanel.for_test(harness.controller)
+        with patch.object(panel, "_draw_choice_cards") as draw_cards:
+            panel._draw_game_missions(
+                pygame.Surface((1366, 768)),
+                pygame.Rect(0, 0, 1200, 640),
+                harness.controller,
+                harness.now,
+            )
+        choices = draw_cards.call_args.args[4]
+        self.assertTrue(draw_cards.call_args.kwargs["show_card_descriptions"])
+        self.assertEqual([choice.card_payload for choice in choices], [
+            tuple(mission.payload.split("|")) for mission in harness.config.missions
+        ])
+        self.assertEqual([choice.detail for choice in choices], [mission.consequence for mission in harness.config.missions])
+        self.assertEqual(draw_cards.call_args.args[3], "Qual mensagem você quer enviar? Ela vai precisar chegar intacta!")
+        self.assertEqual(STEP_LABELS["ATTRACT"], "SALVE A MENSAGEM EM ÓRBITA")
+
+        harness.tick()
+        harness.assert_action("mission:TELEMETRY")
+        self.assertEqual(panel._confirmation_label(harness.controller), "AVANÇAR")
+
+    def test_profile_cards_have_only_frequency_and_short_description(self):
+        harness = StagedHarness()
+        harness.assert_press()
+        harness.choose("mission:TELEMETRY")
+        panel = GamePanel.for_test(harness.controller)
+        with patch.object(panel, "_draw_choice_cards") as draw_cards:
+            panel._draw_game_profiles(
+                pygame.Surface((1366, 768)),
+                pygame.Rect(0, 0, 1200, 640),
+                harness.controller,
+                harness.now,
+            )
+        choices = draw_cards.call_args.args[4]
+        self.assertEqual(draw_cards.call_args.args[3], "Em que ritmo a Wisdom vai trabalhar?")
+        self.assertEqual([choice.title for choice in choices], ["CPU Normal", "CPU Limitada"])
+        self.assertEqual([choice.card_frequency for choice in choices], ["240 MHz", "80 MHz"])
+        self.assertEqual([choice.detail for choice in choices], ["", ""])
+        self.assertTrue(draw_cards.call_args.kwargs["show_card_descriptions"])
+        self.assertFalse(draw_cards.call_args.kwargs["show_selected_detail"])
 
     def test_completed_replay_packet_can_be_dragged_without_changing_game_state(self):
         controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)
