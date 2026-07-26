@@ -764,9 +764,11 @@ coleta FAIR e aceite físico pendentes**.
 Implementado:
 
 - entrada única `python3 dashboard.py`, sem launcher Bash;
-- máquina pública de 14 estados: missão, perfil, modo de chave, CRC,
-  preparação, proteção, transmissão, verificação, diagnóstico, decisão,
-  retransmissão e debrief, além de atração e erro;
+- máquina pública de 17 estados: missão, modo de chave, CRC, pausa ilustrada
+  antes de cada uma das quatro etapas, preparação, proteção, transmissão,
+  verificação, diagnóstico, decisão, retransmissão e debrief, além de atração
+  e erro; a demonstração pública fixa `BASELINE/240 MHz` e preserva 80 MHz
+  apenas nas ferramentas técnicas;
 - meta de 120–180 s, sem timeout público, avanço automático ou reset do
   debrief;
 - standby integrado ao loop principal: a descoberta roda no worker e libera
@@ -788,23 +790,22 @@ Implementado:
   verificação e chave/nonce novos na retransmissão;
 - `INVESTIGATE`, `MISSION` e comandos de bancada preservados no firmware e nas
   ferramentas técnicas; a interface/roteiro visual anterior foi removida;
-- três cartões de missão com prioridade, prazo tipado em ms e consequência;
+- três cartões de missão com payload e frase pública curta; prioridade, prazo e
+  explicação técnica ficam com o narrador e as ferramentas;
 - incidentes `NORMAL`, `CHANNEL_BITFLIP`, `TAMPER` e `RX_MEMORY`, com sequência
   pública balanceada e causa oculta até o encerramento;
 - handshake obrigatório, fila serial não bloqueante, timeout e reconexão do
   cliente existente;
 - A39 capturado junto ao D27 ou lido assincronamente por `ANALOG POT` quando a
-  faixa verde confirma `PROTECT`, sempre antes do mapeamento single-bit;
+  faixa verde confirma `NEXT_TRANSMIT`, sempre antes do mapeamento single-bit;
 - pressões durante comando, animação, guarda ou restauração são ignoradas sem
   consumir o debounce da próxima ação válida;
 - animações específicas de preparação, proteção, canal, verificação, retry e
   causalidade, separadas do tempo real recebido;
-- cartões de escolha quadrados, com título e arte causal em destaque; na
-  escolha de missão, descrição e payload em lista compacta aparecem antes da
-  seleção, e somente a consequência aparece depois. A escolha de CPU mostra
-  frequência e descrição curta no próprio cartão, sem detalhe posterior; a
-  torre sobre a Terra foi removida e o CubeSat móvel recebeu um sorriso angular
-  original;
+- cartões de escolha quadrados, com título, arte causal e uma frase curta; na
+  escolha de missão, o payload em lista compacta aparece antes da seleção. A
+  configuração da missão aparece somente no relatório final; a torre sobre a
+  Terra foi removida e o CubeSat móvel recebeu um sorriso angular original;
 - depois da reprodução automática, a própria mensagem pode ser arrastada por
   estações explicadas; esse estado é somente visual e não toca no gate de confirmação;
 - fixture oficial somente em testes/evidência offline, com proveniência e
@@ -827,11 +828,11 @@ Validado em software novamente em 2026-07-23 após a simplificação da interfac
   `INVESTIGATE`, contrato `KEX_FAIR_V1`, plano pareado, fachadas, replay
   arrastável e preservação da sessão em
   `GAME_PROTECT -> ANALOG POT -> GAME_TRANSMIT`;
-- soak de 50 partidas conclui 625 confirmações lógicas, 100 mudanças A39, 275
+- soak de 50 partidas conclui 775 confirmações lógicas, 100 mudanças A39, 275
   comandos `GAME_*`, 25 retries, zero erros e zero crescimento de RSS;
-- por resolução, a busca, os 14 estados e 18 quadros de replay em
+- por resolução, a busca, os 17 estados e 18 quadros de replay em
   início/meio/fim, além do vídeo offline rotulado;
-- média headless da interface completa de 7,280 ms e 10,204 ms, abaixo do
+- média headless da interface completa de 6,312 ms e 8,822 ms, abaixo do
   orçamento de 16,667 ms;
 - o firmware FAIR atual, incluindo `SESSION_BENCH`, compila do zero com
   wolfSSL 5.9.2: 59.020 B de RAM, 1.005.497 B de flash e binário de

@@ -23,12 +23,15 @@ from pqc_sat.stand.settings import DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH  # 
 INVESTIGATION_STATE_ORDER = (
     InvestigationState.ATTRACT,
     InvestigationState.SELECT_MISSION,
-    InvestigationState.SELECT_PROFILE,
     InvestigationState.SELECT_KEY_MODE,
     InvestigationState.SELECT_GUARD,
+    InvestigationState.NEXT_PREPARE,
     InvestigationState.PREPARE,
+    InvestigationState.NEXT_PROTECT,
     InvestigationState.PROTECT,
+    InvestigationState.NEXT_TRANSMIT,
     InvestigationState.TRANSMIT,
+    InvestigationState.NEXT_VERIFY,
     InvestigationState.VERIFY,
     InvestigationState.DIAGNOSE,
     InvestigationState.SELECT_RESPONSE,
@@ -88,16 +91,18 @@ def build_completed_investigation_controller(config_path: Path, fixture_path: Pa
         now = max(now + 0.03, (controller.animation_deadline or now) + 0.01)
         controller.update(now=now)
         press()
+        if controller.state.value.startswith("NEXT_"):
+            press()
 
     press()
     choose("mission:TELEMETRY")
-    choose("profile:240")
     choose("key:MLKEM")
     choose("guard:CRC32")
-    finish_stage()  # PREPARE -> PROTECT
+    press()  # NEXT_PREPARE -> GAME_BEGIN -> PREPARE
+    finish_stage()  # PREPARE -> NEXT_PROTECT -> PROTECT
     controller.set_simulated_pot(client.pot_value)
-    finish_stage()  # PROTECT -> TRANSMIT
-    finish_stage()  # TRANSMIT -> VERIFY
+    finish_stage()  # PROTECT -> NEXT_TRANSMIT -> TRANSMIT
+    finish_stage()  # TRANSMIT -> NEXT_VERIFY -> VERIFY
     finish_stage()  # VERIFY -> DIAGNOSE
     choose("diagnosis:MEMORY")
     choose("response:RETRY")
@@ -144,7 +149,6 @@ def prepare_investigation_capture_state(controller: InvestigationController, sta
     if state in {
         InvestigationState.ATTRACT,
         InvestigationState.SELECT_MISSION,
-        InvestigationState.SELECT_PROFILE,
         InvestigationState.ERROR,
     }:
         controller.selected_profile = ""
@@ -152,7 +156,6 @@ def prepare_investigation_capture_state(controller: InvestigationController, sta
     if state in {
         InvestigationState.ATTRACT,
         InvestigationState.SELECT_MISSION,
-        InvestigationState.SELECT_PROFILE,
         InvestigationState.SELECT_KEY_MODE,
         InvestigationState.ERROR,
     }:
@@ -160,18 +163,18 @@ def prepare_investigation_capture_state(controller: InvestigationController, sta
     if state in {
         InvestigationState.ATTRACT,
         InvestigationState.SELECT_MISSION,
-        InvestigationState.SELECT_PROFILE,
         InvestigationState.SELECT_KEY_MODE,
         InvestigationState.SELECT_GUARD,
+        InvestigationState.NEXT_PREPARE,
         InvestigationState.ERROR,
     }:
         controller.selected_guard = None
     if state in {
         InvestigationState.ATTRACT,
         InvestigationState.SELECT_MISSION,
-        InvestigationState.SELECT_PROFILE,
         InvestigationState.SELECT_KEY_MODE,
         InvestigationState.SELECT_GUARD,
+        InvestigationState.NEXT_PREPARE,
         InvestigationState.ERROR,
     }:
         controller.incident = None
@@ -186,9 +189,13 @@ def prepare_investigation_capture_state(controller: InvestigationController, sta
         controller.diagnosis_correct = None
         controller.operational_decision = None
     stage_limits = {
+        InvestigationState.NEXT_PREPARE: set(),
         InvestigationState.PREPARE: {"PREPARE"},
+        InvestigationState.NEXT_PROTECT: {"PREPARE"},
         InvestigationState.PROTECT: {"PREPARE", "PROTECT"},
+        InvestigationState.NEXT_TRANSMIT: {"PREPARE", "PROTECT"},
         InvestigationState.TRANSMIT: {"PREPARE", "PROTECT", "TRANSMIT"},
+        InvestigationState.NEXT_VERIFY: {"PREPARE", "PROTECT", "TRANSMIT"},
     }
     if state in stage_limits:
         allowed = stage_limits[state]
@@ -201,7 +208,7 @@ def prepare_investigation_capture_state(controller: InvestigationController, sta
         controller.selected_diagnosis = ""
         controller.diagnosis_correct = None
         controller.operational_decision = None
-    if state in {InvestigationState.VERIFY, InvestigationState.DIAGNOSE}:
+    if state in {InvestigationState.NEXT_VERIFY, InvestigationState.VERIFY, InvestigationState.DIAGNOSE}:
         controller.retry_result = None
         controller.end_receipt = None
         controller.selected_diagnosis = ""
@@ -268,7 +275,6 @@ def main(argv=None) -> int:
         print(output)
         selected_actions = {
             InvestigationState.SELECT_MISSION: "mission:TELEMETRY",
-            InvestigationState.SELECT_PROFILE: f"profile:{controller.config.baseline_mhz}",
             InvestigationState.SELECT_KEY_MODE: "key:MLKEM",
         }
         if state in selected_actions:

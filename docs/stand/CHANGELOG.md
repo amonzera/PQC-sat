@@ -1,5 +1,37 @@
 # Changelog do modo estande SBPC
 
+## 2026-07-24 — Iteração 6 do fluxo público
+
+- a escolha de CPU saiu do jogo público: cada partida visual fixa
+  `BASELINE/240 MHz`, enquanto o perfil de 80 MHz permanece em baterias e
+  ferramentas de engenharia;
+- `NEXT_PREPARE` passou a anunciar a primeira etapa e requer confirmação antes
+  de `GAME_BEGIN`; com a remoção da CPU, o fluxo permanece com 17 estados;
+- cartões foram reduzidos a ícone, título, payload quando aplicável e uma frase
+  curta. Os detalhes científicos passam a ser responsabilidade do narrador;
+- as quatro telas de próximo passo agora mostram uma sequência ilustrada com
+  rótulos curtos, setas e selo `PRÓXIMO PASSO`; os cabeçalhos usam `ETAPA`, e
+  as decisões preservam seu rótulo;
+- a faixa de missão/CPU/abordagem/CRC saiu das etapas e aparece somente no
+  relatório final. Os rótulos da timeline passaram a ocupar até duas linhas,
+  sem corte nas duas resoluções validadas.
+
+## 2026-07-23 — Iteração 5 dos checkpoints
+
+- os quatro checkpoints ficaram mais limpos: subtítulos, instruções de replay e
+  cartões inferiores de explicação saíram; o payload abre a primeira etapa no
+  centro e a timeline arrastável passou a usar somente uma legenda curta da
+  operação ativa;
+- as animações de `PREPARE`, `PROTECT`, `TRANSMIT` e `VERIFY` foram estendidas
+  em aproximadamente 25% para facilitar o acompanhamento visual;
+- três estados explícitos — `NEXT_PROTECT`, `NEXT_TRANSMIT` e `NEXT_VERIFY` —
+  anunciam o que acontece a seguir com ícones lúdicos. Cada um requer uma nova
+  confirmação por D27 ou faixa verde; não há avanço automático nem alteração
+  no protocolo serial;
+- a leitura A39 foi deslocada para a confirmação de `NEXT_TRANSMIT`, antes de
+  `GAME_TRANSMIT`, mantendo o comando assíncrono, a mesma sessão e a seleção
+  de bit real.
+
 ## 2026-07-23 — Iteração 4 das escolhas iniciais
 
 - a missão usa o título em linguagem natural e mostra o payload como lista de

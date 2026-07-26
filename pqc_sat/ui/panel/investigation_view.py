@@ -37,14 +37,17 @@ from pqc_sat.ui.theme import (
 
 STEP_LABELS = {
     "ATTRACT": "SALVE A MENSAGEM EM ÓRBITA",
-    "SELECT_MISSION": "ESCOLHA 1/4 • MENSAGEM",
-    "SELECT_PROFILE": "ESCOLHA 2/4 • CPU",
-    "SELECT_KEY_MODE": "ESCOLHA 3/4 • ABORDAGEM",
-    "SELECT_GUARD": "ESCOLHA 4/4 • CRC",
-    "PREPARE": "CHECKPOINT 1/4 • PREPARAR",
-    "PROTECT": "CHECKPOINT 2/4 • PROTEGER",
-    "TRANSMIT": "CHECKPOINT 3/4 • TRANSMITIR",
-    "VERIFY": "CHECKPOINT 4/4 • VERIFICAR",
+    "SELECT_MISSION": "ESCOLHA 1/3 • MENSAGEM",
+    "SELECT_KEY_MODE": "ESCOLHA 2/3 • ABORDAGEM",
+    "SELECT_GUARD": "ESCOLHA 3/3 • CHECAGEM",
+    "NEXT_PREPARE": "A SEGUIR • ETAPA 1/4",
+    "PREPARE": "ETAPA 1/4 • PREPARAR",
+    "NEXT_PROTECT": "A SEGUIR • ETAPA 2/4",
+    "PROTECT": "ETAPA 2/4 • PROTEGER",
+    "NEXT_TRANSMIT": "A SEGUIR • ETAPA 3/4",
+    "TRANSMIT": "ETAPA 3/4 • TRANSMITIR",
+    "NEXT_VERIFY": "A SEGUIR • ETAPA 4/4",
+    "VERIFY": "ETAPA 4/4 • VERIFICAR",
     "DIAGNOSE": "DECISÃO 1/2 • DIAGNÓSTICO",
     "SELECT_RESPONSE": "DECISÃO 2/2 • RESPOSTA",
     "RETRY": "OPERAÇÃO EXTRA • RETRANSMISSÃO",
@@ -112,16 +115,18 @@ class InvestigationPresentationMixin:
 
         self._draw_game_header(surface, rect, controller)
         body = pygame.Rect(rect.x + 24, rect.y + 62, rect.width - 48, rect.height - 82)
-        body = self._draw_confirmed_loadout(surface, body, controller)
         renderer = {
             "ATTRACT": self._draw_game_attract,
             "SELECT_MISSION": self._draw_game_missions,
-            "SELECT_PROFILE": self._draw_game_profiles,
             "SELECT_KEY_MODE": self._draw_game_key_modes,
             "SELECT_GUARD": self._draw_game_guards,
+            "NEXT_PREPARE": self._draw_next_checkpoint,
             "PREPARE": self._draw_game_prepare,
+            "NEXT_PROTECT": self._draw_next_checkpoint,
             "PROTECT": self._draw_game_protect,
+            "NEXT_TRANSMIT": self._draw_next_checkpoint,
             "TRANSMIT": self._draw_game_transmit,
+            "NEXT_VERIFY": self._draw_next_checkpoint,
             "VERIFY": self._draw_game_verify,
             "DIAGNOSE": self._draw_game_diagnose,
             "SELECT_RESPONSE": self._draw_game_response,
@@ -146,32 +151,10 @@ class InvestigationPresentationMixin:
         )
         surface.blit(step, (header.centerx - step.get_width() // 2, header.centery - step.get_height() // 2))
 
-    def _draw_confirmed_loadout(self, surface, body, controller):
-        key_label = _approach_label(controller.selected_key_mode)
-        values = (
-            ("MISSÃO", controller.selected_mission.title if controller.selected_mission else "--", C_ACCENT_CYAN),
-            ("CPU", f"{controller.selected_profile_mhz} MHz" if controller.selected_profile_mhz else "--", C_ACCENT_BLUE),
-            ("ABORDAGEM", key_label, C_ACCENT_PURPLE),
-            ("CRC APP", "LIGADO" if controller.selected_guard is GuardMode.CRC32 else "DESLIGADO" if controller.selected_guard is GuardMode.NONE else "--", C_ACCENT_GREEN),
-        )
-        if all(value == "--" for _, value, _ in values):
-            return body
-        gap = 8
-        chip_w = (body.width - gap * 3) // 4
-        for index, (label, value, color) in enumerate(values):
-            chip = pygame.Rect(body.x + index * (chip_w + gap), body.y, chip_w, 36)
-            pygame.draw.rect(surface, (5, 18, 35), chip, border_radius=5)
-            pygame.draw.rect(surface, color if value != "--" else (45, 62, 80), chip, 1, border_radius=5)
-            surface.blit(FONT_LABEL.render(label, True, C_TEXT_DIM), (chip.x + 8, chip.y + 10))
-            rendered = self._render_clipped(FONT_LABEL, value, color if value != "--" else C_TEXT_DIM, chip.width - 86)
-            surface.blit(rendered, (chip.right - rendered.get_width() - 8, chip.y + 10))
-        return pygame.Rect(body.x, body.y + 43, body.width, body.height - 43)
-
     @staticmethod
     def _confirmation_label(controller):
         return {
             "SELECT_MISSION": "AVANÇAR",
-            "SELECT_PROFILE": "CONFIRMAR ESCOLHA",
             "SELECT_KEY_MODE": "CONFIRMAR ESCOLHA",
             "SELECT_GUARD": "CONFIRMAR ESCOLHA",
             "PREPARE": "CONTINUAR",
@@ -255,7 +238,7 @@ class InvestigationPresentationMixin:
         *,
         columns=None,
         show_card_descriptions=False,
-        show_selected_detail=True,
+        show_selected_detail=False,
     ):
         choices = tuple(choices)
         self._draw_stand_centered(surface, FONT_TITLE, title, C_TEXT_PRIMARY, body.centerx, body.y, body.width - 50)
@@ -416,7 +399,7 @@ class InvestigationPresentationMixin:
                     f"mission:{mission.mission_id}",
                     mission.title,
                     mission.description,
-                    mission.consequence,
+                    "",
                     "",
                     color,
                     icons.get(mission.mission_id, "packet"),
@@ -433,91 +416,71 @@ class InvestigationPresentationMixin:
             show_card_descriptions=True,
         )
 
-    def _draw_game_profiles(self, surface, body, controller, t):
-        choices = (
-            ChoiceVisual(
-                f"profile:{controller.config.baseline_mhz}",
-                "CPU Normal",
-                "Opera na frequência normal da Wisdom.",
-                "",
-                "",
-                C_ACCENT_CYAN,
-                "cpu_fast",
-                card_frequency=f"{controller.config.baseline_mhz} MHz",
-            ),
-            ChoiceVisual(
-                f"profile:{controller.config.limited_mhz}",
-                "CPU Limitada",
-                "Opera em ritmo reduzido.",
-                "",
-                "",
-                C_ACCENT_PURPLE,
-                "cpu_limited",
-                card_frequency=f"{controller.config.limited_mhz} MHz",
-            ),
-        )
-        self._draw_choice_cards(
-            surface,
-            body,
-            controller,
-            "Em que ritmo a Wisdom vai trabalhar?",
-            choices,
-            t,
-            show_card_descriptions=True,
-            show_selected_detail=False,
-        )
-
     def _draw_game_key_modes(self, surface, body, controller, t):
         choices = (
             ChoiceVisual(
                 "key:ECDH",
                 "CLÁSSICA",
-                "ECDH P-256 estabelece o segredo.",
-                "Receptor e iniciador trocam pontos públicos P-256 e chegam ao mesmo segredo; HKDF deriva a chave do AES-GCM.",
-                "ECDH P-256 • WOLFCRYPT",
+                "Duas chaves combinam para criar o mesmo segredo.",
+                "",
+                "",
                 C_ACCENT_ORANGE,
                 "classic_key",
             ),
             ChoiceVisual(
                 "key:MLKEM",
                 "PÓS-QUÂNTICA",
-                "ML-KEM-512 estabelece o segredo.",
-                "KeyGen, Encaps e Decaps usam chave pública e cápsula para chegar ao mesmo segredo; HKDF deriva a chave do AES-GCM.",
-                "ML-KEM-512 • WOLFCRYPT",
+                "Uma cápsula ajuda os dois lados a criar o mesmo segredo.",
+                "",
+                "",
                 C_ACCENT_PURPLE,
                 "quantum_atom",
             ),
         )
-        self._draw_choice_cards(surface, body, controller, "QUAL ABORDAGEM VAI ESTABELECER O SEGREDO?", choices, t)
+        self._draw_choice_cards(
+            surface,
+            body,
+            controller,
+            "Como vamos criar o segredo?",
+            choices,
+            t,
+            show_card_descriptions=True,
+        )
 
     def _draw_game_guards(self, surface, body, controller, t):
         choices = (
             ChoiceVisual(
                 "guard:NONE",
-                "SEM CRC DA APLICAÇÃO",
-                "O plaintext segue direto ao AES-GCM.",
-                "Uma corrupção posterior à verificação da tag pode ficar silenciosa. AES-GCM continua ativo.",
-                "0 B EXTRA • GCM CONTINUA ATIVO",
+                "SEM CRC32",
+                "A mensagem segue sem uma checagem extra.",
+                "",
+                "",
                 C_ACCENT_ORANGE,
                 "no_crc",
             ),
             ChoiceVisual(
                 "guard:CRC32",
-                "CRC32 DA APLICAÇÃO",
-                "Quatro bytes acompanham o plaintext.",
-                "O CRC32 é anexado antes da cifra e ajuda a localizar corrupção de memória; CRC não autentica.",
-                "+4 B • DETECTA, NÃO AUTENTICA",
+                "COM CRC32",
+                "Uma checagem extra acompanha a mensagem.",
+                "",
+                "",
                 C_ACCENT_GREEN,
                 "crc32",
             ),
         )
-        self._draw_choice_cards(surface, body, controller, "ADICIONAR UM GUARDIÃO AO PLAINTEXT?", choices, t)
+        self._draw_choice_cards(
+            surface,
+            body,
+            controller,
+            "Quer adicionar uma checagem extra?",
+            choices,
+            t,
+            show_card_descriptions=True,
+        )
 
-    def _stage_status(self, surface, body, controller, *, title, subtitle):
+    def _stage_status(self, surface, body, controller, *, title):
         title_surface = self._render_clipped(FONT_TITLE, title, C_TEXT_PRIMARY, body.width - 30)
         surface.blit(title_surface, (body.x + 8, body.y + 3))
-        subtitle_surface = self._render_clipped(FONT_SMALL, subtitle, C_TEXT_DIM, body.width - 30)
-        surface.blit(subtitle_surface, (body.x + 8, body.y + 34))
         measurement = controller.current_stage_measurement
         if controller.pending is not None:
             ready = False
@@ -552,18 +515,12 @@ class InvestigationPresentationMixin:
         self._draw_stand_centered(surface, FONT_BODY, operation, C_TEXT_PRIMARY, visual.centerx, icon.bottom + 38, visual.width - 50)
 
     def _replay_rect(self, body):
-        height = min(560, max(120, body.height - 139))
-        return pygame.Rect(body.x + 18, body.y + 65, body.width - 36, height)
+        height = min(560, max(120, body.height - 105))
+        return pygame.Rect(body.x + 18, body.y + 40, body.width - 36, height)
 
-    def _draw_replay_label(self, surface, visual):
-        if self.stand_controller.animation_complete:
-            text = "REPLAY CONCLUÍDO • SEGURE E ARRASTE A MENSAGEM PARA REVER"
-            color = C_ACCENT_GREEN
-        else:
-            text = "REPLAY AUTOMÁTICO • ANIMAÇÃO DIDÁTICA EM TEMPO AMPLIADO"
-            color = C_ACCENT_ORANGE
-        label = self._render_clipped(FONT_LABEL, text, color, visual.width - 24)
-        surface.blit(label, (visual.x + 12, visual.y + 9))
+    def _draw_replay_label(self, surface, visual, text, color):
+        label = self._render_clipped(FONT_BODY, text, color, visual.width - 24)
+        surface.blit(label, (visual.centerx - label.get_width() // 2, visual.y + 10))
 
     @staticmethod
     def _timeline_ratio(station_progresses, progress):
@@ -578,9 +535,9 @@ class InvestigationPresentationMixin:
                 return ((index - 1) + local) / (len(values) - 1)
         return 1.0
 
-    def _replay_content_rect(self, visual):
-        narrative_top = visual.bottom - 153
-        return pygame.Rect(visual.x + 16, visual.y + 34, visual.width - 32, max(72, narrative_top - visual.y - 40))
+    def _replay_content_rect(self, visual, *, reserve_status=True):
+        timeline_top = visual.bottom - (96 if reserve_status else 58)
+        return pygame.Rect(visual.x + 16, visual.y + 50, visual.width - 32, max(72, timeline_top - visual.y - 58))
 
     def _cue_evidence(self, controller, cue, measurement):
         if cue.measured_us is not None:
@@ -616,52 +573,17 @@ class InvestigationPresentationMixin:
             return values.get(cue.key, f"RESULTADO REAL: {controller.retry_result.result}")
         return "ETAPA EXECUTADA E VALIDADA PELA WISDOM"
 
-    def _draw_cue_explanation(self, surface, visual, cue, evidence):
-        card = pygame.Rect(visual.x + 14, visual.bottom - 151, visual.width - 28, 82)
-        pygame.draw.rect(surface, (7, 25, 43), card, border_radius=7)
-        pygame.draw.rect(surface, cue.color, card, 2, border_radius=7)
-        title = self._render_clipped(FONT_BODY, f"AGORA: {cue.short_label}", cue.color, card.width // 2)
-        surface.blit(title, (card.x + 12, card.y + 7))
-        proof = self._render_clipped(FONT_LABEL, evidence, C_ACCENT_GREEN, card.width // 2 - 18)
-        surface.blit(proof, (card.right - proof.get_width() - 12, card.y + 10))
-        pygame.draw.line(surface, (38, 68, 91), (card.x + 10, card.y + 31), (card.right - 10, card.y + 31), 1)
-
-        left_w = int(card.width * 0.23)
-        right_w = left_w
-        center_w = card.width - left_w - right_w - 30
-        columns = (
-            (card.x + 10, left_w, "ENTRA", cue.input_label, C_ACCENT_CYAN),
-            (card.x + left_w + 15, center_w, "O QUE ACONTECE", cue.explanation, cue.color),
-            (card.right - right_w - 10, right_w, "SAI", cue.output_label, C_ACCENT_GREEN),
-        )
-        for x, width, heading, text, color in columns:
-            surface.blit(FONT_LABEL.render(heading, True, color), (x, card.y + 38))
-            self._draw_wrapped_text(
-                surface,
-                FONT_LABEL,
-                text,
-                C_TEXT_PRIMARY,
-                x,
-                card.y + 55,
-                width,
-                line_spacing=15,
-                max_lines=2,
-            )
-
-    def _draw_timeline_nodes(self, surface, visual, timeline, progress):
+    def _draw_timeline_nodes(self, surface, visual, timeline, progress, *, show_status=True):
         if not timeline.cues:
             return
         controller = self.stand_controller
         active = timeline.active(progress)
-        self._draw_cue_explanation(
-            surface,
-            visual,
-            active,
-            self._cue_evidence(controller, active, controller.current_stage_measurement),
-        )
+        if show_status:
+            status = self._render_clipped(FONT_SMALL, active.short_label, active.color, visual.width - 80)
+            surface.blit(status, (visual.centerx - status.get_width() // 2, visual.bottom - 82))
 
         left, right = visual.x + 54, visual.right - 54
-        y = visual.bottom - 24
+        y = visual.bottom - 42
         pygame.draw.line(surface, (36, 68, 94), (left, y), (right, y), 2)
         values = timeline.station_progresses
         stations = (("ENTRADA", C_ACCENT_CYAN),) + tuple((cue.short_label, cue.color) for cue in timeline.cues)
@@ -672,10 +594,19 @@ class InvestigationPresentationMixin:
             color = C_ACCENT_GREEN if completed else station_color if index and stations[index][0] == active.short_label else C_TEXT_DIM
             pygame.draw.circle(surface, (5, 18, 35), (x, y), 8)
             pygame.draw.circle(surface, color, (x, y), 8, 2)
-            max_label = max(54, (right - left) // len(stations) - 5)
-            label = self._render_clipped(FONT_LABEL, label_text, color, max_label)
-            label_x = max(visual.x + 5, min(x - label.get_width() // 2, visual.right - label.get_width() - 5))
-            surface.blit(label, (label_x, y + 9))
+            cell_w = max(58, (right - left) // len(stations) - 5)
+            cell = pygame.Rect(x - cell_w // 2, y + 9, cell_w, 30)
+            self._draw_stand_centered(
+                surface,
+                FONT_LABEL,
+                label_text,
+                color,
+                cell.centerx,
+                cell.y,
+                cell.width,
+                line_gap=0,
+                max_lines=2,
+            )
 
         ratio = self._timeline_ratio(values, progress)
         packet_x = int(left + (right - left) * ratio)
@@ -703,14 +634,60 @@ class InvestigationPresentationMixin:
             values,
         )
 
+    def _draw_next_checkpoint(self, surface, body, controller, t):
+        details = {
+            "NEXT_PREPARE": (
+                "PREPARAR A MENSAGEM",
+                "Vamos transformar a mensagem em bytes e montar o pacote.",
+                C_ACCENT_CYAN,
+                (("payload", "MENSAGEM"), ("packet", "BYTES"), ("packet", "PACOTE")),
+            ),
+            "NEXT_PROTECT": (
+                "PROTEGER A MENSAGEM",
+                "Vamos criar um segredo e proteger o pacote.",
+                C_ACCENT_PURPLE,
+                (("payload", "PACOTE"), ("quantum_atom", "SEGREDO"), ("aes_gcm", "PROTEGIDO")),
+            ),
+            "NEXT_TRANSMIT": (
+                "ENVIAR PARA O SATÉLITE",
+                "O pacote protegido vai viajar até o receptor.",
+                C_ACCENT_BLUE,
+                (("ground", "ORIGEM"), ("satellite", "SATÉLITE"), ("ground", "DESTINO")),
+            ),
+            "NEXT_VERIFY": (
+                "CONFERIR A MENSAGEM",
+                "Vamos checar se ela chegou intacta.",
+                C_ACCENT_GREEN,
+                (("packet", "PACOTE"), ("channel", "CHECAGENS"), ("crc32", "RESULTADO")),
+            ),
+        }
+        title, subtitle, color, icons = details[controller.state.value]
+        badge = self._render_clipped(FONT_LABEL, "PRÓXIMO PASSO", color, body.width - 60)
+        surface.blit(badge, (body.centerx - badge.get_width() // 2, body.y + 8))
+        self._draw_stand_centered(surface, FONT_TITLE, title, C_TEXT_PRIMARY, body.centerx, body.y + 29, body.width - 60)
+        self._draw_stand_centered(surface, FONT_BODY, subtitle, C_TEXT_DIM, body.centerx, body.y + 65, body.width - 80)
+        visual = pygame.Rect(body.x + 80, body.y + 101, body.width - 160, max(150, body.height - 197))
+        pygame.draw.rect(surface, (4, 17, 34), visual, border_radius=12)
+        pygame.draw.rect(surface, color, visual, 2, border_radius=12)
+        centers = (visual.x + visual.width // 6, visual.centerx, visual.right - visual.width // 6)
+        icon_size = min(150, max(88, visual.height // 2))
+        for index, (center_x, (icon, label)) in enumerate(zip(centers, icons)):
+            icon_rect = pygame.Rect(center_x - icon_size // 2, visual.centery - icon_size // 2, icon_size, icon_size)
+            draw_game_icon(surface, icon, icon_rect, t + index * 0.35, color=color, active=index == 1, progress=0.65)
+            self._draw_stand_centered(surface, FONT_LABEL, label, color, icon_rect.centerx, icon_rect.bottom + 9, icon_rect.width + 30)
+            if index < len(icons) - 1:
+                start = (icon_rect.right + 12, visual.centery)
+                end = (centers[index + 1] - icon_size // 2 - 12, visual.centery)
+                pygame.draw.line(surface, color, start, end, 3)
+                pygame.draw.polygon(surface, color, [end, (end[0] - 12, end[1] - 8), (end[0] - 12, end[1] + 8)])
+        self._confirmation_hint(surface, body, controller, ready=True)
+
     def _draw_game_prepare(self, surface, body, controller, t):
-        source = "Wisdom" if controller.mode == "hardware" else "fixture de teste"
         measurement = self._stage_status(
             surface,
             body,
             controller,
             title="PREPARAR A MENSAGEM",
-            subtitle=f"A {source} aplicou o perfil, serializou o payload e tratou o CRC escolhido.",
         )
         visual = self._replay_rect(body)
         if measurement is None:
@@ -718,7 +695,7 @@ class InvestigationPresentationMixin:
             return
         pygame.draw.rect(surface, (4, 17, 34), visual, border_radius=10)
         pygame.draw.rect(surface, C_ACCENT_CYAN, visual, 2, border_radius=10)
-        self._draw_replay_label(surface, visual)
+        self._draw_replay_label(surface, visual, "PAYLOAD DA MENSAGEM", C_ACCENT_CYAN)
         timeline = build_didactic_timeline(
             "PREPARE",
             measurement,
@@ -726,7 +703,7 @@ class InvestigationPresentationMixin:
             guard=controller.selected_guard,
         )
         progress = self.replay_progress(timeline)
-        content = self._replay_content_rect(visual)
+        content = self._replay_content_rect(visual, reserve_status=False)
         data = controller.selected_mission.payload_bytes if controller.selected_mission else b""
         serialize_cue = timeline.cues[0]
         serialize_progress = timeline.cue_progress(progress, serialize_cue)
@@ -764,19 +741,14 @@ class InvestigationPresentationMixin:
             pygame.draw.rect(surface, C_TEXT_DIM, crc, 1, border_radius=5)
             text = FONT_LABEL.render("CRC DA APLICAÇÃO AUSENTE", True, C_TEXT_DIM)
         surface.blit(text, (crc.centerx - text.get_width() // 2, crc.y + 10))
-        self._draw_timeline_nodes(surface, visual, timeline, progress)
+        self._draw_timeline_nodes(surface, visual, timeline, progress, show_status=False)
 
     def _draw_game_protect(self, surface, body, controller, t):
-        if _enum_value(controller.selected_key_mode) == "MLKEM":
-            subtitle = "ML-KEM-512 estabelece o segredo; HKDF-SHA256 deriva a chave do AES-128-GCM."
-        else:
-            subtitle = "ECDH P-256 estabelece o segredo; HKDF-SHA256 deriva a chave do AES-128-GCM."
         measurement = self._stage_status(
             surface,
             body,
             controller,
             title="ESTABELECER A CHAVE E PROTEGER",
-            subtitle=subtitle,
         )
         visual = self._replay_rect(body)
         if measurement is None:
@@ -784,7 +756,7 @@ class InvestigationPresentationMixin:
             return
         pygame.draw.rect(surface, (4, 17, 34), visual, border_radius=10)
         pygame.draw.rect(surface, C_ACCENT_PURPLE, visual, 2, border_radius=10)
-        self._draw_replay_label(surface, visual)
+        self._draw_replay_label(surface, visual, "PROTEÇÃO DA MENSAGEM", C_ACCENT_PURPLE)
         timeline = build_didactic_timeline(
             "PROTECT",
             measurement,
@@ -820,8 +792,6 @@ class InvestigationPresentationMixin:
             active=True,
             progress=cue_progress,
         )
-        label = active.label
-        self._draw_stand_centered(surface, FONT_BODY, label, active.color, content.centerx, icon_rect.bottom - 2, content.width - 430)
         self._draw_timeline_nodes(surface, visual, timeline, progress)
 
     def _draw_game_transmit(self, surface, body, controller, t):
@@ -830,7 +800,6 @@ class InvestigationPresentationMixin:
             body,
             controller,
             title="TRANSMITIR PELO ENLACE",
-            subtitle="O incidente real já foi aplicado; sua causa permanece oculta até o relatório.",
         )
         visual = self._replay_rect(body)
         if measurement is None:
@@ -838,7 +807,7 @@ class InvestigationPresentationMixin:
             return
         pygame.draw.rect(surface, (3, 15, 31), visual, border_radius=10)
         pygame.draw.rect(surface, C_ACCENT_BLUE, visual, 2, border_radius=10)
-        self._draw_replay_label(surface, visual)
+        self._draw_replay_label(surface, visual, "MENSAGEM EM TRÂNSITO", C_ACCENT_BLUE)
         timeline = build_didactic_timeline("TRANSMIT", measurement, key_mode=controller.selected_key_mode, guard=controller.selected_guard)
         progress = self.replay_progress(timeline)
         active = timeline.active(progress)
@@ -919,7 +888,6 @@ class InvestigationPresentationMixin:
             body,
             controller,
             title="VERIFICAR EM TRÊS CAMADAS",
-            subtitle="Cada portal usa o resultado validado da Wisdom; nenhum indicador é sorteado.",
         )
         visual = self._replay_rect(body)
         if result is None:
@@ -927,7 +895,7 @@ class InvestigationPresentationMixin:
             return
         pygame.draw.rect(surface, (4, 17, 34), visual, border_radius=10)
         pygame.draw.rect(surface, C_ACCENT_GREEN, visual, 2, border_radius=10)
-        self._draw_replay_label(surface, visual)
+        self._draw_replay_label(surface, visual, "VERIFICAÇÃO DA MENSAGEM", C_ACCENT_GREEN)
         timeline = build_didactic_timeline("VERIFY", result, key_mode=controller.selected_key_mode, guard=controller.selected_guard)
         progress = self.replay_progress(timeline)
         reveal_count = sum(1 for cue in timeline.cues if progress > cue.start or progress >= 1.0)
@@ -943,73 +911,89 @@ class InvestigationPresentationMixin:
         choices = (
             ChoiceVisual(
                 "diagnosis:CHANNEL",
-                "CANAL",
-                "O quadro mudou no enlace.",
-                "O CRC do quadro localiza alterações durante armazenamento ou transmissão.",
-                "PISTA: CRC DO QUADRO",
+                "NO CANAL",
+                "A mensagem pode ter mudado durante a viagem.",
+                "",
+                "",
                 C_ACCENT_CYAN,
                 "channel",
             ),
             ChoiceVisual(
                 "diagnosis:AUTH",
-                "ADULTERAÇÃO",
-                "A autenticação não fechou.",
-                "Um CRC sem chave pode ser recalculado; a tag GCM exige a chave secreta.",
-                "PISTA: TAG AES-GCM",
+                "PACOTE ALTERADO",
+                "Alguém pode ter alterado o pacote.",
+                "",
+                "",
                 C_ACCENT_RED,
                 "tamper",
             ),
             ChoiceVisual(
                 "diagnosis:MEMORY",
-                "MEMÓRIA",
-                "O plaintext mudou no receptor.",
-                "A alteração ocorreu depois da tag; o CRC da aplicação observa esse conteúdo.",
-                "PISTA: CRC DA APLICAÇÃO",
+                "NO RECEPTOR",
+                "A mensagem pode ter mudado dentro do receptor.",
+                "",
+                "",
                 C_ACCENT_PURPLE,
                 "memory",
             ),
         )
         choice_body = pygame.Rect(body.x, body.y + 112, body.width, body.height - 112)
-        self._draw_choice_cards(surface, choice_body, controller, "ESCOLHA SUA HIPÓTESE — A CAUSA AINDA ESTÁ OCULTA", choices, t)
+        self._draw_choice_cards(
+            surface,
+            choice_body,
+            controller,
+            "Onde a mensagem pode ter mudado?",
+            choices,
+            t,
+            show_card_descriptions=True,
+        )
 
     def _draw_game_response(self, surface, body, controller, t):
         result = controller.result
         status = result.result if result else "SEM RESULTADO"
-        self._draw_stand_centered(surface, FONT_TITLE, "VOCÊ ESTÁ NO COMANDO: QUAL É A RESPOSTA?", C_TEXT_PRIMARY, body.centerx, body.y, body.width - 50)
+        self._draw_stand_centered(surface, FONT_TITLE, "O que devemos fazer agora?", C_TEXT_PRIMARY, body.centerx, body.y, body.width - 50)
         self._draw_stand_centered(surface, FONT_BODY, f"VERIFICAÇÃO REAL: {status}", C_ACCENT_ORANGE, body.centerx, body.y + 32, body.width - 70)
         accept_blocked = bool(result and result.cryptographically_rejected)
         choices = (
             ChoiceVisual(
                 "response:ACCEPT",
                 "ACEITAR",
-                "Entregar o conteúdo aprovado.",
-                "Só é permitido quando o protocolo não rejeitou criptograficamente o pacote.",
-                "ENTREGA IMEDIATA",
+                "Entregar a mensagem.",
+                "",
+                "",
                 C_ACCENT_GREEN,
                 "accept",
                 "PACOTE REJEITADO: ACEITAR ESTÁ BLOQUEADO" if accept_blocked else "",
             ),
             ChoiceVisual(
                 "response:RETRY",
-                "RETRANSMITIR",
-                "Executar uma nova proteção real.",
-                "O mesmo payload recebe material criptográfico novo e segue sem falha injetada.",
-                "MESMO PAYLOAD • CHAVE E NONCE NOVOS",
+                "ENVIAR DE NOVO",
+                "Enviar a mesma mensagem outra vez.",
+                "",
+                "",
                 C_ACCENT_CYAN,
                 "retry",
             ),
             ChoiceVisual(
                 "response:SAFE_MODE",
                 "MODO SEGURO",
-                "Não entregar o pacote.",
-                "A missão solicita uma resposta conservadora sem aceitar conteúdo rejeitado.",
-                "DECISÃO OPERACIONAL CONSERVADORA",
+                "Parar a entrega e proteger a missão.",
+                "",
+                "",
                 C_ACCENT_PURPLE,
                 "safe",
             ),
         )
         choice_body = pygame.Rect(body.x, body.y + 57, body.width, body.height - 57)
-        self._draw_choice_cards(surface, choice_body, controller, "ESCOLHA A AÇÃO", choices, t)
+        self._draw_choice_cards(
+            surface,
+            choice_body,
+            controller,
+            "Escolha uma ação",
+            choices,
+            t,
+            show_card_descriptions=True,
+        )
         if controller.blocked_choice_message:
             warning = self._render_clipped(FONT_LABEL, controller.blocked_choice_message, C_ACCENT_RED, body.width - 80)
             surface.blit(warning, (body.centerx - warning.get_width() // 2, body.bottom - 122))
@@ -1020,7 +1004,6 @@ class InvestigationPresentationMixin:
             body,
             controller,
             title="RETRANSMISSÃO REAL",
-            subtitle="Mesmo payload, sem falha injetada, com nova chave de sessão e novo nonce.",
         )
         visual = self._replay_rect(body)
         if result is None:
@@ -1028,7 +1011,7 @@ class InvestigationPresentationMixin:
             return
         pygame.draw.rect(surface, (4, 17, 34), visual, border_radius=10)
         pygame.draw.rect(surface, C_ACCENT_GREEN, visual, 2, border_radius=10)
-        self._draw_replay_label(surface, visual)
+        self._draw_replay_label(surface, visual, "RETRANSMISSÃO", C_ACCENT_GREEN)
         timeline = build_didactic_timeline("RETRY", result, key_mode=controller.selected_key_mode, guard=controller.selected_guard)
         progress = self.replay_progress(timeline)
         active = timeline.active(progress)
@@ -1049,6 +1032,27 @@ class InvestigationPresentationMixin:
             IncidentScenario.RX_MEMORY: ("CORRUPÇÃO NA MEMÓRIA", "O plaintext mudou depois que a tag GCM já havia sido validada.", "memory"),
             IncidentScenario.NORMAL: ("CONTROLE NORMAL", "Nenhuma falha foi aplicada.", "accept"),
         }.get(incident, ("INCIDENTE INDISPONÍVEL", "", "bit"))
+
+    def _draw_mission_configuration(self, surface, body, controller, *, y):
+        values = (
+            ("MISSÃO", controller.selected_mission.title if controller.selected_mission else "--", C_ACCENT_CYAN),
+            ("CPU", f"{controller.selected_profile_mhz} MHz" if controller.selected_profile_mhz else "--", C_ACCENT_BLUE),
+            ("ABORDAGEM", _approach_label(controller.selected_key_mode), C_ACCENT_PURPLE),
+            ("CRC APP", "COM CRC32" if controller.selected_guard is GuardMode.CRC32 else "SEM CRC32", C_ACCENT_GREEN),
+        )
+        gap = 8
+        chip_w = (body.width - 46 - gap * 3) // 4
+        for index, (label, value, color) in enumerate(values):
+            self._draw_overlay_metric_box(
+                surface,
+                label,
+                value,
+                body.x + 23 + index * (chip_w + gap),
+                y,
+                chip_w,
+                38,
+                color,
+            )
 
     def _draw_game_debrief(self, surface, body, controller, t):
         if controller.end_receipt is None or not controller.animation_complete:
@@ -1087,19 +1091,18 @@ class InvestigationPresentationMixin:
         elapsed += (result.elapsed_us if result else 0) + (controller.retry_result.elapsed_us if controller.retry_result else 0)
         measured_result = controller.retry_result or result
         bytes_total = measured_result.bytes_total if measured_result else 0
-        min_heap = measured_result.min_heap if measured_result else 0
-        approach = _approach_label(controller.selected_key_mode)
+        self._draw_mission_configuration(surface, body, controller, y=body.y + 62)
         badges = (
-            ("ABORDAGEM", approach, C_ACCENT_PURPLE),
             ("ENTREGA", delivery, C_ACCENT_GREEN if delivery == "DELIVERED" else C_ACCENT_ORANGE),
             ("SEGURANÇA", result.result if result else "--", C_ACCENT_CYAN),
-            ("RECURSOS DESTA PARTIDA", f"{_format_elapsed(elapsed)} • {bytes_total} B • {min_heap / 1024:.1f} KiB mín.", verdict_color),
+            ("TEMPO", _format_elapsed(elapsed), verdict_color),
+            ("DADOS", f"{bytes_total} B", C_ACCENT_BLUE),
         )
         badge_gap = 8
         badge_w = (body.width - 46 - badge_gap * 3) // 4
         for index, (label, value, color) in enumerate(badges):
             x = body.x + 23 + index * (badge_w + badge_gap)
-            self._draw_overlay_metric_box(surface, label, value, x, body.y + 62, badge_w, 52, color)
+            self._draw_overlay_metric_box(surface, label, value, x, body.y + 108, badge_w, 46, color)
 
         if controller.incident is IncidentScenario.RX_MEMORY:
             counterfactual = (
@@ -1109,19 +1112,19 @@ class InvestigationPresentationMixin:
             )
         else:
             counterfactual = "CRC32 NÃO AUTENTICA: A TAG AES-GCM CONTINUA ESSENCIAL."
-        self._draw_stand_centered(surface, FONT_LABEL, counterfactual, C_ACCENT_ORANGE, body.centerx, body.y + 118, body.width - 90)
+        self._draw_stand_centered(surface, FONT_LABEL, counterfactual, C_ACCENT_ORANGE, body.centerx, body.y + 164, body.width - 90)
 
-        available_h = max(220, body.height - 205)
+        available_h = max(220, body.height - 251)
         visual_h = min(470, available_h)
         visual = pygame.Rect(
             body.x + 18,
-            body.y + 139 + max(0, (available_h - visual_h) // 2),
+            body.y + 185 + max(0, (available_h - visual_h) // 2),
             body.width - 36,
             visual_h,
         )
         pygame.draw.rect(surface, (4, 17, 34), visual, border_radius=10)
         pygame.draw.rect(surface, C_ACCENT_CYAN, visual, 2, border_radius=10)
-        self._draw_replay_label(surface, visual)
+        self._draw_replay_label(surface, visual, "REVISÃO DA MISSÃO", C_ACCENT_CYAN)
         timeline = build_mission_review_timeline(controller.stage_measurements, controller.result, controller.retry_result)
         progress = self.replay_progress(timeline)
         active = timeline.active(progress)

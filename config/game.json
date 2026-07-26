@@ -16,12 +16,12 @@
   "windowed_size": [1366, 768],
   "animation": {
     "min_duration_ms": 1200,
-    "max_duration_ms": 4800,
+    "max_duration_ms": 5250,
     "checkpoints_ms": {
-      "PREPARE": 2200,
-      "PROTECT": 4200,
-      "TRANSMIT": 3000,
-      "VERIFY": 3600,
+      "PREPARE": 2750,
+      "PROTECT": 5250,
+      "TRANSMIT": 3750,
+      "VERIFY": 4500,
       "RETRY": 3000,
       "DEBRIEF": 1200
     }
@@ -51,7 +51,7 @@
     {
       "id": "TELEMETRY",
       "title": "TELEMETRIA CRÍTICA",
-      "description": "Temperatura crítica; solicitar modo de segurança.",
+      "description": "O satélite avisa que está esquentando.",
       "payload": "TEMP=84C|STATUS=CRITICAL|SAFE=REQUEST",
       "priority": "ALTA",
       "deadline_ms": 2000,
@@ -60,7 +60,7 @@
     {
       "id": "SAFE_COMMAND",
       "title": "COMANDO DE EMERGÊNCIA",
-      "description": "Ordenar que o satélite entre em modo seguro.",
+      "description": "Um comando manda o satélite entrar em modo seguro.",
       "payload": "CMD=SAFE_MODE|PRIORITY=CRITICAL|SEQ=0042",
       "priority": "CRÍTICA",
       "deadline_ms": 500,
@@ -69,7 +69,7 @@
     {
       "id": "CONFIG_UPDATE",
       "title": "ATUALIZAR CONFIGURAÇÃO",
-      "description": "Alterar a janela de comunicação da missão.",
+      "description": "Uma mensagem muda a próxima janela de comunicação.",
       "payload": "CFG=COMMS_WINDOW|VALUE=12MIN|SEQ=0043",
       "priority": "MÉDIA",
       "deadline_ms": 10000,

@@ -157,13 +157,15 @@ class StagedHarness:
         self.now = max(self.now + 0.03, (self.controller.animation_deadline or self.now) + 0.01)
         self.controller.update(now=self.now)
         self.assert_press()
+        if self.controller.state.value.startswith("NEXT_"):
+            self.assert_press()
 
     def reach_prepare(self):
         self.assert_press()
         self.choose("mission:TELEMETRY")
-        self.choose("profile:240")
         self.choose(f"key:{self.key_mode}")
         self.choose(f"guard:{self.guard}")
+        self.assert_press()
         self.pump()
         return self.controller
 
@@ -204,6 +206,10 @@ class StagedConfigurationTests(unittest.TestCase):
         self.assertFalse(config.public_auto_reset_enabled)
         self.assertEqual([mission.deadline_ms for mission in config.missions], [2000, 500, 10000])
         self.assertEqual(set(dict(config.checkpoint_animation_ms)), {"PREPARE", "PROTECT", "TRANSMIT", "VERIFY", "RETRY", "DEBRIEF"})
+        self.assertEqual(
+            {stage: dict(config.checkpoint_animation_ms)[stage] for stage in ("PREPARE", "PROTECT", "TRANSMIT", "VERIFY")},
+            {"PREPARE": 2750, "PROTECT": 5250, "TRANSMIT": 3750, "VERIFY": 4500},
+        )
 
     def test_controlled_battery_covers_four_protections_four_incidents_two_profiles(self):
         rows = list(build_matrix(StandConfig.load(DEFAULT_CONFIG_PATH), 1))
@@ -414,7 +420,26 @@ class StagedControllerTests(unittest.TestCase):
         self.assertTrue(controller.animation_complete)
         harness.now = deadline + 1.1
         harness.assert_press()
+        self.assertEqual(controller.state, InvestigationState.NEXT_PROTECT)
+        self.assertFalse(any(command.startswith("GAME_PROTECT") for command in harness.commands))
+        harness.assert_press()
         self.assertEqual(controller.state, InvestigationState.PROTECT)
+        self.assertTrue(any(command.startswith("GAME_PROTECT") for command in harness.commands))
+
+    def test_next_prepare_requires_confirmation_before_game_begin(self):
+        harness = StagedHarness()
+        harness.assert_press()
+        harness.choose("mission:TELEMETRY")
+        harness.choose("key:MLKEM")
+        harness.choose("guard:CRC32")
+        controller = harness.controller
+        self.assertEqual(controller.state, InvestigationState.NEXT_PREPARE)
+        self.assertFalse(any(command.startswith("GAME_BEGIN") for command in harness.commands))
+        harness.assert_press()
+        self.assertEqual(controller.state, InvestigationState.PREPARE)
+        begin = next(command for command in harness.commands if command.startswith("GAME_BEGIN"))
+        self.assertIn(f" {harness.config.baseline_name} ", begin)
+        self.assertEqual(controller.selected_profile_mhz, 240)
 
     def test_green_control_confirms_a_selected_choice_and_logs_screen_origin(self):
         harness = StagedHarness()
@@ -423,7 +448,7 @@ class StagedControllerTests(unittest.TestCase):
         harness.assert_action("mission:TELEMETRY")
         harness.tick()
         self.assertTrue(harness.controller.handle_action("confirm", now=harness.now))
-        self.assertEqual(harness.controller.state, InvestigationState.SELECT_PROFILE)
+        self.assertEqual(harness.controller.state, InvestigationState.SELECT_KEY_MODE)
         confirmation = next(
             record
             for record in reversed(harness.logger.records)
@@ -459,14 +484,18 @@ class StagedControllerTests(unittest.TestCase):
             )
             harness.controller.update(now=harness.now)
             confirm()
+            if harness.controller.state is InvestigationState.NEXT_TRANSMIT:
+                harness.controller.set_simulated_pot(3072)
+                confirm()
+            elif harness.controller.state in {InvestigationState.NEXT_PROTECT, InvestigationState.NEXT_VERIFY}:
+                confirm()
 
         confirm()  # ATTRACT
         select("mission:TELEMETRY")
-        select("profile:240")
         select("key:MLKEM")
         select("guard:CRC32")
+        confirm()  # NEXT_PREPARE
         finish_stage()  # PREPARE
-        harness.controller.set_simulated_pot(3072)
         finish_stage()  # PROTECT
         finish_stage()  # TRANSMIT
         finish_stage()  # VERIFY
@@ -491,23 +520,28 @@ class StagedControllerTests(unittest.TestCase):
         }
         self.assertEqual(origins, {"screen"})
 
-    def test_green_control_samples_real_a39_before_protect_transition(self):
+    def test_green_control_samples_real_a39_before_transmit_transition(self):
         harness = StagedHarness()
         controller = harness.reach_prepare()
         harness.now = max(harness.now + 0.03, (controller.animation_deadline or harness.now) + 0.01)
         controller.update(now=harness.now)
         harness.assert_press()
+        self.assertEqual(controller.state, InvestigationState.NEXT_PROTECT)
+        harness.assert_press()
         self.assertEqual(controller.state, InvestigationState.PROTECT)
         harness.now = max(harness.now + 0.03, (controller.animation_deadline or harness.now) + 0.01)
         controller.update(now=harness.now)
+        harness.assert_press()
+        self.assertEqual(controller.state, InvestigationState.NEXT_TRANSMIT)
         harness.client.set_pot(3072)
         controller.mode = "hardware"
+        harness.tick()
 
         self.assertTrue(controller.handle_action("confirm", now=harness.now))
         self.assertIsNotNone(controller.pending)
         self.assertEqual(controller.pending.purpose, "screen_pot")
         self.assertEqual(harness.commands[-1], "ANALOG POT")
-        self.assertEqual(controller.state, InvestigationState.PROTECT)
+        self.assertEqual(controller.state, InvestigationState.NEXT_TRANSMIT)
 
         harness.pump()
         self.assertEqual(controller.state, InvestigationState.TRANSMIT)
@@ -526,9 +560,13 @@ class StagedControllerTests(unittest.TestCase):
         harness.now = max(harness.now + 0.03, (controller.animation_deadline or harness.now) + 0.01)
         controller.update(now=harness.now)
         harness.assert_press()
+        harness.assert_press()
         harness.now = max(harness.now + 0.03, (controller.animation_deadline or harness.now) + 0.01)
         controller.update(now=harness.now)
+        harness.assert_press()
+        self.assertEqual(controller.state, InvestigationState.NEXT_TRANSMIT)
         controller.mode = "hardware"
+        harness.tick()
 
         self.assertTrue(controller.handle_action("confirm", now=harness.now))
         controller.handle_serial_event(
@@ -536,7 +574,7 @@ class StagedControllerTests(unittest.TestCase):
             {"command": "ANALOG POT", "status": "OK", "payload": {"pot": "9000"}},
             now=harness.now + 0.01,
         )
-        self.assertEqual(controller.state, InvestigationState.PROTECT)
+        self.assertEqual(controller.state, InvestigationState.NEXT_TRANSMIT)
         self.assertIsNone(controller.pending)
         self.assertIn("A39 NÃO CONFIRMADO", controller.blocked_choice_message)
         self.assertTrue(controller.ready)
@@ -545,7 +583,7 @@ class StagedControllerTests(unittest.TestCase):
         self.assertTrue(controller.handle_action("confirm", now=harness.now))
         deadline = controller.pending.deadline
         controller.update(now=deadline + 0.01)
-        self.assertEqual(controller.state, InvestigationState.PROTECT)
+        self.assertEqual(controller.state, InvestigationState.NEXT_TRANSMIT)
         self.assertIsNone(controller.pending)
         self.assertIn("timeout", controller.blocked_choice_message)
         self.assertTrue(controller.ready)
@@ -818,9 +856,9 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
         panel.draw(frame, harness.now + 0.1)
         green = panel.stand_action_rects["confirm"]
         panel.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": green.center}))
-        self.assertEqual(harness.controller.state, InvestigationState.SELECT_PROFILE)
+        self.assertEqual(harness.controller.state, InvestigationState.SELECT_KEY_MODE)
 
-    def test_mission_cards_show_payload_rows_and_only_the_consequence_after_selection(self):
+    def test_mission_cards_show_payload_rows_and_short_public_copy(self):
         harness = StagedHarness()
         harness.assert_press()
         panel = GamePanel.for_test(harness.controller)
@@ -836,7 +874,7 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
         self.assertEqual([choice.card_payload for choice in choices], [
             tuple(mission.payload.split("|")) for mission in harness.config.missions
         ])
-        self.assertEqual([choice.detail for choice in choices], [mission.consequence for mission in harness.config.missions])
+        self.assertEqual([choice.detail for choice in choices], ["", "", ""])
         self.assertEqual(draw_cards.call_args.args[3], "Qual mensagem você quer enviar? Ela vai precisar chegar intacta!")
         self.assertEqual(STEP_LABELS["ATTRACT"], "SALVE A MENSAGEM EM ÓRBITA")
 
@@ -844,25 +882,15 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
         harness.assert_action("mission:TELEMETRY")
         self.assertEqual(panel._confirmation_label(harness.controller), "AVANÇAR")
 
-    def test_profile_cards_have_only_frequency_and_short_description(self):
+    def test_public_game_pins_cpu_at_baseline_without_a_profile_choice(self):
         harness = StagedHarness()
         harness.assert_press()
         harness.choose("mission:TELEMETRY")
-        panel = GamePanel.for_test(harness.controller)
-        with patch.object(panel, "_draw_choice_cards") as draw_cards:
-            panel._draw_game_profiles(
-                pygame.Surface((1366, 768)),
-                pygame.Rect(0, 0, 1200, 640),
-                harness.controller,
-                harness.now,
-            )
-        choices = draw_cards.call_args.args[4]
-        self.assertEqual(draw_cards.call_args.args[3], "Em que ritmo a Wisdom vai trabalhar?")
-        self.assertEqual([choice.title for choice in choices], ["CPU Normal", "CPU Limitada"])
-        self.assertEqual([choice.card_frequency for choice in choices], ["240 MHz", "80 MHz"])
-        self.assertEqual([choice.detail for choice in choices], ["", ""])
-        self.assertTrue(draw_cards.call_args.kwargs["show_card_descriptions"])
-        self.assertFalse(draw_cards.call_args.kwargs["show_selected_detail"])
+        self.assertEqual(harness.controller.state, InvestigationState.SELECT_KEY_MODE)
+        self.assertEqual(harness.controller.selected_profile, harness.config.baseline_name)
+        self.assertEqual(harness.controller.selected_profile_mhz, 240)
+        harness.tick()
+        self.assertFalse(harness.controller.handle_action("profile:80", now=harness.now))
 
     def test_completed_replay_packet_can_be_dragged_without_changing_game_state(self):
         controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)

@@ -29,8 +29,17 @@ class GameArtTests(unittest.TestCase):
     def test_four_acts_cover_every_public_state(self):
         expected = {
             GameAct.BRIEFING: {"ATTRACT", "SELECT_MISSION"},
-            GameAct.LOADOUT: {"SELECT_PROFILE", "SELECT_KEY_MODE", "SELECT_GUARD"},
-            GameAct.OPERATION: {"PREPARE", "PROTECT", "TRANSMIT", "VERIFY"},
+            GameAct.LOADOUT: {"SELECT_KEY_MODE", "SELECT_GUARD"},
+            GameAct.OPERATION: {
+                "NEXT_PREPARE",
+                "PREPARE",
+                "NEXT_PROTECT",
+                "PROTECT",
+                "NEXT_TRANSMIT",
+                "TRANSMIT",
+                "NEXT_VERIFY",
+                "VERIFY",
+            },
             GameAct.COMMAND: {"DIAGNOSE", "SELECT_RESPONSE", "RETRY", "DEBRIEF", "ERROR"},
         }
         for act, states in expected.items():

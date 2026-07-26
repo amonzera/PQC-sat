@@ -16,21 +16,20 @@ encerramento.
 
 ## Direção visual em quatro atos
 
-Os 14 estados continuam sendo estados transacionais distintos, mas o visitante
+Os 17 estados continuam sendo estados transacionais distintos, mas o visitante
 os percebe como quatro atos de uma única missão:
 
 | Ato visual | Estados | Leitura pública |
 |---|---|---|
 | 1. Receber a missão | `ATTRACT`, `SELECT_MISSION` | Terra, órbita, CubeSat e mensagem crítica |
-| 2. Montar o sistema | `SELECT_PROFILE`, `SELECT_KEY_MODE`, `SELECT_GUARD` | cartões ilustrados e loadout já confirmado |
-| 3. Executar a operação | `PREPARE` a `VERIFY` | replays didáticos dos checkpoints reais |
+| 2. Montar o sistema | `SELECT_KEY_MODE`, `SELECT_GUARD` | cartões ilustrados com frases curtas |
+| 3. Executar a operação | `PREPARE` a `VERIFY` | replays didáticos das etapas reais |
 | 4. Comandar a resposta | `DIAGNOSE` a `DEBRIEF`, mais `ERROR` | hipótese, ação e cadeia causal |
 
 A Terra em rotação, a órbita e o CubeSat sorridente são procedurais e persistem
 entre os atos; a torre que cobria o disco da Terra foi removida. Não há imagem,
-áudio ou fonte externa. Cada escolha
-possui um desenho animado próprio; a faixa de loadout mostra somente escolhas
-já confirmadas e nunca transforma uma seleção pendente em decisão.
+áudio ou fonte externa. Cada escolha possui um desenho animado próprio e uma
+frase curta; os parâmetros da partida aparecem somente no relatório final.
 
 ## Invariante de interação
 
@@ -47,8 +46,9 @@ tela. A abertura narrativa de `ATTRACT` permanece até `INICIAR MISSÃO` ou D27.
 - D27 durante comando pendente, animação, guarda de tela ou restauração de
   perfil é ignorado sem consumir o debounce seguinte;
 - teclado não representa D27 no hardware público, mesmo com diagnóstico;
-- em `PROTECT`, a faixa verde solicita `ANALOG POT` sem bloquear o loop e só
-  avança com A39 real válido; não reutiliza valor antigo ou padrão;
+- em `NEXT_TRANSMIT`, a faixa verde solicita `ANALOG POT` sem bloquear o loop
+  e só inicia a transmissão com A39 real válido; não reutiliza valor antigo ou
+  padrão;
 - qualquer desconexão reapresenta a busca; após novo `HELLO`, a partida
   interrompida é apagada e a abertura narrativa retorna automaticamente;
 - `Home` é aborto administrativo e exige novo handshake para recuperação;
@@ -76,18 +76,21 @@ bancada; a jornada visual anterior foi removida.
 | Estado | Seleção ou evidência | Verde ou D27 confirmado executa |
 |---|---|---|
 | `ATTRACT` | Terra, CubeSat, cabeçalho `SALVE A MENSAGEM EM ÓRBITA` e botão isolado | `INICIAR MISSÃO` ou D27 abrem diretamente uma nova partida |
-| `SELECT_MISSION` | telemetria, comando crítico ou configuração, cada qual com descrição e payload | fixa missão, payload, prioridade e prazo |
-| `SELECT_PROFILE` | 240 ou 80 MHz | fixa o perfil experimental |
-| `SELECT_KEY_MODE` | `CLÁSSICA — ECDH P-256` ou `PÓS-QUÂNTICA — ML-KEM-512` | fixa como o segredo será estabelecido |
-| `SELECT_GUARD` | CRC da aplicação desligado ou CRC32 ligado | fixa o guardião e envia `GAME_BEGIN` |
-| `PREPARE` | bytes serializados e CRC opcional anexado | envia `GAME_PROTECT` |
-| `PROTECT` | chave/cápsula, KDF, AES-GCM, ciphertext e tag | captura A39 no D27 ou por `ANALOG POT` e envia `GAME_TRANSMIT` |
-| `TRANSMIT` | pacote percorre satélite, antena e canal; causa segue oculta | envia `GAME_VERIFY` |
+| `SELECT_MISSION` | telemetria, comando crítico ou configuração, cada qual com frase curta e payload | fixa a mensagem |
+| `SELECT_KEY_MODE` | abordagem clássica ou pós-quântica, com uma frase curta | fixa como o segredo será criado |
+| `SELECT_GUARD` | sem CRC32 ou com CRC32, com uma frase curta | fixa a checagem extra |
+| `NEXT_PREPARE` | ícones de mensagem, bytes e pacote; o próximo passo é anunciado | envia `GAME_BEGIN` e abre a primeira etapa |
+| `PREPARE` | payload centralizado, bytes serializados e CRC opcional | abre a pausa `NEXT_PROTECT` |
+| `NEXT_PROTECT` | ícones de payload, chave e proteção; o próximo passo é anunciado | envia `GAME_PROTECT` |
+| `PROTECT` | chave/cápsula, KDF, AES-GCM, ciphertext e tag | abre a pausa `NEXT_TRANSMIT` |
+| `NEXT_TRANSMIT` | ícones de solo, satélite e solo; o enlace é anunciado | captura A39 no D27 ou por `ANALOG POT` e envia `GAME_TRANSMIT` |
+| `TRANSMIT` | pacote percorre satélite, antena e canal; causa segue oculta | abre a pausa `NEXT_VERIFY` |
+| `NEXT_VERIFY` | ícones de pacote, canal e verificação; a conferência é anunciada | envia `GAME_VERIFY` |
 | `VERIFY` | CRC do quadro, tag GCM e CRC da aplicação, nessa ordem | libera o diagnóstico |
 | `DIAGNOSE` | canal, adulteração ou memória | fixa a hipótese |
 | `SELECT_RESPONSE` | aceitar, retransmitir ou modo seguro | executa `GAME_RETRY` ou `GAME_END` |
 | `RETRY` | mesma mensagem, nova chave e novo nonce, sem falha | envia `GAME_END ... ACCEPT` |
-| `DEBRIEF` | incidente, consequência, métricas, diagnóstico e contrafactual | encerra e volta a `ATTRACT` |
+| `DEBRIEF` | configuração da partida, incidente, métricas, diagnóstico e contrafactual | encerra e volta a `ATTRACT` |
 | `ERROR` | erro atual; nenhuma medição anterior é reutilizada | a busca cobre a tela e, após novo `HELLO`, volta automaticamente a `ATTRACT` |
 
 Pacotes rejeitados criptograficamente não oferecem `ACCEPT` como escolha
@@ -192,7 +195,7 @@ fim automático, o arraste está desabilitado. Antes da resposta serial, sequer
 existe replay construído. Em `TRANSMIT`, a revisão mostra byte, bit e máscara
 do A39, mas mantém a causa do incidente oculta até `DEBRIEF`.
 
-A tela rotula “animação didática em tempo ampliado”. Os checkpoints explicam
+A tela rotula “animação didática em tempo ampliado”. As etapas explicam
 causalidade sem mostrar números de recursos; somente o debrief exibe
 tempo/bytes/heap da partida. `elapsed_us` é tempo de processamento, não
 energia. Não há nota, ranking ou gamificação competitiva.
@@ -217,7 +220,7 @@ no programa de produção.
 
 ## Acessibilidade e contingência
 
-- 1366×768 e 1920×1080 possuem busca, 14 estados e 18
+- 1366×768 e 1920×1080 possuem busca, 17 estados e 18
   quadros adicionais de replay, cobrindo início, meio e fim dos seis painéis revisáveis;
 - alto contraste, texto junto às cores e nenhuma dependência de áudio;
 - cartões grandes para toque/mouse;

@@ -181,7 +181,7 @@ medida. Tempo de CPU é indicador de custo computacional, não watts ou joules.
 ```text
 ┌──────────────────────── notebook ────────────────────────┐
 │ dashboard.py                                             │
-│  - jogo público em 14 estados                            │
+│  - jogo público em 17 estados                            │
 │  - cartão seleciona; controle contextual ou D27 confirmam│
 │  - métricas GAME_* e log JSONL v2                        │
 │  - sem simulação de produção                             │
@@ -693,26 +693,23 @@ misturados com a coleta atual.
 ### 12.1 Cabeçalho e progresso
 
 Depois do handshake, a interface pública não repete marca, conexão ou atos. O
-único cabeçalho identifica a tela ativa, por exemplo `ESCOLHA 2/4 • CPU` ou
-`CHECKPOINT 3/4 • TRANSMITIR`.
+único cabeçalho identifica a tela ativa, por exemplo `ESCOLHA 2/3 • ABORDAGEM`
+ou `ETAPA 3/4 • TRANSMITIR`.
 
 A Terra em rotação e o satélite sorridente em órbita formam um mundo
 procedural persistente; a torre sobre o planeta foi removida. Nas escolhas,
-cada cartão quadrado tem um desenho próprio e um título em destaque, sem
-subtítulo interno; a explicação aparece somente depois que o visitante
-seleciona a opção. A faixa de loadout mostra missão, CPU, chave e CRC somente
-depois de cada confirmação.
+cada cartão quadrado tem um desenho próprio, título e uma frase curta. O
+payload continua visível nas missões; a explicação científica fica com o
+apresentador. Missão, CPU, chave e CRC aparecem somente no relatório final.
 
 ### 12.2 Cartões de escolha
 
-Em `SELECT_MISSION`, `SELECT_PROFILE`, `SELECT_KEY_MODE`, `SELECT_GUARD`,
-`DIAGNOSE` e `SELECT_RESPONSE`, toque no cartão apenas o destaca. A seleção
-pode ser trocada até a confirmação. O cartão mantém somente arte e título; o
-efeito científico da opção selecionada surge abaixo do conjunto e o botão
-contextual aparece quando a escolha está pronta. Depois da confirmação não
-existe “voltar”.
+Em `SELECT_MISSION`, `SELECT_KEY_MODE`, `SELECT_GUARD`, `DIAGNOSE` e
+`SELECT_RESPONSE`, toque no cartão apenas o destaca. A seleção pode ser
+trocada até a confirmação. O botão contextual aparece quando a escolha está
+pronta; depois da confirmação não existe “voltar”.
 
-### 12.3 Checkpoints reais
+### 12.3 Etapas reais
 
 `PREPARE`, `PROTECT`, `TRANSMIT`, `VERIFY` e `RETRY` mostram resposta real da
 Wisdom e uma animação didática ampliada. Enquanto comando ou animação estiver
@@ -909,9 +906,9 @@ e use a faixa verde ou peça um novo D27 em cada linha. Não antecipe o incident
 |---|---|---|---|---|---|---|
 | `ATTRACT` | “Vamos acompanhar uma mensagem real processada pela Wisdom.” | “Pronto para assumir a missão?” | busca automática; abertura por `INICIAR MISSÃO` ou D27 | Terra, CubeSat e chamada mínima; segue direto às escolhas | “Ainda não há resultado; o `HELLO` só confirmou a capacidade.” | “A placa está pronta” sem `game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` |
 | `SELECT_MISSION` | “Escolha qual consequência você quer proteger.” | “Qual mensagem tolera menos erro?” | payload, prioridade e prazo | desenhos de telemetria, comando e configuração; o selecionado pulsa | “O prazo é contexto didático, não deadline de voo certificado.” | “A missão representa um satélite real em operação.” |
-| `SELECT_PROFILE` | “Agora escolha o ritmo de CPU do experimento.” | “80 MHz deve aumentar qual custo?” | perfil controlado e tempo de CPU | chips ilustrados mostram ritmos distintos, sem ícone de energia | “80 MHz é um perfil experimental; não medimos energia.” | “Todo CubeSat opera a 80 MHz” ou “economizamos energia.” |
 | `SELECT_KEY_MODE` | “Escolha como o segredo será estabelecido.” | “ECDH e ML-KEM fazem qual parte da sessão?” | acordo clássico, KEM pós-quântico, KDF e cifra simétrica | pontos ECDH e chave/cápsula ML-KEM percorrem caminhos visuais distintos | “Os dois estabelecem segredo; HKDF deriva e AES-GCM protege a mensagem.” | “ML-KEM criptografa o payload” ou “ECDH usa chave AES pré-compartilhada.” |
-| `SELECT_GUARD` | “Decida se o plaintext leva um CRC da aplicação.” | “Um CRC válido prova autenticidade?” | checksum e região coberta | blocos do payload recebem ou não o bloco verde de +4 B | “CRC detecta corrupção acidental; não autentica.” | “CRC impede ataque” ou “CRC substitui GCM.” |
+| `SELECT_GUARD` | “Escolha se a mensagem terá uma checagem extra.” | “Você quer acrescentar uma checagem?” | checksum e região coberta | blocos do payload recebem ou não o bloco verde de +4 B | “CRC detecta corrupção acidental; não autentica.” | “CRC impede ataque” ou “CRC substitui GCM.” |
+| `NEXT_PREPARE` | “Primeiro vamos preparar a mensagem.” | “O que vem antes de proteger um pacote?” | representação em bytes | mensagem, bytes e pacote aparecem em sequência | “A interface só antecipa o passo; a Wisdom ainda não começou.” | “A tela já executou a etapa.” |
 | `PREPARE` | “A Wisdom está serializando exatamente a mensagem escolhida.” | “Onde o CRC entra quando ligado?” | representação em bytes e referência anterior à falha | bytes só surgem durante serialização; CRC muda de previsto para calculando e anexado; depois arraste a mensagem | “A animação está ampliada; os números de recursos ficam reservados ao debrief.” | “Esses segundos são o tempo real da placa.” |
 | `PROTECT` | “Agora o segredo é obtido e o AES-GCM protege o pacote.” | “Qual parte muda entre ECDH e ML-KEM?” | setup, iniciador, receptor, HKDF, nonce e tag | pontos ECDH ou chave/cápsula ML-KEM; depois arraste por cada subtiming | “As duas opções usam o mesmo HKDF e AES-GCM; muda o estabelecimento.” | “PQC substitui o AES” ou “a tag é um CRC.” |
 | `TRANSMIT` | “Gire A39: ele escolhe o bit; a causa continua escondida.” | “Qual byte e máscara foram selecionados?” | vetor single-bit reproduzível e camada do incidente | a mensagem atravessa as estações; o bit aparece somente no ponto A39 e a revisão não revela a causa | “A falha é injetada por software e ainda não revela sua causa.” | “Observamos radiação real” ou “o potenciômetro mede radiação.” |
@@ -1115,7 +1112,7 @@ foi selecionado para a partida.
 
 **Por que tocar no cartão não avança?** Para separar escolha de confirmação:
 o cartão muda `pending_choice`; o controle contextual ou D27 confirmam a fase.
-Em `PROTECT`, o controle da tela ainda solicita uma leitura A39 real antes de
+Em `NEXT_TRANSMIT`, o controle da tela solicita uma leitura A39 real antes de
 avançar.
 
 **O que a faixa de RAM mostra?**  Consumo observado de heap em relação ao total
@@ -1280,7 +1277,7 @@ python3 tools/firmware_deploy.py --upload
 - standby liberado automaticamente somente por
   `HELLO STAGED_V1/FAIR_V1/FAIR_SESSION_V1`;
 - abertura narrativa preservada e confirmada por `INICIAR MISSÃO` e D27;
-- uma partida pelo verde com `ANALOG POT` validado em `PROTECT`;
+- uma partida pelo verde com `ANALOG POT` validado em `NEXT_TRANSMIT`;
 - uma partida `GAME_BEGIN` … `GAME_END` com retry testada;
 - uma tela de cada checkpoint deixada parada sem avançar sozinha;
 - JSON oficial disponível localmente;

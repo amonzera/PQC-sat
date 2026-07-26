@@ -105,12 +105,6 @@ def main(argv=None) -> int:
                     controller.handle_action(f"mission:{mission.mission_id}", now=synthetic_now)
                 else:
                     press()
-            elif state is InvestigationState.SELECT_PROFILE:
-                mhz = config.baseline_mhz if controller.cycle_index % 2 else config.limited_mhz
-                if not controller.pending_choice:
-                    controller.handle_action(f"profile:{mhz}", now=synthetic_now)
-                else:
-                    press()
             elif state is InvestigationState.SELECT_KEY_MODE:
                 mode = controller.KEY_MODES[(controller.cycle_index - 1) % len(controller.KEY_MODES)]
                 if not controller.pending_choice:
@@ -130,11 +124,18 @@ def main(argv=None) -> int:
                 InvestigationState.VERIFY,
                 InvestigationState.RETRY,
             } and controller.stage_ready_for_confirmation:
-                if state is InvestigationState.PROTECT:
-                    value = (client.pot_value + 613) % (config.pot_maximum + 1)
-                    client.set_pot(value)
-                    controller.set_simulated_pot(value)
-                    pot_changes += 1
+                press()
+            elif state in {
+                InvestigationState.NEXT_PREPARE,
+                InvestigationState.NEXT_PROTECT,
+                InvestigationState.NEXT_VERIFY,
+            }:
+                press()
+            elif state is InvestigationState.NEXT_TRANSMIT:
+                value = (client.pot_value + 613) % (config.pot_maximum + 1)
+                client.set_pot(value)
+                controller.set_simulated_pot(value)
+                pot_changes += 1
                 press()
             elif state is InvestigationState.DIAGNOSE:
                 if not controller.pending_choice:

@@ -66,12 +66,15 @@ class InvestigationController:
     _FORWARD_STATES = {
         InvestigationState.ATTRACT,
         InvestigationState.SELECT_MISSION,
-        InvestigationState.SELECT_PROFILE,
         InvestigationState.SELECT_KEY_MODE,
         InvestigationState.SELECT_GUARD,
+        InvestigationState.NEXT_PREPARE,
         InvestigationState.PREPARE,
+        InvestigationState.NEXT_PROTECT,
         InvestigationState.PROTECT,
+        InvestigationState.NEXT_TRANSMIT,
         InvestigationState.TRANSMIT,
+        InvestigationState.NEXT_VERIFY,
         InvestigationState.VERIFY,
         InvestigationState.DIAGNOSE,
         InvestigationState.SELECT_RESPONSE,
@@ -506,8 +509,8 @@ class InvestigationController:
 
     def _accept_response(self, pending: PendingCommand, payload: dict[str, object], *, now: float) -> None:
         if pending.purpose == "screen_pot":
-            if self.state is not InvestigationState.PROTECT:
-                raise StandProtocolError("leitura A39 chegou fora do checkpoint PROTECT")
+            if self.state is not InvestigationState.NEXT_TRANSMIT:
+                raise StandProtocolError("leitura A39 chegou fora da transição para TRANSMIT")
             pot_value = _required_int(payload, "pot")
             if not self.config.pot_minimum <= pot_value <= self.config.pot_maximum:
                 raise StandProtocolError("leitura A39 fora da faixa")
@@ -625,10 +628,6 @@ class InvestigationController:
             choice_kind = "mission"
             choice_value = action.split(":", 1)[1].upper()
             valid = any(mission.mission_id == choice_value for mission in self.config.missions)
-        elif action.startswith("profile:") and self.state is InvestigationState.SELECT_PROFILE:
-            choice_kind = "profile"
-            choice_value = action.split(":", 1)[1]
-            valid = choice_value in {str(self.config.baseline_mhz), str(self.config.limited_mhz)}
         elif action.startswith("key:") and self.state is InvestigationState.SELECT_KEY_MODE:
             choice_kind = "key_mode"
             choice_value = action.split(":", 1)[1].upper()
@@ -674,7 +673,7 @@ class InvestigationController:
         if not allowed:
             self._ignore_input("screen", reason, now=now, action="confirm")
             return False
-        if self.mode == "hardware" and self.state is InvestigationState.PROTECT:
+        if self.mode == "hardware" and self.state is InvestigationState.NEXT_TRANSMIT:
             self.blocked_choice_message = "LENDO O A39 REAL NA WISDOM"
             return self._send("ANALOG POT", "screen_pot", now=now)
         return self.handle_button(
@@ -706,7 +705,6 @@ class InvestigationController:
             return (self.ready, "handshake STAGED_V1 ainda não confirmado")
         expected_choice = {
             InvestigationState.SELECT_MISSION: "mission",
-            InvestigationState.SELECT_PROFILE: "profile",
             InvestigationState.SELECT_KEY_MODE: "key_mode",
             InvestigationState.SELECT_GUARD: "guard",
             InvestigationState.DIAGNOSE: "diagnosis",
@@ -718,12 +716,15 @@ class InvestigationController:
         if self.state in self._STAGE_BY_STATE:
             if not self.stage_ready_for_confirmation:
                 return False, "resposta real ou animação ainda incompleta"
-            if (
-                self.state is InvestigationState.PROTECT
-                and pot_value is None
-                and self.mode == "hardware"
-                and not allow_screen_pot_request
-            ):
+            return True, ""
+        if self.state in {
+            InvestigationState.NEXT_PREPARE,
+            InvestigationState.NEXT_PROTECT,
+            InvestigationState.NEXT_VERIFY,
+        }:
+            return True, ""
+        if self.state is InvestigationState.NEXT_TRANSMIT:
+            if pot_value is None and self.mode == "hardware" and not allow_screen_pot_request:
                 return False, "BUTTON_PING sem leitura A39"
             return True, ""
         if self.state is InvestigationState.DEBRIEF:
@@ -798,17 +799,7 @@ class InvestigationController:
         if self.state is InvestigationState.SELECT_MISSION:
             mission_id = self._confirm_choice()
             self.selected_mission = next(mission for mission in self.config.missions if mission.mission_id == mission_id)
-            self._advance(InvestigationState.SELECT_PROFILE, reason="mission_confirmed", now=now)
-            return True
-        if self.state is InvestigationState.SELECT_PROFILE:
-            value = self._confirm_choice()
-            if value == str(self.config.baseline_mhz):
-                self.selected_profile = self.config.baseline_name
-                self.selected_profile_mhz = self.config.baseline_mhz
-            else:
-                self.selected_profile = self.config.limited_name
-                self.selected_profile_mhz = self.config.limited_mhz
-            self._advance(InvestigationState.SELECT_KEY_MODE, reason="profile_confirmed", now=now)
+            self._advance(InvestigationState.SELECT_KEY_MODE, reason="mission_confirmed", now=now)
             return True
         if self.state is InvestigationState.SELECT_KEY_MODE:
             self.selected_key_mode = KeyMode(self._confirm_choice())
@@ -816,15 +807,26 @@ class InvestigationController:
             return True
         if self.state is InvestigationState.SELECT_GUARD:
             self.selected_guard = GuardMode(self._confirm_choice())
+            self._advance(InvestigationState.NEXT_PREPARE, reason="guard_confirmed", now=now)
+            return True
+        if self.state is InvestigationState.NEXT_PREPARE:
             self._begin_game(now)
             return True
         if self.state is InvestigationState.PREPARE:
+            self._reset_animation()
+            self._advance(InvestigationState.NEXT_PROTECT, reason="prepare_reviewed", now=now)
+            return True
+        if self.state is InvestigationState.NEXT_PROTECT:
             if self._send(f"GAME_PROTECT {self.game_id}", "game_protect", now=now):
                 self._reset_animation()
-                self._advance(InvestigationState.PROTECT, reason="prepare_confirmed", now=now)
+                self._advance(InvestigationState.PROTECT, reason="next_protect_confirmed", now=now)
                 return True
             return False
         if self.state is InvestigationState.PROTECT:
+            self._reset_animation()
+            self._advance(InvestigationState.NEXT_TRANSMIT, reason="protect_reviewed", now=now)
+            return True
+        if self.state is InvestigationState.NEXT_TRANSMIT:
             assert self.selected_mission is not None
             selected_pot = self.live_pot_value if pot_value is None else pot_value
             self.live_pot_value = selected_pot
@@ -840,13 +842,17 @@ class InvestigationController:
                 now=now,
             ):
                 self._reset_animation()
-                self._advance(InvestigationState.TRANSMIT, reason="protect_confirmed", now=now)
+                self._advance(InvestigationState.TRANSMIT, reason="next_transmit_confirmed", now=now)
                 return True
             return False
         if self.state is InvestigationState.TRANSMIT:
+            self._reset_animation()
+            self._advance(InvestigationState.NEXT_VERIFY, reason="transmit_reviewed", now=now)
+            return True
+        if self.state is InvestigationState.NEXT_VERIFY:
             if self._send(f"GAME_VERIFY {self.game_id}", "game_verify", now=now):
                 self._reset_animation()
-                self._advance(InvestigationState.VERIFY, reason="transmit_confirmed", now=now)
+                self._advance(InvestigationState.VERIFY, reason="next_verify_confirmed", now=now)
                 return True
             return False
         if self.state is InvestigationState.VERIFY:
@@ -923,6 +929,8 @@ class InvestigationController:
 
     def _start_cycle(self, now: float) -> None:
         self._reset_cycle_data()
+        self.selected_profile = self.config.baseline_name
+        self.selected_profile_mhz = self.config.baseline_mhz
         self.cycle_index += 1
         self.cycle_started_at = now
         self.cycle_target_logged = False
@@ -943,7 +951,7 @@ class InvestigationController:
         self._log("incident_armed", game_id=self.game_id, incident=self.incident.value)
         if self._send(command, "game_begin", now=now):
             self._reset_animation()
-            self._advance(InvestigationState.PREPARE, reason="guard_confirmed", now=now)
+            self._advance(InvestigationState.PREPARE, reason="next_prepare_confirmed", now=now)
 
     def _finish_cycle(self, now: float) -> None:
         self.completed_cycles += 1

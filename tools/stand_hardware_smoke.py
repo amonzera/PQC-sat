@@ -113,8 +113,6 @@ def main(argv=None) -> int:
             if input_ready and not controller.pending_choice:
                 if controller.state is InvestigationState.SELECT_MISSION:
                     controller.handle_action("mission:TELEMETRY", now=now)
-                elif controller.state is InvestigationState.SELECT_PROFILE:
-                    controller.handle_action(f"profile:{config.baseline_mhz}", now=now)
                 elif controller.state is InvestigationState.SELECT_KEY_MODE:
                     controller.handle_action("key:MLKEM", now=now)
                 elif controller.state is InvestigationState.SELECT_GUARD:

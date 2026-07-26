@@ -14,7 +14,7 @@ não é automaticamente um `PASS` de hardware.
 | verde ou D27 confirmam transição | PASS software / FAIL hardware | log v2 exige `button_seq` e origem; verde percorre todos os estados; teclado bloqueado | uma partida real por cada controle |
 | resposta/animação não avançam | PASS software | testes mantêm estágio após resposta e após deadline da animação | deixar cada estado parado na Wisdom |
 | D27 inválido não consome debounce | PASS software | cobertos comando pendente, animação, guarda, evento antigo e repetido | smoke físico com rebote/pressões prematuras |
-| sem timeout ou reset público | PASS software | flags v3 desabilitadas e teste com relógio avançado | permanência física nos 14 estados |
+| sem timeout ou reset público | PASS software | flags v3 desabilitadas e teste com relógio avançado | permanência física nos 17 estados |
 | incidente oculto até debrief | PASS software | UI só renderiza causa após `GAME_END` aceito | observar fluxo real |
 | sem voltar após confirmação | PASS | não há ação pública de retorno; `Home` aborta a partida | nenhum |
 | duração alvo 120–180 s | PARCIAL | configuração e validador tipam a faixa | medir mediana com cinco visitantes |
@@ -24,7 +24,7 @@ não é automaticamente um `PASS` de hardware.
 | Requisito | Estado | Evidência atual | Fechamento restante |
 |---|---|---|---|
 | três missões com prazo em ms | PASS | configuração v3 e cartões nas duas resoluções | nenhum |
-| perfis 240/80 MHz | PASS software | parsers exigem perfil/clock correspondentes | repetir ambos em `GAME_*` real |
+| CPU fixa no jogo público | PASS software | controlador sempre envia `BASELINE/240 MHz`; parsers e baterias técnicas preservam 240/80 MHz | confirmar a partida visual a 240 MHz |
 | chave e CRC independentes | PASS software | `ECDH`, `ECDH_CRC32`, `MLKEM`, `MLKEM_CRC32` | executar as quatro combinações na Wisdom |
 | todas usam AES-128-GCM | PASS código | parser e firmware exigem `cipher=AES-128-GCM` | confirmar respostas reais |
 | backend comparável | PASS no hardware curto | ECDH P-256 e ML-KEM-512, RNG, HKDF e AES-GCM usam o mesmo wolfCrypt; `KEX_INFO` e o diagnóstico `20260723T160223Z` confirmaram a política FAIR na Wisdom | bateria controlada e análise estatística |
@@ -58,7 +58,7 @@ não é automaticamente um `PASS` de hardware.
 
 | Requisito | Estado | Evidência atual | Fechamento restante |
 |---|---|---|---|
-| 14 estados renderizados | PASS | 14 PNGs em cada resolução | ensaio no monitor definitivo |
+| 17 estados renderizados | PASS software | 17 PNGs em cada resolução, incluindo quatro pausas antes das etapas | ensaio no monitor definitivo |
 | escolhas compreensíveis | PASS software | cartões quadrados com título e arte causal; nas três missões, descrição e payload em lista ficam visíveis antes da seleção, somente a consequência surge depois, e CPU mostra frequência e descrição curta no card | testar compreensão com cinco visitantes |
 | replay compreensível e controlável | PASS software | pacote arrastável com entrada, operação, saída e evidência; 18 quadros extras por resolução | testar compreensão com cinco visitantes |
 | animação orientada à resposta | PASS software | bytes, CRC, proteção, A39, verificação, retry e causalidade só depois da resposta aceita | observar timings reais |
@@ -66,7 +66,7 @@ não é automaticamente um `PASS` de hardware.
 | log v2 completo | PASS software | seleção/confirmação, origem D27/tela, fonte A39, estágio, decisão, retry e aborto | gerar JSONL físico |
 | validador mantém leitura V1 | PASS | testes e ramo de compatibilidade | nenhum |
 | diagnóstico/smoke/soak/captura/vídeo/bateria atualizados | PARCIAL hardware | diagnóstico curto FAIR passou 27 registros; ferramentas longas e artefatos offline estão preparados | smoke visual, aceite longo e coleta FAIR reais |
-| média <16,667 ms | PASS host | interface completa: 7,280 ms e 10,204 ms | não é garantia de todo host/monitor |
+| média <16,667 ms | PASS host | interface completa: 6,312 ms e 8,822 ms | não é garantia de todo host/monitor |
 
 ## Gates do estande
 

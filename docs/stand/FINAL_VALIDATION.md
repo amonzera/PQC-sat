@@ -20,7 +20,7 @@ confirmações D27/tela por partida ou o novo debrief.
 
 | Verificação | Resultado | Evidência |
 |---|---|---|
-| suíte integrada | PASS | 117 testes host; busca automática, narrativa direta, reconexão, controle de tela, A39 assíncrono, contrato FAIR, manifesto, códigos de retorno KEX, baterias v2, limites serial separados, legado e jogo por etapas |
+| suíte integrada | PASS software | 122 testes host; busca automática, narrativa direta, reconexão, controle de tela, A39 assíncrono, pausas entre etapas, contrato FAIR, manifesto, códigos de retorno KEX, baterias v2, limites serial separados, legado e jogo por etapas |
 | matriz científica | PASS | 2 perfis × 2 modos de chave × 2 guardiões × 4 incidentes = 32 casos |
 | confirmação explícita | PASS no modelo | transições v2 exigem `button_confirmed` de origem `physical|screen`; resposta/animação não avançam |
 | busca automática | PASS no host/modelo | dashboard permanece aberto sem porta; somente `HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` fecha o standby |
@@ -29,9 +29,9 @@ confirmações D27/tela por partida ou o novo debrief.
 | A39 durante sessão | PASS no hardware curto | `GAME_PROTECT -> ANALOG POT -> GAME_TRANSMIT` preservou a sessão; `pot=1470` selecionou byte 13/máscara `0x04` |
 | ausência de timeout público | PASS | estados permanecem parados; flags públicas desabilitadas |
 | retransmissão | PASS no hardware curto | `same_payload=1`, `fresh_key=1`, `fresh_nonce=1`, `result=DELIVERED` |
-| soak offline | PASS | 50/50 partidas, 625 confirmações lógicas, 100 mudanças A39, 275 `GAME_*`, 25 retries, zero erros e zero crescimento RSS |
-| renderização | PASS | por resolução: busca + 14 estados + 18 quadros dos replays; tela de tutorial ausente |
-| orçamento médio | PASS | interface completa: 7,280 ms e 10,204 ms; limite 16,667 ms no host headless |
+| soak offline | PASS software | 50/50 partidas, 775 confirmações lógicas, 100 mudanças A39, 275 `GAME_*`, 25 retries, zero erros e zero crescimento RSS |
+| renderização | PASS software | por resolução: busca + 17 estados + 18 quadros dos replays; tela de tutorial ausente |
+| orçamento médio | PASS host | interface completa: 6,312 ms e 8,822 ms; limite 16,667 ms no host headless |
 | vídeo offline | PASS | `staged_game_test_fixture.mp4`, permanentemente rotulado como fixture sem hardware |
 | smoke FAIR anterior | FAIL parcial na placa | `logs/stand/diagnostics/20260723T152842Z_stand_diagnostic.json`: handshake, perfil, `KEX_INFO` e ML-KEM passaram; ECDH falhou no setup em 29 µs, antes de initiator/responder |
 | segundo smoke FAIR | PASS criptográfico; FAIL no protocolo | `logs/stand/diagnostics/20260723T155138Z_stand_diagnostic.json`: `KEX_BENCH`, `MISSION` e `SESSION_BENCH` passaram para ECDH/ML-KEM; `FAULT` passou; `GAME_BEGIN` passou; `GAME_PROTECT` tinha `experiment` duplicado |
@@ -118,7 +118,7 @@ comprovou:
 
 Essa evidência ainda não comprova repouso `button=0`, uma partida visual
 integral por D27 ou faixa verde, `GAME_ABORT`, matriz física, permanência em
-todos os 14 estados, baterias longas ou compreensão de visitantes.
+todos os 17 estados, baterias longas ou compreensão de visitantes.
 
 ## Gates físicos obrigatórios
 

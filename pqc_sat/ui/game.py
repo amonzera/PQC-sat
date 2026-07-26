@@ -79,7 +79,6 @@ class GamePanel(InvestigationPresentationMixin):
     def _stand_state_label(state: str) -> str:
         return {
             "SELECT_MISSION": "ESCOLHA DA MISSÃO",
-            "SELECT_PROFILE": "ESCOLHA DA CPU",
             "SELECT_KEY_MODE": "ESTABELECIMENTO DE CHAVE",
             "SELECT_GUARD": "GUARDIÃO DA APLICAÇÃO",
             "SELECT_RESPONSE": "RESPOSTA OPERACIONAL",
@@ -253,8 +252,12 @@ class GamePanel(InvestigationPresentationMixin):
         max_width,
         *,
         line_gap=6,
+        max_lines=None,
     ):
-        for line in self._wrap_text_for_width(font, text, max_width):
+        lines = self._wrap_text_for_width(font, text, max_width)
+        if max_lines is not None:
+            lines = lines[:max_lines]
+        for line in lines:
             rendered = font.render(line, True, color)
             surface.blit(rendered, (center_x - rendered.get_width() // 2, y))
             y += rendered.get_height() + line_gap

@@ -40,7 +40,7 @@ implementar.
 - interface única fullscreen em `dashboard.py`; somente o standby de busca
   funciona sem conexão, e o jogo exige a Wisdom validada;
 - Terra, CubeSat, estrelas, nebulosa e partículas procedurais;
-- fluxo público por cartões, 14 estados e confirmações por D27 ou faixa verde;
+- fluxo público por cartões, 17 estados e confirmações por D27 ou faixa verde;
 - firmware serial `V1` para a RoboCore BlackBoard Wisdom;
 - bridge serial Python e console `tools/serial_console.py`;
 - `dashboard.py` abre o standby e sonda todas as portas em worker por `HELLO`; exige
@@ -125,7 +125,7 @@ implementar.
   `stand_demo.py`, dashboard manual legado, launchers Bash e flags de simulação
   de produção foram removidos; limites estão em
   `docs/DASHBOARD_ARCHITECTURE.md`;
-- `Missão Bit Flip` oferece três missões, 240/80 MHz, chave ECDH/MLKEM,
+- `Missão Bit Flip` oferece três missões, CPU pública fixa em 240 MHz, chave ECDH/MLKEM,
   guardião NONE/CRC32, incidente oculto, diagnóstico e resposta operacional;
 - comando `INVESTIGATE` implementado no firmware para instrumentar, na mesma
   execução, CRC do quadro, AES-GCM e CRC da aplicação em `NORMAL`,
@@ -143,7 +143,7 @@ implementar.
   `BUTTON_PING`. Essa lacuna histórica foi fechada no smoke FAIR curto de
   2026-07-23, que observou `button=1`, `pot=1469` e uptime fresco; repouso D27,
   partida integral e aceite físico longo continuam pendentes.
-- jogo didático `STAGED_V1` implementado em software com 14 estados: toque em
+- jogo didático `STAGED_V1` implementado em software com 17 estados: toque em
   cartão apenas seleciona, D27 ou faixa verde confirmam cada transição, A39 seleciona o bit, resposta
   serial e animação apenas liberam a confirmação, sem timeout ou reset público;
 - primeiro handshake fecha automaticamente a busca e mostra a abertura com
@@ -152,7 +152,7 @@ implementar.
   arrastada por estações explicadas sem alterar o controlador ou o gate de confirmação;
 - standby permanece até `HELLO STAGED_V1/FAIR_V1/FAIR_SESSION_V1` e fecha automaticamente; a abertura
   narrativa permanece até clique ou D27, e o controle de tela usa `ANALOG POT` antes
-  de confirmar `PROTECT`;
+  de confirmar `NEXT_TRANSMIT`;
 - cartões de escolha são quadrados, com títulos e artes causais em destaque;
   na escolha de missão, descrição e payload aparecem antes da seleção, e a
   torre sobre a Terra foi removida enquanto o CubeSat móvel preserva o sorriso
@@ -161,8 +161,9 @@ implementar.
   `GAME_VERIFY`, `GAME_RETRY`, `GAME_END` e `GAME_ABORT` implementado no
   firmware, preservando `INVESTIGATE` e o fluxo legado; `CLASSIC_CRC32` permite
   escolher modo de chave e CRC da aplicação independentemente;
-- validação host atual passa 117 testes e preserva a matriz de 32 casos, soak offline
-  de 50 partidas, 66 capturas, vídeo rotulado e benchmark abaixo de 16,667 ms
+- validação host atual passa 122 testes e preserva a matriz de 32 casos, soak offline
+  de 50 partidas, 76 capturas, vídeo rotulado e benchmark de 6,312 ms e 8,822
+  ms, abaixo de 16,667 ms
   em ambas as resoluções; após build FAIR, o candidato corrigido usa
   59.020 B de RAM e 1.005.497 B de flash, com binário de 1.012.080 B e
   SHA-256 `9eba850f…32a18d`; o perfil legado atual compila com 59.004 B de RAM,
@@ -383,7 +384,7 @@ compilação.
 1. Registrar o D27 em repouso (`button=0`) e percorrer uma partida visual
    completa, inclusive retry, somente com D27.
 2. Percorrer outra partida completa pela faixa verde, validar
-   `ANALOG POT` em `PROTECT` e exercitar `GAME_ABORT`.
+   `ANALOG POT` em `NEXT_TRANSMIT` e exercitar `GAME_ABORT`.
 3. Variar o A39 e executar a matriz física curta de modos, guardiões,
    incidentes e perfis.
 4. Executar pelo operador a bateria FAIR v2 e entregar o JSON para análise.

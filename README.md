@@ -73,18 +73,21 @@ O jogo possui os estados:
 
 1. `ATTRACT`;
 2. `SELECT_MISSION`;
-3. `SELECT_PROFILE`;
-4. `SELECT_KEY_MODE`;
-5. `SELECT_GUARD`;
+3. `SELECT_KEY_MODE`;
+4. `SELECT_GUARD`;
+5. `NEXT_PREPARE`;
 6. `PREPARE`;
-7. `PROTECT`;
-8. `TRANSMIT`;
-9. `VERIFY`;
-10. `DIAGNOSE`;
-11. `SELECT_RESPONSE`;
-12. `RETRY` quando escolhida;
-13. `DEBRIEF`;
-14. `ERROR` em falha segura.
+7. `NEXT_PROTECT`;
+8. `PROTECT`;
+9. `NEXT_TRANSMIT`;
+10. `TRANSMIT`;
+11. `NEXT_VERIFY`;
+12. `VERIFY`;
+13. `DIAGNOSE`;
+14. `SELECT_RESPONSE`;
+15. `RETRY` quando escolhida;
+16. `DEBRIEF`;
+17. `ERROR` em falha segura.
 
 Na abertura, o standby serve somente para procurar a Wisdom: não tem botão e
 desaparece automaticamente após o handshake válido. A tela seguinte preserva
@@ -97,29 +100,31 @@ D27 confirmam a etapa.
 Respostas seriais e fim de animação apenas liberam essa confirmação. `Home`
 aborta a partida inteira; nenhuma tecla simula D27.
 
-No checkpoint `PROTECT`, o D27 traz o A39 no próprio `BUTTON_PING`; se o
-visitante usar a faixa verde, o dashboard solicita `ANALOG POT` de forma
-assíncrona e só avança após validar a leitura real. O firmware permite essa
+Depois do replay de `PROTECT`, a pausa `NEXT_TRANSMIT` apresenta o próximo
+movimento. Nela, o D27 traz o A39 no próprio `BUTTON_PING`; se o visitante
+usar a faixa verde, o dashboard solicita `ANALOG POT` de forma assíncrona e
+só inicia `GAME_TRANSMIT` após validar a leitura real. O firmware permite essa
 consulta somente-leitura durante a sessão `GAME_*`, sem apagar o estado
 `PROTECT`; os demais comandos de bancada continuam bloqueados.
 
-Visualmente, a busca técnica fica fora dos 14 estados, que formam quatro atos:
+Visualmente, a busca técnica fica fora dos 17 estados, que formam quatro atos:
 receber a missão, montar o
 sistema, executar a operação e comandar a resposta. Terra, CubeSat, órbita e
 estações são desenhados proceduralmente. Os cartões de escolha permanecem
-quadrados e destacam a arte causal e o título. Na escolha de missão, cada
-cartão também mostra descrição e o payload em uma lista compacta antes da
-seleção; depois, a tela apresenta somente a consequência da missão. Os perfis
-mostram frequência e uma descrição curta no próprio cartão, sem detalhe após a
-escolha. Os checkpoints só reproduzem uma
+quadrados, mostram ícone, título e uma frase curta; a missão preserva o payload
+em lista compacta. A apresentação pública fixa a CPU em `BASELINE/240 MHz`;
+o perfil de 80 MHz permanece apenas nas ferramentas técnicas. A configuração
+da partida aparece somente no relatório final. As etapas só reproduzem uma
 animação didática depois de uma resposta `GAME_*` validada. O tempo real da
 Wisdom permanece separado do replay ampliado.
 
 Quando a reprodução automática termina, a própria mensagem fica destacada e
-pode ser arrastada entre as estações. Cada parada mostra o que entra, o que a
-Wisdom fez, o que saiu e qual evidência real sustenta a explicação. Esse
-arraste é somente visual: não muda escolha, resultado, liberação da confirmação ou
-estado da sessão.
+pode ser arrastada entre as estações. A timeline mostra apenas uma legenda
+curta da operação ativa; o payload fica centralizado na primeira etapa.
+Esse arraste é somente visual: não muda escolha, resultado, liberação da
+confirmação ou estado da sessão. Antes de cada uma das quatro etapas, uma tela
+ilustrada antecipa a próxima ação e pede uma confirmação extra antes do próximo
+`GAME_*`.
 
 ## Protocolo do jogo
 
