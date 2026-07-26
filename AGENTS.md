@@ -149,8 +149,11 @@ implementar.
   serial e animação apenas liberam a confirmação, sem timeout ou reset público;
 - primeiro handshake fecha automaticamente a busca e mostra a abertura com
   Terra/CubeSat, chamada única e botão `INICIAR MISSÃO`; clique ou D27 abrem
-  diretamente as escolhas; depois do replay validado, a própria mensagem pode ser
-  arrastada por estações explicadas sem alterar o controlador ou o gate de confirmação;
+  diretamente as escolhas; depois do replay validado, a própria mensagem pode
+  ser arrastada nas etapas com timeline sem alterar o controlador ou o gate de
+  confirmação; `VERIFY` usa processo visual GCM→CRC sem arraste;
+- `TRANSMIT` mostra trechos de risco sempre amarelos na ida e na volta; alerta
+  e efeitos vermelhos aparecem somente no centro da volta quando há incidente;
 - standby permanece até `HELLO STAGED_V1/FAIR_V1/FAIR_SESSION_V1` e fecha automaticamente; a abertura
   narrativa permanece até clique ou D27, e o controle de tela usa `ANALOG POT` antes
   de confirmar `NEXT_TRANSMIT`;
@@ -162,8 +165,8 @@ implementar.
   `GAME_VERIFY`, `GAME_RETRY`, `GAME_END` e `GAME_ABORT` implementado no
   firmware, preservando `INVESTIGATE` e o fluxo legado; `CLASSIC_CRC32` permite
   escolher modo de chave e CRC da aplicação independentemente;
-- validação host atual passa 124 testes e preserva a matriz de 32 casos, soak offline
-  de 50 partidas, 76 capturas, vídeo rotulado e benchmark de 9,960 ms e 15,730
+- validação host atual passa 133 testes e preserva a matriz de 32 casos, soak offline
+  de 50 partidas, 88 capturas, vídeo rotulado e benchmark de 5,966 ms e 8,014
   ms, abaixo de 16,667 ms
   em ambas as resoluções; após build FAIR, o candidato corrigido usa
   59.020 B de RAM e 1.005.497 B de flash, com binário de 1.012.080 B e

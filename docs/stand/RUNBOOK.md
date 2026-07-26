@@ -110,6 +110,11 @@ Controles:
 | `Esc` | alterna janela/tela cheia |
 | `Ctrl+Q` | encerra o programa |
 
+Na Etapa 3, confirme que os dois trechos permanecem amarelos. Em uma partida
+com incidente, o alerta vermelho deve surgir somente no centro da volta, nunca
+sobre o satélite. Na Etapa 4, confira o fluxo visual AES-GCM→CRC sem timeline
+ou arraste.
+
 O standby não possui confirmação: ele avança automaticamente após validar a
 Wisdom. A tela narrativa seguinte aceita `INICIAR MISSÃO` ou D27 e abre
 diretamente a escolha da missão em todas as partidas. Espaço e Enter não

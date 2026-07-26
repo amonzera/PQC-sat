@@ -209,7 +209,7 @@ class StagedConfigurationTests(unittest.TestCase):
         self.assertEqual(set(dict(config.checkpoint_animation_ms)), {"PREPARE", "PROTECT", "TRANSMIT", "VERIFY", "RETRY", "DEBRIEF"})
         self.assertEqual(
             {stage: dict(config.checkpoint_animation_ms)[stage] for stage in ("PREPARE", "PROTECT", "TRANSMIT", "VERIFY")},
-            {"PREPARE": 2750, "PROTECT": 5250, "TRANSMIT": 6500, "VERIFY": 4500},
+            {"PREPARE": 2750, "PROTECT": 5250, "TRANSMIT": 8000, "VERIFY": 4500},
         )
         self.assertEqual(config.incident_probability, 0.70)
         self.assertEqual((config.radiation_weight, config.intrusion_weight), (0.50, 0.50))
@@ -887,6 +887,7 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
                 harness = StagedHarness(key_mode=key_mode)
                 controller = harness.reach_prepare()
                 controller.state = InvestigationState.NEXT_PROTECT
+                controller.state_entered_at = harness.now - 1.0
                 panel = GamePanel.for_test(controller)
                 with patch("pqc_sat.ui.panel.investigation_view.draw_game_icon") as draw_icon:
                     panel._draw_next_checkpoint(
@@ -898,6 +899,114 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
                 icons = [call.args[1] for call in draw_icon.call_args_list]
                 self.assertIn(expected, icons)
                 self.assertNotIn(forbidden, icons)
+
+    def test_next_step_accepts_confirmation_after_standard_input_guard(self):
+        for origin in ("d27", "screen"):
+            with self.subTest(origin=origin):
+                harness = StagedHarness()
+                harness.assert_press()
+                harness.choose("mission:TELEMETRY")
+                harness.choose("key:MLKEM")
+                harness.choose("guard:CRC32")
+                controller = harness.controller
+                self.assertEqual(controller.state, InvestigationState.NEXT_PREPARE)
+                ready = controller.state_entered_at + controller.config.screen_input_guard_seconds + 0.01
+                controller.update(now=ready)
+                accepted = (
+                    controller.handle_button(now=ready, origin="test-d27")
+                    if origin == "d27"
+                    else controller.handle_action("confirm", now=ready)
+                )
+                self.assertTrue(accepted)
+                self.assertEqual(controller.state, InvestigationState.PREPARE)
+                self.assertTrue(any(command.startswith("GAME_BEGIN ") for command in harness.commands))
+
+    def test_key_mode_cards_expose_technology_combinations(self):
+        harness = StagedHarness()
+        harness.assert_press()
+        harness.choose("mission:TELEMETRY")
+        panel = GamePanel.for_test(harness.controller)
+        captured = {}
+
+        def capture(_surface, _body, _controller, _title, choices, _t, **_kwargs):
+            captured.update({choice.action: (choice.technology_label, choice.summary) for choice in choices})
+
+        with patch.object(panel, "_draw_choice_cards", side_effect=capture):
+            panel._draw_game_key_modes(
+                pygame.Surface((1366, 768)),
+                pygame.Rect(80, 60, 1200, 640),
+                harness.controller,
+                harness.now,
+            )
+        self.assertEqual(captured["key:ECDH"][0], "ECDH P-256 + AES-GCM")
+        self.assertEqual(captured["key:MLKEM"][0], "ML-KEM-512 + AES-GCM")
+        self.assertIn("chaves públicas", captured["key:ECDH"][1])
+        self.assertIn("cápsula", captured["key:MLKEM"][1])
+
+    def test_transmission_effect_is_generic_and_only_runs_for_an_incident(self):
+        controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)
+        prepare_investigation_capture_state(controller, InvestigationState.TRANSMIT)
+        controller.state = InvestigationState.TRANSMIT
+        controller.last_clock_at = 2.0
+        panel = GamePanel.for_test(controller)
+        panel.replay_interaction.sync("TRANSMIT", 1.0, True)
+        panel.replay_interaction.display_progress = 0.6
+        frame = pygame.Surface((1366, 768))
+        body = pygame.Rect(40, 70, 1280, 660)
+
+        with patch.object(panel, "_draw_transmission_interference") as effect:
+            panel._draw_game_transmit(frame, body, controller, 2.0)
+            effect.assert_called_once()
+
+        panel.replay_interaction.display_progress = 0.42
+        with patch.object(panel, "_draw_transmission_interference") as effect:
+            panel._draw_game_transmit(frame, body, controller, 2.0)
+            effect.assert_not_called()
+
+        panel.replay_interaction.display_progress = 0.49
+        with patch.object(panel, "_draw_transmission_interference") as effect:
+            panel._draw_game_transmit(frame, body, controller, 2.0)
+            effect.assert_not_called()
+
+        panel.replay_interaction.display_progress = 0.6
+        controller.incident = IncidentScenario.NORMAL
+        with patch.object(panel, "_draw_transmission_interference") as effect:
+            panel._draw_game_transmit(frame, body, controller, 2.0)
+            effect.assert_not_called()
+
+    def test_transmission_marks_both_risk_segments_and_incident_stays_on_return(self):
+        controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)
+        prepare_investigation_capture_state(controller, InvestigationState.TRANSMIT)
+        controller.state = InvestigationState.TRANSMIT
+        controller.last_clock_at = 2.0
+        panel = GamePanel.for_test(controller)
+        panel.replay_interaction.sync("TRANSMIT", 1.0, True)
+        panel.replay_interaction.display_progress = 0.6
+        frame = pygame.Surface((1366, 768))
+        body = pygame.Rect(40, 70, 1280, 660)
+
+        with patch.object(panel, "_draw_risk_segment") as risk:
+            panel._draw_game_transmit(frame, body, controller, 2.0)
+        self.assertEqual(risk.call_count, 2)
+        self.assertGreater(panel._transmission_route_progress(0.50), 0.64)
+        self.assertLess(panel._transmission_route_progress(0.72), 0.86)
+        self.assertEqual(panel._transmission_incident_strength(0.49, True), 0.0)
+        self.assertGreater(panel._transmission_incident_strength(0.60, True), 0.0)
+        self.assertEqual(panel._transmission_incident_strength(0.73, True), 0.0)
+
+    def test_next_transmit_shows_two_decorative_risk_segments(self):
+        controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)
+        prepare_investigation_capture_state(controller, InvestigationState.NEXT_TRANSMIT)
+        controller.state = InvestigationState.NEXT_TRANSMIT
+        panel = GamePanel.for_test(controller)
+        with patch.object(panel, "_draw_risk_segment") as risk:
+            panel._draw_next_checkpoint(
+                pygame.Surface((1366, 768)),
+                pygame.Rect(40, 70, 1280, 660),
+                controller,
+                2.0,
+            )
+        self.assertEqual(risk.call_count, 2)
 
     def test_public_verification_exposes_only_gcm_and_one_message_crc(self):
         cases = (
@@ -917,6 +1026,38 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
                         ("CRC DA MENSAGEM", crc_status),
                     ],
                 )
+
+    def test_verification_is_a_visual_process_without_timeline_or_drag_track(self):
+        harness = StagedHarness(incident="RX_MEMORY", guard="CRC32")
+        controller = harness.reach_verify()
+        controller.animation_complete = True
+        panel = GamePanel.for_test(controller)
+        panel.replay_interaction.sync("VERIFY", 1.0, True)
+        panel.replay_interaction.display_progress = 0.6
+        with patch.object(panel, "_draw_timeline_nodes") as timeline:
+            panel._draw_game_verify(
+                pygame.Surface((1366, 768)),
+                pygame.Rect(40, 70, 1280, 660),
+                controller,
+                2.0,
+            )
+        timeline.assert_not_called()
+        self.assertEqual(panel.replay_interaction.track_rect.width, 0)
+        self.assertFalse(panel.replay_interaction.begin_drag((100, 100)))
+
+    def test_verification_summary_never_claims_integrity_without_crc(self):
+        cases = (
+            ("TAMPER", "CRC32", "PROTEÇÃO REJEITOU O PACOTE"),
+            ("RX_MEMORY", "CRC32", "CRC ENCONTROU UMA ALTERAÇÃO"),
+            ("RX_MEMORY", "NONE", "AES-GCM OK • SEM CRC PARA A CHECAGEM FINAL"),
+            ("NORMAL", "CRC32", "MENSAGEM PASSOU NAS DUAS CHECAGENS"),
+        )
+        for incident, guard, expected in cases:
+            with self.subTest(incident=incident, guard=guard):
+                harness = StagedHarness(incident=incident, guard=guard)
+                controller = harness.reach_verify()
+                summary, _color, _icon = GamePanel.for_test(controller)._verification_summary(controller.result)
+                self.assertEqual(summary, expected)
 
     def test_completed_replay_packet_can_be_dragged_without_changing_game_state(self):
         controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)

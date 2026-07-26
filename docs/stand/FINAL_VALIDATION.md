@@ -20,7 +20,7 @@ confirmações D27/tela por partida ou o novo debrief.
 
 | Verificação | Resultado | Evidência |
 |---|---|---|
-| suíte integrada | PASS software | testes host cobrem busca, reconexão, controle de tela, sorteio reproduzível, pausas, contrato FAIR, legado e jogo por etapas |
+| suíte integrada | PASS software | 133 testes host cobrem busca, reconexão, telas `NEXT_*` simples, controle, risco no enlace, verificação visual, contrato FAIR, legado e jogo por etapas |
 | matriz científica | PASS | 2 perfis × 2 modos de chave × 2 guardiões × 4 incidentes = 32 casos |
 | confirmação explícita | PASS no modelo | transições v2 exigem `button_confirmed` de origem `physical|screen`; resposta/animação não avançam |
 | busca automática | PASS no host/modelo | dashboard permanece aberto sem porta; somente `HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` fecha o standby |
@@ -30,8 +30,8 @@ confirmações D27/tela por partida ou o novo debrief.
 | ausência de timeout público | PASS | estados permanecem parados; flags públicas desabilitadas |
 | retransmissão | PASS no hardware curto | `same_payload=1`, `fresh_key=1`, `fresh_nonce=1`, `result=DELIVERED` |
 | soak offline | PASS software | 50/50 partidas: 12 normais, 24 radiações simuladas, 14 invasões, 775 confirmações, 275 `GAME_*`, zero erros e zero crescimento RSS |
-| renderização | PASS software | por resolução: busca + 17 estados + 18 quadros dos replays; tela de tutorial ausente |
-| orçamento médio | PASS host | interface completa: 9,960 ms e 15,730 ms; limite 16,667 ms no host headless |
+| renderização | PASS software | por resolução: busca + 17 estados + 24 quadros de replay; telas `NEXT_*` simples e sem apresentação progressiva |
+| orçamento médio | PASS host | interface completa: 5,966 ms e 8,014 ms; limite 16,667 ms no host headless |
 | vídeo offline | PASS | `staged_game_test_fixture.mp4`, permanentemente rotulado como fixture sem hardware |
 | smoke FAIR anterior | FAIL parcial na placa | `logs/stand/diagnostics/20260723T152842Z_stand_diagnostic.json`: handshake, perfil, `KEX_INFO` e ML-KEM passaram; ECDH falhou no setup em 29 µs, antes de initiator/responder |
 | segundo smoke FAIR | PASS criptográfico; FAIL no protocolo | `logs/stand/diagnostics/20260723T155138Z_stand_diagnostic.json`: `KEX_BENCH`, `MISSION` e `SESSION_BENCH` passaram para ECDH/ML-KEM; `FAULT` passou; `GAME_BEGIN` passou; `GAME_PROTECT` tinha `experiment` duplicado |
@@ -55,8 +55,9 @@ perfil FAIR e permanece como histórico da UI. Capturas ficam em
 - toda transição para a frente possui confirmação D27/tela correspondente no log;
 - a faixa verde percorre todos os estados sem solicitar A39;
 - resposta serial e término de animação apenas liberam a confirmação;
-- pacote só pode ser arrastado depois do replay automático e o gesto não muda
-  controlador, resultado, estado ou liberação da confirmação;
+- pacote só pode ser arrastado depois dos replays com timeline e o gesto não
+  muda controlador, resultado, estado ou liberação da confirmação; `VERIFY`
+  usa processo visual sem trilha arrastável;
 - D27 antigo, repetido, durante comando, animação ou guarda é rejeitado;
 - quatro proteções, quatro incidentes e dois perfis obedecem à tabela;
 - `RX_MEMORY/NONE` produz `SILENT_CORRUPTION`;
@@ -191,7 +192,7 @@ O relatório `hardware_acceptance_summary.json` precisa ter todos os gates em
 | Entregável | Estado |
 |---|---|
 | código, configuração v3, parsers, fixture v2 e firmware | PASS em software |
-| testes, soak, benchmark, 66 capturas e vídeo offline | PASS |
+| testes, soak, benchmark, 88 capturas e vídeo offline | PASS |
 | documentação, guia do apresentador e catálogo técnico | PASS |
 | JSON FAIR v2 oficial ECDH/ML-KEM | FAIL — bateria do operador ainda não executada |
 | log de partida `STAGED_V1/FAIR_V1` em hardware | FAIL — ainda não produzido |

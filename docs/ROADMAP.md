@@ -784,6 +784,9 @@ Implementado:
 - quatro combinações independentes: `ECDH/NONE`, `ECDH/CRC32`,
   `MLKEM/NONE` e `MLKEM/CRC32`; todas usam HKDF-SHA256 e AES-128-GCM no
   mesmo wolfCrypt;
+- escolha 2/3 explicita `ECDH P-256 + AES-GCM` e
+  `ML-KEM-512 + AES-GCM`; a etapa de proteção separa origem e receptor e
+  encadeia troca pública, segredo, HKDF, chave AES, nonce e AES-GCM;
 - protocolo transacional `GAME_BEGIN`, `GAME_PROTECT`, `GAME_TRANSMIT`,
   `GAME_VERIFY`, `GAME_RETRY`, `GAME_END` e `GAME_ABORT`;
 - uma única sessão ativa, ordem e ID estritos, limpeza de segredos depois da
@@ -801,14 +804,22 @@ Implementado:
   A39 permanece somente nas ferramentas de engenharia;
 - pressões durante comando, animação, guarda ou restauração são ignoradas sem
   consumir o debounce da próxima ação válida;
+- as quatro pausas `NEXT_*` mostram imediatamente uma frase curta, o fluxo
+  visual e o botão `CONTINUAR`, preservando confirmação por D27;
 - animações específicas de preparação, proteção, canal, verificação, retry e
   causalidade, separadas do tempo real recebido;
+- a transmissão didática dura 8 s e mostra trechos amarelos na ida e na volta;
+  36% ficam reservados ao risco da volta, e efeitos vermelhos só surgem no
+  centro desse trecho quando existe incidente;
+- a verificação é um processo visual sem timeline: AES-GCM precede o CRC
+  opcional e bloqueia sua execução quando rejeita o pacote;
 - cartões de escolha quadrados, com título, arte causal e uma frase curta; na
   escolha de missão, o payload em lista compacta aparece antes da seleção. A
   configuração da missão aparece somente no relatório final; a torre sobre a
   Terra foi removida e o CubeSat móvel recebeu um sorriso angular original;
-- depois da reprodução automática, a própria mensagem pode ser arrastada por
-  estações explicadas; esse estado é somente visual e não toca no gate de confirmação;
+- depois da reprodução automática, a própria mensagem pode ser arrastada nas
+  etapas com timeline; `VERIFY` não oferece arraste. A revisão é somente visual
+  e não toca no gate de confirmação;
 - fixture oficial somente em testes/evidência offline, com proveniência e
   rótulo permanente;
 - log JSONL v2 com seleção/confirmação, origem D27/tela, seed, rolls, vetor RNG,
@@ -819,7 +830,7 @@ Implementado:
   para o protocolo por etapas;
 - documentação operacional completa em `docs/stand/`.
 
-Validado em software novamente em 2026-07-23 após a simplificação da interface:
+Validado em software novamente em 2026-07-26 após a Iteração 8:
 
 - parser e fixture cobrem 32 combinações de perfil, modo de chave, guardião e
   incidente;
@@ -832,9 +843,10 @@ Validado em software novamente em 2026-07-23 após a simplificação da interfac
 - soak de 50 partidas conclui 775 confirmações lógicas, 12 envios normais,
   24 radiações simuladas, 14 invasões, 275 comandos `GAME_*`, 25 retries,
   zero erros e zero crescimento de RSS;
-- por resolução, a busca, os 17 estados e 18 quadros de replay em
-  início/meio/fim, além do vídeo offline rotulado;
-- média headless da interface completa de 9,960 ms e 15,730 ms, abaixo do
+- por resolução, a busca, os 17 estados e 24 quadros de replay em
+  início/meio/fim, incluindo ECDH/ML-KEM e envio normal/interferido, além do
+  vídeo offline rotulado;
+- média headless da interface completa de 5,966 ms e 8,014 ms, abaixo do
   orçamento de 16,667 ms;
 - o firmware FAIR atual, incluindo `SESSION_BENCH`, compila do zero com
   wolfSSL 5.9.2: 59.020 B de RAM, 1.005.497 B de flash e binário de
@@ -920,7 +932,8 @@ Gate restante:
   Wisdom real validada;
 - entrega de mensagem demonstrável em `ECDH` e `MLKEM`, com guardião
   `NONE`/`CRC32`, sob `KEX_FAIR_V1`;
-- replay didático arrastável dentro do fluxo único, sempre separado da medição;
+- replay didático arrastável nas etapas aplicáveis, com verificação sequencial
+  não arrastável e sempre separada da medição;
 - campanha reproduzível em ferramenta de terminal exclusiva do operador;
 - bateria pareada dedicada em `tools/kex_metrics_battery.py` para gerar
   resultados FAIR_V1 fresh/amortizados sem misturar os logs históricos;

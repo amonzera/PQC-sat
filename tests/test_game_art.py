@@ -13,7 +13,7 @@ from pqc_sat.ui.game_art import (
     draw_game_icon,
     game_act_for_state,
 )
-from pqc_sat.ui.theme import C_ACCENT_CYAN
+from pqc_sat.ui.theme import C_ACCENT_CYAN, C_ACCENT_ORANGE
 from tools.capture_stand_evidence import (
     build_completed_investigation_controller,
     prepare_investigation_capture_state,
@@ -58,8 +58,8 @@ class GameArtTests(unittest.TestCase):
             "encrypt_us": "390",
         }
         timeline = build_didactic_timeline("PROTECT", raw, key_mode="MLKEM", guard="CRC32")
-        self.assertEqual([cue.key for cue in timeline.cues], ["keygen", "encaps", "decaps", "kdf", "nonce", "aes"])
-        self.assertEqual([cue.measured_us for cue in timeline.cues], [3100, 3700, 4900, 120, 80, 390])
+        self.assertEqual([cue.key for cue in timeline.cues], ["keygen", "encaps", "decaps", "kdf", "aes"])
+        self.assertEqual([cue.measured_us for cue in timeline.cues], [3100, 3700, 4900, 120, 470])
         self.assertEqual(timeline.cues[0].start, 0.0)
         self.assertEqual(timeline.cues[-1].end, 1.0)
         self.assertTrue(all(cue.short_label for cue in timeline.cues))
@@ -84,8 +84,9 @@ class GameArtTests(unittest.TestCase):
         )
         self.assertEqual(
             [cue.key for cue in ecdh.cues],
-            ["ecdh_setup", "ecdh_initiator", "ecdh_responder", "kdf", "nonce", "aes"],
+            ["ecdh_setup", "ecdh_initiator", "ecdh_responder", "kdf", "aes"],
         )
+        self.assertEqual(ecdh.cues[-1].measured_us, 502)
         with_crc = build_didactic_timeline("PREPARE", {}, key_mode="MLKEM", guard="CRC32")
         without_crc = build_didactic_timeline("PREPARE", {}, key_mode="MLKEM", guard="NONE")
         self.assertIn("app_crc", [cue.key for cue in with_crc.cues])
@@ -143,6 +144,24 @@ class GameArtTests(unittest.TestCase):
 
         self.assertEqual(evidence, "OPERAÇÃO EXECUTADA E VALIDADA PELA WISDOM")
         self.assertNotIn("TEMPO", evidence)
+
+    def test_transmission_reserves_the_largest_share_for_the_risk_segment(self):
+        timeline = build_didactic_timeline("TRANSMIT", {}, key_mode="MLKEM", guard="CRC32")
+        self.assertEqual([cue.key for cue in timeline.cues], ["uplink", "orbit", "event", "arrival"])
+        self.assertEqual(
+            [(round(cue.start, 2), round(cue.end, 2)) for cue in timeline.cues],
+            [(0.0, 0.30), (0.30, 0.42), (0.42, 0.78), (0.78, 1.0)],
+        )
+        self.assertEqual(timeline.cues[2].short_label, "TRECHO DE RISCO")
+
+    def test_risk_segment_is_always_drawn_in_yellow(self):
+        controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)
+        panel = GamePanel.for_test(controller)
+        surface = pygame.Surface((500, 300))
+        with patch("pygame.draw.line") as draw_line:
+            panel._draw_risk_segment(surface, (20, 220), (480, 40))
+        self.assertGreater(draw_line.call_count, 0)
+        self.assertTrue(all(call.args[1] == C_ACCENT_ORANGE for call in draw_line.call_args_list))
 
     def test_timeline_rejects_missing_validated_measurement(self):
         with self.assertRaisesRegex(ValueError, "resposta GAME_\\*"):

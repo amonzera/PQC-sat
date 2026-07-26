@@ -81,6 +81,7 @@ class ChoiceVisual:
     disabled_reason: str = ""
     card_payload: tuple[str, ...] = ()
     card_frequency: str = ""
+    technology_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -148,44 +149,44 @@ _CUE_NARRATIVES = {
         "chave e nonce novos",
     ),
     "keygen": (
-        "CRIAR CHAVES",
-        "ML-KEM-512 cria as chaves pública e secreta; nenhum segredo é exibido.",
+        "CRIAR CHAVES (KEYGEN)",
+        "O receptor cria as chaves ML-KEM-512 e envia somente a chave pública.",
         "aleatoriedade interna",
         "par de chaves ML-KEM",
     ),
     "ecdh_setup": (
-        "CHAVE DO RECEPTOR",
-        "O receptor cria um par P-256 efêmero e publica apenas o ponto de 65 bytes.",
+        "CHAVE DO RECEPTOR (ECDH)",
+        "O receptor cria uma chave temporária ECDH P-256 e envia somente sua parte pública.",
         "aleatoriedade interna",
         "chave pública do receptor",
     ),
     "ecdh_initiator": (
-        "CHAVE DO INICIADOR",
-        "O iniciador cria outro par efêmero e combina sua chave secreta com a chave pública recebida.",
+        "CHAVE DA ORIGEM (ECDH)",
+        "A origem cria outra chave temporária, responde com sua parte pública e calcula o segredo.",
         "chave pública do receptor",
         "chave pública do iniciador + segredo",
     ),
     "ecdh_responder": (
-        "CRIAR SEGREDO",
-        "O receptor combina sua chave secreta com a chave pública do iniciador e obtém o mesmo segredo.",
+        "MESMO SEGREDO",
+        "O receptor combina as chaves e chega ao mesmo segredo que a origem.",
         "chave pública do iniciador",
         "segredo reconstruído",
     ),
     "encaps": (
-        "CRIAR CÁPSULA",
-        "Encaps usa a chave pública para produzir uma cápsula e um segredo compartilhado.",
+        "CRIAR CÁPSULA (ENCAPS)",
+        "A origem usa a chave pública para criar uma cápsula e seu segredo.",
         "chave pública ML-KEM",
         "cápsula + segredo",
     ),
     "decaps": (
-        "ABRIR CÁPSULA",
-        "Decaps usa a cápsula e a chave secreta para reconstruir o segredo.",
+        "ABRIR CÁPSULA (DECAPS)",
+        "O receptor abre a cápsula e chega ao mesmo segredo da origem.",
         "cápsula + chave secreta",
         "segredo reconstruído",
     ),
     "kdf": (
-        "CHAVE AES",
-        "A função de derivação transforma o segredo compartilhado na chave usada pelo AES-GCM.",
+        "DERIVAR CHAVE (HKDF)",
+        "HKDF-SHA256 transforma o segredo compartilhado na chave AES-128.",
         "segredo compartilhado",
         "chave AES-128",
     ),
@@ -196,9 +197,9 @@ _CUE_NARRATIVES = {
         "nonce novo",
     ),
     "aes": (
-        "PROTEGER PACOTE",
-        "AES-128-GCM cifra a mensagem e cria uma tag que permite verificar autenticidade.",
-        "mensagem + chave + nonce",
+        "PROTEGER (AES-GCM)",
+        "Um nonce novo entra no AES-GCM, que cifra a mensagem e cria a tag de segurança.",
+        "mensagem + chave AES + nonce",
         "ciphertext + tag GCM",
     ),
     "uplink": (
@@ -220,8 +221,8 @@ _CUE_NARRATIVES = {
         "pacote após evento oculto",
     ),
     "event": (
-        "OBSERVAR ENVIO",
-        "O experimento pode aplicar um evento simulado sem revelar sua causa.",
+        "TRECHO DE RISCO",
+        "O pacote desacelera no trecho em que uma interferência simulada pode acontecer.",
         "pacote em trânsito",
         "pacote após o evento",
     ),
@@ -340,21 +341,19 @@ def _cue_specs(stage: str, key_mode: str, guard: str):
         return specs
     if stage == "PROTECT" and key_mode == "MLKEM":
         return [
-            ("keygen", "RECEPTOR: KEYGEN ML-KEM", "pqc_keygen", C_ACCENT_PURPLE, "setup_us"),
-            ("encaps", "INICIADOR: ENCAPS", "capsule", C_ACCENT_CYAN, "initiator_us"),
-            ("decaps", "RECEPTOR: DECAPS", "pqc_decaps", C_ACCENT_PURPLE, "responder_us"),
-            ("kdf", "DERIVAR A CHAVE AES", "kdf", C_ACCENT_ORANGE, "kdf_us"),
-            ("nonce", "GERAR NONCE", "nonce", C_ACCENT_BLUE, "rng_us"),
-            ("aes", "AES-GCM: CIPHERTEXT + TAG", "aes_gcm", C_ACCENT_GREEN, "encrypt_us"),
+            ("keygen", "CRIAR CHAVES (KEYGEN)", "pqc_keygen", C_ACCENT_PURPLE, ("setup_us",)),
+            ("encaps", "CRIAR CÁPSULA (ENCAPS)", "capsule", C_ACCENT_CYAN, ("initiator_us",)),
+            ("decaps", "ABRIR CÁPSULA (DECAPS)", "pqc_decaps", C_ACCENT_PURPLE, ("responder_us",)),
+            ("kdf", "DERIVAR CHAVE (HKDF)", "kdf", C_ACCENT_ORANGE, ("kdf_us",)),
+            ("aes", "PROTEGER (AES-GCM)", "aes_gcm", C_ACCENT_GREEN, ("rng_us", "encrypt_us")),
         ]
     if stage == "PROTECT" and key_mode == "ECDH":
         return [
-            ("ecdh_setup", "RECEPTOR: PAR ECDH P-256", "classic_key", C_ACCENT_ORANGE, "setup_us"),
-            ("ecdh_initiator", "INICIADOR: SEGREDO ECDH", "classic_key", C_ACCENT_CYAN, "initiator_us"),
-            ("ecdh_responder", "RECEPTOR: SEGREDO ECDH", "classic_key", C_ACCENT_ORANGE, "responder_us"),
-            ("kdf", "DERIVAR A CHAVE AES", "kdf", C_ACCENT_PURPLE, "kdf_us"),
-            ("nonce", "GERAR NONCE", "nonce", C_ACCENT_BLUE, "rng_us"),
-            ("aes", "AES-GCM: CIPHERTEXT + TAG", "aes_gcm", C_ACCENT_GREEN, "encrypt_us"),
+            ("ecdh_setup", "CHAVE DO RECEPTOR (ECDH)", "classic_key", C_ACCENT_ORANGE, ("setup_us",)),
+            ("ecdh_initiator", "CHAVE DA ORIGEM (ECDH)", "classic_key", C_ACCENT_CYAN, ("initiator_us",)),
+            ("ecdh_responder", "MESMO SEGREDO", "classic_key", C_ACCENT_ORANGE, ("responder_us",)),
+            ("kdf", "DERIVAR CHAVE (HKDF)", "kdf", C_ACCENT_PURPLE, ("kdf_us",)),
+            ("aes", "PROTEGER (AES-GCM)", "aes_gcm", C_ACCENT_GREEN, ("rng_us", "encrypt_us")),
         ]
     if stage == "TRANSMIT":
         return [
@@ -419,13 +418,24 @@ def build_didactic_timeline(
     else:
         raw = getattr(measurement, "raw_response", {})
     specs = _cue_specs(stage_value, key_value, guard_value)
-    measured = [_positive_int(raw, timing_key) if timing_key else None for *_, timing_key in specs]
-    numeric = [value if value is not None else 1 for value in measured]
-    total = max(1, sum(numeric))
-    minimum_share = min(0.12, 0.8 / max(1, len(specs)))
-    shares = [max(minimum_share, value / total) for value in numeric]
-    share_total = sum(shares)
-    shares = [value / share_total for value in shares]
+    measured = []
+    for *_, timing_keys in specs:
+        keys = (timing_keys,) if isinstance(timing_keys, str) else tuple(timing_keys or ())
+        values = [_positive_int(raw, key) for key in keys]
+        measured.append(
+            sum(value for value in values if value is not None)
+            if any(value is not None for value in values)
+            else None
+        )
+    if stage_value == "TRANSMIT":
+        shares = [0.30, 0.12, 0.36, 0.22]
+    else:
+        numeric = [value if value is not None else 1 for value in measured]
+        total = max(1, sum(numeric))
+        minimum_share = min(0.12, 0.8 / max(1, len(specs)))
+        shares = [max(minimum_share, value / total) for value in numeric]
+        share_total = sum(shares)
+        shares = [value / share_total for value in shares]
     cues: list[AnimationCue] = []
     cursor = 0.0
     for spec, timing, share in zip(specs, measured, shares):

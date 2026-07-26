@@ -100,6 +100,11 @@ D27 confirmam a etapa.
 Respostas seriais e fim de animação apenas liberam essa confirmação. `Home`
 aborta a partida inteira; nenhuma tecla simula D27.
 
+Na escolha 2/3, os cartões apresentam explicitamente
+`ECDH P-256 + AES-GCM` e `ML-KEM-512 + AES-GCM`. Antes de cada etapa, uma tela
+“A seguir” mostra imediatamente o que acontecerá, com ícones simples e o botão
+`CONTINUAR`; D27 e faixa verde também confirmam.
+
 Depois do replay de `PROTECT`, a pausa `NEXT_TRANSMIT` apresenta o próximo
 movimento. D27 ou faixa verde confirmam o envio, e o dashboard sorteia um vetor
 single-bit reproduzível sem solicitar A39. O firmware preserva `ANALOG POT` e
@@ -118,12 +123,21 @@ Wisdom permanece separado do replay ampliado.
 
 Cada partida tem 70% de chance de incidente: 35% de radiação simulada na
 mensagem recebida, 35% de tentativa de invasão simulada e 30% de envio normal.
-A transmissão ampliada dura 6,5 s e mostra somente um alerta genérico quando o
-evento ocorre. A causa continua escondida até o relatório final.
+A transmissão ampliada dura 8 s. Ida e volta exibem trechos de risco sempre
+amarelos; quando há incidente, a surpresa visual ocorre somente no centro da
+volta, depois que o pacote deixou o satélite. Vermelho fica restrito ao alerta,
+à distorção, às ondas e às partículas do evento. A causa continua escondida
+até o relatório final.
+
+Na etapa de proteção, origem e receptor aparecem separados. Chave pública
+ECDH ou ML-KEM, cápsula, segredo compartilhado, HKDF-SHA256, nonce e AES-GCM
+são encadeados visualmente sem exibir segredos ou confundir o replay com tempo
+real.
 
 Quando a reprodução automática termina, a própria mensagem fica destacada e
-pode ser arrastada entre as estações. A timeline mostra apenas uma legenda
-curta da operação ativa; o payload fica centralizado na primeira etapa.
+pode ser arrastada entre as estações de preparação, proteção, transmissão e
+retry. A verificação final é um processo visual direto, sem timeline: pacote,
+AES-GCM, CRC opcional e resultado. O payload fica centralizado na primeira etapa.
 Esse arraste é somente visual: não muda escolha, resultado, liberação da
 confirmação ou estado da sessão. Antes de cada uma das quatro etapas, uma tela
 ilustrada antecipa a próxima ação e pede uma confirmação extra antes do próximo

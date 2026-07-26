@@ -59,14 +59,14 @@ não é automaticamente um `PASS` de hardware.
 | Requisito | Estado | Evidência atual | Fechamento restante |
 |---|---|---|---|
 | 17 estados renderizados | PASS software | 17 PNGs em cada resolução, incluindo quatro pausas antes das etapas | ensaio no monitor definitivo |
-| escolhas compreensíveis | PASS software | cartões quadrados com título e arte causal; nas três missões, descrição e payload em lista ficam visíveis antes da seleção, somente a consequência surge depois, e CPU mostra frequência e descrição curta no card | testar compreensão com cinco visitantes |
-| replay compreensível e controlável | PASS software | pacote arrastável com entrada, operação, saída e evidência; 18 quadros extras por resolução | testar compreensão com cinco visitantes |
-| animação orientada à resposta | PASS software | bytes, CRC, proteção, incidente sorteado, verificação, retry e causalidade só depois da resposta aceita | observar timings reais |
+| escolhas compreensíveis | PASS software | cartões quadrados com título e arte causal; nas três missões, descrição e payload em lista ficam visíveis antes da seleção e somente a consequência surge depois; CPU fixa em 240 MHz não aparece como escolha | testar compreensão com cinco visitantes |
+| replay compreensível e controlável | PASS software | pacote arrastável nas etapas com timeline; `VERIFY` usa processo GCM→CRC sem arraste; 24 quadros extras por resolução | testar compreensão com cinco visitantes |
+| animação orientada à resposta | PASS software | dois riscos amarelos no enlace; incidente vermelho só no risco da volta; GCM e CRC refletem `GameResult` depois da resposta aceita | observar timings reais |
 | métricas da jornada só no debrief | PASS design | etapas mostram causalidade sem números; tempo/bytes/heap da partida aparecem apenas no relatório final | observar no monitor definitivo |
 | log v2 completo | PASS software | seleção/confirmação, origem D27/tela, seed, rolls, vetor RNG, estágio, decisão, retry e aborto | gerar JSONL físico |
 | validador mantém leitura V1 | PASS | testes e ramo de compatibilidade | nenhum |
 | diagnóstico/smoke/soak/captura/vídeo/bateria atualizados | PARCIAL hardware | diagnóstico curto FAIR passou 27 registros; ferramentas longas e artefatos offline estão preparados | smoke visual, aceite longo e coleta FAIR reais |
-| média <16,667 ms | PASS host | interface completa: 9,960 ms e 15,730 ms | não é garantia de todo host/monitor |
+| média <16,667 ms | PASS host | interface completa: 5,966 ms e 8,014 ms | não é garantia de todo host/monitor |
 
 ## Gates do estande
 

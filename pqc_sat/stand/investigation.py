@@ -64,6 +64,12 @@ class InvestigationController:
         InvestigationState.VERIFY: GameStage.VERIFY,
         InvestigationState.RETRY: GameStage.RETRY,
     }
+    _NEXT_STATES = {
+        InvestigationState.NEXT_PREPARE,
+        InvestigationState.NEXT_PROTECT,
+        InvestigationState.NEXT_TRANSMIT,
+        InvestigationState.NEXT_VERIFY,
+    }
     _FORWARD_STATES = {
         InvestigationState.ATTRACT,
         InvestigationState.SELECT_MISSION,
@@ -724,13 +730,7 @@ class InvestigationController:
             if not self.stage_ready_for_confirmation:
                 return False, "resposta real ou animação ainda incompleta"
             return True, ""
-        if self.state in {
-            InvestigationState.NEXT_PREPARE,
-            InvestigationState.NEXT_PROTECT,
-            InvestigationState.NEXT_VERIFY,
-        }:
-            return True, ""
-        if self.state is InvestigationState.NEXT_TRANSMIT:
+        if self.state in self._NEXT_STATES:
             return True, ""
         if self.state is InvestigationState.DEBRIEF:
             return (

@@ -304,6 +304,29 @@ class InvestigationPresentationMixin:
             surface.blit(heading, (card.centerx - heading.get_width() // 2, heading_y))
             if show_card_descriptions:
                 description_y = heading_y + heading.get_height() + 8
+                if choice.technology_label:
+                    technology = self._render_clipped(
+                        FONT_BODY,
+                        choice.technology_label,
+                        accent,
+                        card.width - 54,
+                    )
+                    technology_box = pygame.Rect(
+                        card.centerx - technology.get_width() // 2 - 12,
+                        description_y,
+                        technology.get_width() + 24,
+                        technology.get_height() + 10,
+                    )
+                    pygame.draw.rect(surface, (8, 28, 45), technology_box, border_radius=8)
+                    pygame.draw.rect(surface, accent, technology_box, 2, border_radius=8)
+                    surface.blit(
+                        technology,
+                        (
+                            technology_box.centerx - technology.get_width() // 2,
+                            technology_box.centery - technology.get_height() // 2,
+                        ),
+                    )
+                    description_y = technology_box.bottom + 10
                 if choice.card_frequency:
                     frequency = FONT_BODY.render(choice.card_frequency, True, accent)
                     surface.blit(frequency, (card.centerx - frequency.get_width() // 2, description_y))
@@ -421,20 +444,22 @@ class InvestigationPresentationMixin:
             ChoiceVisual(
                 "key:ECDH",
                 "CLÁSSICA",
-                "Duas chaves combinam para criar o mesmo segredo.",
+                "Os dois lados trocam chaves públicas e chegam ao mesmo segredo.",
                 "",
                 "",
                 C_ACCENT_ORANGE,
                 "classic_key",
+                technology_label="ECDH P-256 + AES-GCM",
             ),
             ChoiceVisual(
                 "key:MLKEM",
                 "PÓS-QUÂNTICA",
-                "Uma cápsula ajuda os dois lados a criar o mesmo segredo.",
+                "Uma chave pública cria a cápsula que leva os dois lados ao mesmo segredo.",
                 "",
                 "",
                 C_ACCENT_PURPLE,
                 "quantum_atom",
+                technology_label="ML-KEM-512 + AES-GCM",
             ),
         )
         self._draw_choice_cards(
@@ -668,15 +693,55 @@ class InvestigationPresentationMixin:
         centers = (visual.x + visual.width // 6, visual.centerx, visual.right - visual.width // 6)
         icon_size = min(150, max(88, visual.height // 2))
         for index, (center_x, (icon, label)) in enumerate(zip(centers, icons)):
-            icon_rect = pygame.Rect(center_x - icon_size // 2, visual.centery - icon_size // 2, icon_size, icon_size)
-            draw_game_icon(surface, icon, icon_rect, t + index * 0.35, color=color, active=index == 1, progress=0.65)
-            self._draw_stand_centered(surface, FONT_LABEL, label, color, icon_rect.centerx, icon_rect.bottom + 9, icon_rect.width + 30)
+            icon_rect = pygame.Rect(
+                center_x - icon_size // 2,
+                visual.centery - icon_size // 2,
+                icon_size,
+                icon_size,
+            )
+            draw_game_icon(
+                surface,
+                icon,
+                icon_rect,
+                t + index * 0.35,
+                color=color,
+                active=index == 1,
+                progress=1.0,
+            )
+            self._draw_stand_centered(
+                surface,
+                FONT_LABEL,
+                label,
+                color,
+                icon_rect.centerx,
+                visual.centery + icon_size // 2 + 9,
+                icon_size + 30,
+            )
             if index < len(icons) - 1:
-                start = (icon_rect.right + 12, visual.centery)
-                end = (centers[index + 1] - icon_size // 2 - 12, visual.centery)
+                start_x = centers[index] + icon_size // 2 + 12
+                end_x = centers[index + 1] - icon_size // 2 - 12
+                start = (start_x, visual.centery)
+                end = (end_x, visual.centery)
                 pygame.draw.line(surface, color, start, end, 3)
-                pygame.draw.polygon(surface, color, [end, (end[0] - 12, end[1] - 8), (end[0] - 12, end[1] + 8)])
-        self._confirmation_hint(surface, body, controller, ready=True)
+                pygame.draw.polygon(
+                    surface,
+                    color,
+                    [end, (end[0] - 12, end[1] - 8), (end[0] - 12, end[1] + 8)],
+                )
+                if controller.state.value == "NEXT_TRANSMIT":
+                    self._draw_risk_segment(
+                        surface,
+                        start,
+                        end,
+                        label="TRECHO DE RISCO",
+                        label_offset=-28,
+                    )
+        self._confirmation_hint(
+            surface,
+            body,
+            controller,
+            ready=True,
+        )
 
     def _draw_game_prepare(self, surface, body, controller, t):
         measurement = self._stage_status(
@@ -739,6 +804,147 @@ class InvestigationPresentationMixin:
         surface.blit(text, (crc.centerx - text.get_width() // 2, crc.y + 10))
         self._draw_timeline_nodes(surface, visual, timeline, progress, show_status=False)
 
+    @staticmethod
+    def _draw_exchange_arrow(surface, start, end, color, progress, *, label=""):
+        progress = max(0.0, min(1.0, progress))
+        current = (
+            int(start[0] + (end[0] - start[0]) * progress),
+            int(start[1] + (end[1] - start[1]) * progress),
+        )
+        pygame.draw.line(surface, color, start, current, 3)
+        if progress >= 0.96:
+            direction = 1 if end[0] >= start[0] else -1
+            pygame.draw.polygon(
+                surface,
+                color,
+                [
+                    current,
+                    (current[0] - direction * 11, current[1] - 7),
+                    (current[0] - direction * 11, current[1] + 7),
+                ],
+            )
+        if label:
+            rendered = FONT_LABEL.render(label, True, color)
+            surface.blit(
+                rendered,
+                (
+                    (start[0] + end[0]) // 2 - rendered.get_width() // 2,
+                    min(start[1], end[1]) - 20,
+                ),
+            )
+
+    @staticmethod
+    def _draw_shared_secret(surface, center, color, t, *, active=True):
+        pulse = 1.0 + (0.10 * math.sin(t * 5.0) if active else 0.0)
+        radius = max(12, int(18 * pulse))
+        points = (
+            (center[0], center[1] - radius),
+            (center[0] + radius, center[1]),
+            (center[0], center[1] + radius),
+            (center[0] - radius, center[1]),
+        )
+        pygame.draw.polygon(surface, (7, 29, 45), points)
+        pygame.draw.polygon(surface, color, points, 3)
+        pygame.draw.circle(surface, C_TEXT_PRIMARY, center, max(3, radius // 4))
+
+    def _draw_exchange_actor(self, surface, rect, title, color, icon, t, *, active=False):
+        pygame.draw.rect(surface, (5, 22, 39), rect, border_radius=10)
+        pygame.draw.rect(surface, color if active else (45, 72, 96), rect, 3 if active else 1, border_radius=10)
+        self._draw_stand_centered(surface, FONT_BODY, title, color, rect.centerx, rect.y + 10, rect.width - 20)
+        icon_rect = pygame.Rect(rect.centerx - 55, rect.y + 34, 110, max(72, rect.height - 45))
+        draw_game_icon(surface, icon, icon_rect, t, color=color, active=active, progress=0.75)
+
+    def _draw_key_exchange_scene(self, surface, content, controller, active, cue_progress, t):
+        mode = controller.selected_key_mode.value
+        actor_w = min(245, max(175, content.width // 4))
+        actor_h = min(150, max(112, content.height - 105))
+        actor_y = content.y + 42
+        origin = pygame.Rect(content.x + 18, actor_y, actor_w, actor_h)
+        receiver = pygame.Rect(content.right - actor_w - 18, actor_y, actor_w, actor_h)
+        origin_active = active.key in {"ecdh_initiator", "encaps", "ecdh_responder", "decaps"}
+        receiver_active = active.key in {"ecdh_setup", "keygen", "ecdh_responder", "decaps"}
+        origin_icon = "classic_key" if mode == "ECDH" else "capsule"
+        receiver_icon = "classic_key" if mode == "ECDH" else "pqc_keygen"
+        if active.key != "aes":
+            self._draw_exchange_actor(surface, origin, "ORIGEM", C_ACCENT_CYAN, origin_icon, t, active=origin_active)
+            self._draw_exchange_actor(surface, receiver, "RECEPTOR", C_ACCENT_PURPLE, receiver_icon, t + 0.25, active=receiver_active)
+
+        left_anchor = (origin.right + 10, origin.centery)
+        right_anchor = (receiver.x - 10, receiver.centery)
+        if active.key in {"ecdh_setup", "keygen"}:
+            self._draw_exchange_arrow(
+                surface,
+                right_anchor,
+                left_anchor,
+                active.color,
+                cue_progress,
+                label="CHAVE PÚBLICA",
+            )
+        elif active.key in {"ecdh_initiator", "encaps"}:
+            label = "CHAVE PÚBLICA" if active.key == "ecdh_initiator" else "CÁPSULA"
+            self._draw_exchange_arrow(
+                surface,
+                left_anchor,
+                right_anchor,
+                active.color,
+                cue_progress,
+                label=label,
+            )
+        elif active.key in {"ecdh_responder", "decaps"}:
+            self._draw_shared_secret(surface, (origin.centerx, origin.bottom - 28), C_ACCENT_GREEN, t)
+            self._draw_shared_secret(surface, (receiver.centerx, receiver.bottom - 28), C_ACCENT_GREEN, t + 0.2)
+            self._draw_exchange_arrow(
+                surface,
+                (origin.centerx + 24, origin.bottom - 28),
+                (receiver.centerx - 24, receiver.bottom - 28),
+                C_ACCENT_GREEN,
+                cue_progress,
+                label="MESMO SEGREDO",
+            )
+        elif active.key == "kdf":
+            center = (content.centerx, origin.centery)
+            self._draw_shared_secret(surface, (origin.centerx, origin.centery), C_ACCENT_GREEN, t)
+            self._draw_shared_secret(surface, (receiver.centerx, receiver.centery), C_ACCENT_GREEN, t + 0.2)
+            kdf_rect = pygame.Rect(center[0] - 62, center[1] - 48, 124, 96)
+            draw_game_icon(surface, "kdf", kdf_rect, t, color=active.color, active=True, progress=cue_progress)
+            self._draw_exchange_arrow(surface, (origin.right, origin.centery), (kdf_rect.left, kdf_rect.centery), active.color, cue_progress)
+            self._draw_exchange_arrow(surface, (receiver.left, receiver.centery), (kdf_rect.right, kdf_rect.centery), active.color, cue_progress)
+        elif active.key == "aes":
+            center_y = origin.centery
+            message = pygame.Rect(content.x + 28, center_y - 22, 150, 44)
+            protected = pygame.Rect(content.right - 178, center_y - 22, 150, 44)
+            draw_packet(surface, message, color=C_ACCENT_CYAN, t=t, sealed=False)
+            nonce_rect = pygame.Rect(content.centerx - 145, center_y - 48, 90, 96)
+            aes_rect = pygame.Rect(content.centerx + 35, center_y - 48, 100, 96)
+            draw_game_icon(surface, "nonce", nonce_rect, t, color=C_ACCENT_BLUE, active=True, progress=cue_progress)
+            draw_game_icon(surface, "aes_gcm", aes_rect, t, color=C_ACCENT_GREEN, active=True, progress=cue_progress)
+            self._draw_exchange_arrow(surface, message.midright, nonce_rect.midleft, C_ACCENT_CYAN, cue_progress)
+            self._draw_exchange_arrow(surface, nonce_rect.midright, aes_rect.midleft, active.color, cue_progress)
+            self._draw_exchange_arrow(surface, aes_rect.midright, protected.midleft, C_ACCENT_GREEN, cue_progress)
+            draw_packet(surface, protected, color=C_ACCENT_GREEN if cue_progress > 0.9 else C_TEXT_DIM, t=t, sealed=cue_progress > 0.9)
+
+        strip_y = content.bottom - 42
+        stages = ("MESMO SEGREDO", "HKDF-SHA256", "CHAVE AES-128", "AES-GCM + NONCE")
+        reached = {
+            "ecdh_setup": 0,
+            "ecdh_initiator": 0,
+            "keygen": 0,
+            "encaps": 0,
+            "ecdh_responder": 1,
+            "decaps": 1,
+            "kdf": 3,
+            "aes": 4,
+        }.get(active.key, 0)
+        gap = 7
+        cell_w = (content.width - gap * (len(stages) - 1)) // len(stages)
+        for index, label in enumerate(stages):
+            rect = pygame.Rect(content.x + index * (cell_w + gap), strip_y, cell_w, 30)
+            enabled = index < reached
+            color = C_ACCENT_GREEN if enabled else C_TEXT_DIM
+            pygame.draw.rect(surface, (6, 30, 39) if enabled else (14, 23, 34), rect, border_radius=6)
+            pygame.draw.rect(surface, color, rect, 1, border_radius=6)
+            self._draw_stand_centered(surface, FONT_LABEL, label, color, rect.centerx, rect.y + 8, rect.width - 8)
+
     def _draw_game_protect(self, surface, body, controller, t):
         measurement = self._stage_status(
             surface,
@@ -763,52 +969,106 @@ class InvestigationPresentationMixin:
         active = timeline.active(progress)
         cue_progress = timeline.cue_progress(progress, active)
         content = self._replay_content_rect(visual)
-        public_steps = {
-            "ecdh_setup": "CADA LADO CRIA SUA CHAVE",
-            "ecdh_initiator": "AS CHAVES COMEÇAM A FORMAR O MESMO SEGREDO",
-            "ecdh_responder": "OS DOIS LADOS CHEGAM AO MESMO SEGREDO",
-            "keygen": "O RECEPTOR CRIA AS CHAVES PÓS-QUÂNTICAS",
-            "encaps": "A CHAVE PÚBLICA CRIA UMA CÁPSULA E UM SEGREDO",
-            "decaps": "O RECEPTOR ABRE A CÁPSULA E RECRIA O SEGREDO",
-            "kdf": "DO SEGREDO NASCE A CHAVE AES",
-            "nonce": "UM NONCE NOVO EVITA REPETIR A PROTEÇÃO",
-            "aes": "AES-GCM CIFRA A MENSAGEM E CRIA UMA ETIQUETA DE SEGURANÇA",
-        }
         self._draw_stand_centered(
             surface,
             FONT_SMALL,
-            public_steps.get(active.key, active.short_label),
+            active.explanation,
             active.color,
             content.centerx,
             content.y,
             content.width - 80,
+            max_lines=2,
         )
-        center_y = content.centery + 7
-        scale = min(1.15, max(0.72, content.height / 150.0))
-        packet_w, packet_h = int(170 * scale), int(50 * scale)
-        input_rect = pygame.Rect(content.x + 26, center_y - packet_h // 2, packet_w, packet_h)
-        output_rect = pygame.Rect(content.right - packet_w - 26, center_y - packet_h // 2, packet_w, packet_h)
-        draw_packet(surface, input_rect, color=C_ACCENT_CYAN, t=t, sealed=False)
-        output_color = C_ACCENT_GREEN if progress >= 0.999 else C_TEXT_DIM
-        draw_packet(surface, output_rect, color=output_color, t=t, sealed=progress >= 0.999)
-        input_label = FONT_LABEL.render("MENSAGEM DE ENTRADA", True, C_ACCENT_CYAN)
-        output_label = FONT_LABEL.render("PACOTE PROTEGIDO AO FINAL", True, output_color)
-        surface.blit(input_label, (input_rect.centerx - input_label.get_width() // 2, input_rect.y - 18))
-        surface.blit(output_label, (output_rect.centerx - output_label.get_width() // 2, output_rect.y - 18))
-        pygame.draw.line(surface, active.color, input_rect.midright, (visual.centerx - 68, center_y), 2)
-        pygame.draw.line(surface, active.color, (visual.centerx + 68, center_y), output_rect.midleft, 2)
-        icon_w, icon_h = int(144 * scale), int(120 * scale)
-        icon_rect = pygame.Rect(content.centerx - icon_w // 2, center_y - icon_h // 2 - 8, icon_w, icon_h)
-        draw_game_icon(
-            surface,
-            active.icon,
-            icon_rect,
-            t,
-            color=active.color,
-            active=True,
-            progress=cue_progress,
-        )
+        self._draw_key_exchange_scene(surface, content, controller, active, cue_progress, t)
         self._draw_timeline_nodes(surface, visual, timeline, progress)
+
+    def _draw_transmission_interference(self, surface, packet_center, t, *, strength):
+        strength = max(0.0, min(1.0, strength))
+        if strength <= 0:
+            return
+        pulse = 0.5 + 0.5 * math.sin(t * 9.0)
+        for index in range(3):
+            radius = int(26 + index * 17 + pulse * 9)
+            wave_rect = pygame.Rect(
+                packet_center[0] - radius,
+                packet_center[1] - radius // 2,
+                radius * 2,
+                radius,
+            )
+            pygame.draw.arc(surface, C_ACCENT_RED, wave_rect, 0.15, math.pi - 0.15, 2)
+            pygame.draw.arc(surface, C_ACCENT_PURPLE, wave_rect, math.pi + 0.15, math.tau - 0.15, 2)
+        for index in range(10):
+            angle = t * 2.8 + index * math.tau / 10
+            distance = 32 + 18 * (0.5 + 0.5 * math.sin(t * 5.0 + index))
+            point = (
+                int(packet_center[0] + math.cos(angle) * distance),
+                int(packet_center[1] + math.sin(angle) * distance * 0.55),
+            )
+            color = C_ACCENT_RED if index % 2 else C_ACCENT_CYAN
+            pygame.draw.rect(surface, color, (point[0] - 3, point[1] - 2, 7, 4), border_radius=2)
+        bolt = []
+        for index in range(7):
+            x = packet_center[0] - 65 + index * 22
+            y = packet_center[1] + 48 + (9 if index % 2 else -5) + int(math.sin(t * 8 + index) * 4)
+            bolt.append((x, y))
+        pygame.draw.lines(surface, C_ACCENT_RED, False, bolt, 3)
+
+    @staticmethod
+    def _route_point(start, end, ratio):
+        return (
+            int(start[0] + (end[0] - start[0]) * ratio),
+            int(start[1] + (end[1] - start[1]) * ratio),
+        )
+
+    def _draw_risk_segment(self, surface, start, end, *, label="TRECHO DE RISCO", label_offset=-34):
+        for index in range(6):
+            segment_start = 0.30 + index * 0.065
+            segment_end = min(0.70, segment_start + 0.038)
+            pygame.draw.line(
+                surface,
+                C_ACCENT_ORANGE,
+                self._route_point(start, end, segment_start),
+                self._route_point(start, end, segment_end),
+                4,
+            )
+        if label:
+            center = self._route_point(start, end, 0.5)
+            risk = FONT_LABEL.render(label, True, C_ACCENT_ORANGE)
+            surface.blit(
+                risk,
+                (
+                    center[0] - risk.get_width() // 2,
+                    center[1] + label_offset - risk.get_height() // 2,
+                ),
+            )
+
+    @staticmethod
+    def _transmission_route_progress(progress):
+        progress = max(0.0, min(1.0, float(progress)))
+        if progress <= 0.30:
+            return 0.5 * (progress / 0.30)
+        if progress <= 0.42:
+            local = (progress - 0.30) / 0.12
+            return 0.5 + 0.14 * local
+        if progress <= 0.78:
+            local = (progress - 0.42) / 0.36
+            eased = local * local * (3.0 - 2.0 * local)
+            return 0.64 + 0.22 * eased
+        local = (progress - 0.78) / 0.22
+        eased = local * local * (3.0 - 2.0 * local)
+        return 0.86 + 0.14 * eased
+
+    @staticmethod
+    def _transmission_incident_strength(progress, incident_applied):
+        if not incident_applied:
+            return 0.0
+        progress = float(progress)
+        if not 0.50 < progress < 0.72:
+            return 0.0
+        fade_in = min(1.0, (progress - 0.50) / 0.06)
+        fade_out = min(1.0, (0.72 - progress) / 0.06)
+        local = max(0.0, min(fade_in, fade_out))
+        return local * local * (3.0 - 2.0 * local)
 
     def _draw_game_transmit(self, surface, body, controller, t):
         measurement = self._stage_status(
@@ -834,26 +1094,52 @@ class InvestigationPresentationMixin:
         draw_game_icon(surface, "ground", pygame.Rect(left[0] - 46, left[1] - 44, 92, 88), t, color=C_ACCENT_CYAN)
         draw_game_icon(surface, "satellite", pygame.Rect(satellite[0] - 55, satellite[1] - 42, 110, 84), t, color=C_ACCENT_BLUE, active=True)
         draw_game_icon(surface, "ground", pygame.Rect(right[0] - 46, right[1] - 44, 92, 88), t + 0.4, color=C_ACCENT_GREEN)
-        link_progress = min(1.0, progress * 2)
+        route_progress = self._transmission_route_progress(progress)
+        link_progress = min(1.0, route_progress * 2)
         draw_signal_link(surface, left, satellite, t, progress=link_progress)
-        draw_signal_link(surface, satellite, right, t + 0.5, color=C_ACCENT_BLUE, progress=max(0.0, progress * 2 - 1))
-        path_progress = max(0.0, min(1.0, progress))
+        draw_signal_link(
+            surface,
+            satellite,
+            right,
+            t + 0.5,
+            color=C_ACCENT_BLUE,
+            progress=max(0.0, route_progress * 2 - 1),
+        )
+        self._draw_risk_segment(surface, left, satellite)
+        self._draw_risk_segment(surface, satellite, right)
+        path_progress = max(0.0, min(1.0, route_progress))
         if path_progress < 0.5:
             local = path_progress * 2
             packet_center = (int(left[0] + (satellite[0] - left[0]) * local), int(left[1] + (satellite[1] - left[1]) * local))
         else:
             local = (path_progress - 0.5) * 2
             packet_center = (int(satellite[0] + (right[0] - satellite[0]) * local), int(satellite[1] + (right[1] - satellite[1]) * local))
-        draw_packet(surface, pygame.Rect(packet_center[0] - 47, packet_center[1] - 18, 94, 36), color=active.color, t=t, sealed=True)
         incident_applied = controller.incident is not None and controller.incident is not IncidentScenario.NORMAL
-        if incident_applied and 0.45 <= progress <= 0.88:
-            radius = int(15 + 9 * (0.5 + 0.5 * math.sin(t * 8)))
-            pygame.draw.circle(surface, C_ACCENT_RED, packet_center, radius, 2)
+        incident_strength = self._transmission_incident_strength(progress, incident_applied)
+        incident_active = incident_strength > 0.0
+        if incident_active:
+            jitter = (
+                int(math.sin(t * 19.0) * 5 * incident_strength),
+                int(math.cos(t * 23.0) * 4 * incident_strength),
+            )
+            packet_center = (packet_center[0] + jitter[0], packet_center[1] + jitter[1])
+            ghost_left = pygame.Rect(packet_center[0] - 53, packet_center[1] - 20, 94, 36)
+            ghost_right = pygame.Rect(packet_center[0] - 41, packet_center[1] - 16, 94, 36)
+            draw_packet(surface, ghost_left, color=C_ACCENT_RED, t=t + 0.05, sealed=True)
+            draw_packet(surface, ghost_right, color=C_ACCENT_CYAN, t=t - 0.05, sealed=True)
+            self._draw_transmission_interference(surface, packet_center, t, strength=incident_strength)
             alert = pygame.Rect(visual.centerx - min(310, visual.width // 3), visual.y + 35, min(620, visual.width - 60), 42)
             pygame.draw.rect(surface, (48, 8, 19), alert, border_radius=8)
             pygame.draw.rect(surface, C_ACCENT_RED, alert, 2, border_radius=8)
             marker = FONT_HEADER.render("ALERTA: ALGO INTERFERIU NA ENTREGA", True, C_ACCENT_RED)
             surface.blit(marker, (alert.centerx - marker.get_width() // 2, alert.centery - marker.get_height() // 2))
+        draw_packet(
+            surface,
+            pygame.Rect(packet_center[0] - 47, packet_center[1] - 18, 94, 36),
+            color=C_ACCENT_RED if incident_active else active.color,
+            t=t,
+            sealed=True,
+        )
         self._draw_timeline_nodes(surface, visual, timeline, progress)
 
     @staticmethod
@@ -894,6 +1180,79 @@ class InvestigationPresentationMixin:
             surface.blit(label_surface, (card.x + icon_size + 20, card.y + 17))
             surface.blit(status_surface, (card.x + icon_size + 20, card.y + 42))
 
+    @staticmethod
+    def _verification_summary(result):
+        if not result.aead_match:
+            return "PROTEÇÃO REJEITOU O PACOTE", C_ACCENT_RED, "tamper"
+        if not result.app_crc_present:
+            return "AES-GCM OK • SEM CRC PARA A CHECAGEM FINAL", C_ACCENT_ORANGE, "no_crc"
+        if not result.app_crc_checked:
+            return "CRC NÃO FOI VERIFICADO", C_ACCENT_ORANGE, "crc32"
+        if not result.app_crc_match:
+            return "CRC ENCONTROU UMA ALTERAÇÃO", C_ACCENT_RED, "crc32"
+        return "MENSAGEM PASSOU NAS DUAS CHECAGENS", C_ACCENT_GREEN, "accept"
+
+    def _draw_verification_gate(
+        self,
+        surface,
+        rect,
+        *,
+        icon,
+        title,
+        input_text,
+        status,
+        color,
+        revealed,
+        active,
+        t,
+    ):
+        border = color if revealed else C_ACCENT_CYAN if active else (39, 66, 91)
+        pygame.draw.rect(surface, (5, 21, 38), rect, border_radius=11)
+        pygame.draw.rect(surface, border, rect, 3 if active else 2, border_radius=11)
+        icon_rect = pygame.Rect(rect.centerx - 48, rect.y + 20, 96, 82)
+        draw_game_icon(
+            surface,
+            icon,
+            icon_rect,
+            t,
+            color=color if revealed else C_TEXT_DIM,
+            active=active,
+            progress=1.0,
+        )
+        self._draw_stand_centered(
+            surface,
+            FONT_HEADER,
+            title,
+            C_TEXT_PRIMARY,
+            rect.centerx,
+            rect.y + 105,
+            rect.width - 24,
+        )
+        self._draw_stand_centered(
+            surface,
+            FONT_LABEL,
+            input_text,
+            C_TEXT_DIM,
+            rect.centerx,
+            rect.y + 137,
+            rect.width - 28,
+            max_lines=2,
+        )
+        status_text = status if revealed else "VERIFICANDO…"
+        status_color = color if revealed else C_TEXT_DIM
+        status_rect = pygame.Rect(rect.x + 18, rect.bottom - 45, rect.width - 36, 30)
+        pygame.draw.rect(surface, (3, 14, 29), status_rect, border_radius=7)
+        pygame.draw.rect(surface, status_color, status_rect, 2, border_radius=7)
+        self._draw_stand_centered(
+            surface,
+            FONT_LABEL,
+            status_text,
+            status_color,
+            status_rect.centerx,
+            status_rect.y + 7,
+            status_rect.width - 12,
+        )
+
     def _draw_game_verify(self, surface, body, controller, t):
         result = self._stage_status(
             surface,
@@ -908,14 +1267,171 @@ class InvestigationPresentationMixin:
         pygame.draw.rect(surface, (4, 17, 34), visual, border_radius=10)
         pygame.draw.rect(surface, C_ACCENT_GREEN, visual, 2, border_radius=10)
         self._draw_replay_label(surface, visual, "VERIFICAÇÃO DA MENSAGEM", C_ACCENT_GREEN)
-        timeline = build_didactic_timeline("VERIFY", result, key_mode=controller.selected_key_mode, guard=controller.selected_guard)
-        progress = self.replay_progress(timeline)
-        reveal_count = sum(1 for cue in timeline.cues if progress > cue.start or progress >= 1.0)
-        content = self._replay_content_rect(visual)
-        gate_y = content.y + 2
-        gate_h = max(78, content.height - 4)
-        self._draw_evidence(surface, visual, result, y=gate_y, reveal_count=reveal_count, t=t, height=gate_h)
-        self._draw_timeline_nodes(surface, visual, timeline, progress)
+        progress = self.replay_progress(None)
+        rows = self._evidence_rows(result)
+        gcm_status, gcm_color = rows[0][1], rows[0][2]
+        crc_status, crc_color = rows[1][1], rows[1][2]
+        content = pygame.Rect(visual.x + 32, visual.y + 52, visual.width - 64, visual.height - 68)
+        summary_h = 52
+        process = pygame.Rect(content.x, content.y, content.width, content.height - summary_h - 10)
+        gate_w = min(280, max(210, (process.width - 340) // 2))
+        gate_h = min(230, max(188, process.height - 24))
+        gate_y = process.centery - gate_h // 2
+        gcm_center_x = int(process.x + process.width * 0.35)
+        crc_center_x = int(process.x + process.width * 0.68)
+        gcm_rect = pygame.Rect(gcm_center_x - gate_w // 2, gate_y, gate_w, gate_h)
+        crc_rect = pygame.Rect(crc_center_x - gate_w // 2, gate_y, gate_w, gate_h)
+        path_y = process.centery - 8
+        source = (process.x + 50, path_y)
+        gcm_in = (gcm_rect.x - 12, path_y)
+        gcm_out = (gcm_rect.right + 12, path_y)
+        crc_in = (crc_rect.x - 12, path_y)
+        crc_out = (crc_rect.right + 12, path_y)
+        destination = (process.right - 48, path_y)
+
+        gcm_revealed = progress >= 0.42
+        crc_revealed = progress >= 0.76
+        gcm_passed = bool(result.aead_match)
+        can_leave_crc = gcm_passed and (
+            not result.app_crc_present
+            or (result.app_crc_checked and result.app_crc_match)
+        )
+
+        self._draw_exchange_arrow(
+            surface,
+            source,
+            gcm_in,
+            C_ACCENT_CYAN,
+            min(1.0, progress / 0.24),
+            label="PACOTE RECEBIDO",
+        )
+        second_progress = max(0.0, min(1.0, (progress - 0.48) / 0.20))
+        if gcm_passed and second_progress > 0.0:
+            self._draw_exchange_arrow(
+                surface,
+                gcm_out,
+                crc_in,
+                C_ACCENT_GREEN,
+                second_progress,
+                label="",
+            )
+        elif progress >= 0.48:
+            stop_x = int(gcm_out[0] + (crc_in[0] - gcm_out[0]) * 0.28)
+            pygame.draw.line(surface, C_ACCENT_RED, gcm_out, (stop_x, path_y), 3)
+            pygame.draw.line(surface, C_ACCENT_RED, (stop_x - 8, path_y - 9), (stop_x + 8, path_y + 9), 3)
+            pygame.draw.line(surface, C_ACCENT_RED, (stop_x - 8, path_y + 9), (stop_x + 8, path_y - 9), 3)
+
+        final_progress = max(0.0, min(1.0, (progress - 0.78) / 0.16))
+        if can_leave_crc and final_progress > 0.0:
+            final_color = C_ACCENT_GREEN if result.app_crc_present else C_ACCENT_ORANGE
+            self._draw_exchange_arrow(
+                surface,
+                crc_out,
+                destination,
+                final_color,
+                final_progress,
+                label="RESULTADO",
+            )
+
+        if progress < 0.24:
+            packet_start, packet_end = source, gcm_in
+            local = progress / 0.24
+        elif gcm_passed and progress < 0.68:
+            packet_start, packet_end = gcm_out, crc_in
+            local = max(0.0, min(1.0, (progress - 0.48) / 0.20))
+        elif can_leave_crc:
+            packet_start, packet_end = crc_out, destination
+            local = final_progress
+        else:
+            packet_start = packet_end = gcm_rect.center if not gcm_passed else crc_rect.center
+            local = 1.0
+        packet_center = self._route_point(packet_start, packet_end, local)
+        draw_packet(
+            surface,
+            pygame.Rect(packet_center[0] - 34, packet_center[1] - 14, 68, 28),
+            color=C_ACCENT_RED if gcm_revealed and not gcm_passed else C_ACCENT_CYAN,
+            t=t,
+            sealed=not gcm_revealed,
+        )
+
+        self._draw_verification_gate(
+            surface,
+            gcm_rect,
+            icon="aes_gcm",
+            title="1  AES-GCM",
+            input_text="CIPHERTEXT + TAG + CHAVE DA SESSÃO",
+            status=gcm_status,
+            color=gcm_color,
+            revealed=gcm_revealed,
+            active=0.18 <= progress < 0.55,
+            t=t,
+        )
+        crc_input = (
+            "REFERÊNCIA + CRC RECALCULADO"
+            if result.app_crc_present
+            else "NENHUMA REFERÊNCIA FOI ADICIONADA"
+        )
+        self._draw_verification_gate(
+            surface,
+            crc_rect,
+            icon="crc32" if result.app_crc_present else "no_crc",
+            title="2  CRC DA MENSAGEM",
+            input_text=crc_input,
+            status=crc_status,
+            color=crc_color,
+            revealed=crc_revealed,
+            active=gcm_passed and 0.56 <= progress < 0.84,
+            t=t + 0.3,
+        )
+        if gcm_passed and second_progress > 0.0:
+            self._draw_stand_centered(
+                surface,
+                FONT_LABEL,
+                "MENSAGEM ABERTA",
+                C_ACCENT_GREEN,
+                (gcm_out[0] + crc_in[0]) // 2,
+                gate_y - 27,
+                180,
+            )
+
+        summary_text, summary_color, summary_icon = self._verification_summary(result)
+        summary = pygame.Rect(content.x + 90, content.bottom - summary_h, content.width - 180, summary_h)
+        pygame.draw.rect(surface, (3, 15, 29), summary, border_radius=9)
+        pygame.draw.rect(
+            surface,
+            summary_color if progress >= 0.90 else (38, 61, 82),
+            summary,
+            2,
+            border_radius=9,
+        )
+        if progress >= 0.90:
+            draw_game_icon(
+                surface,
+                summary_icon,
+                pygame.Rect(summary.x + 10, summary.y + 4, 48, 44),
+                t,
+                color=summary_color,
+                active=True,
+            )
+            self._draw_stand_centered(
+                surface,
+                FONT_BODY,
+                summary_text,
+                summary_color,
+                summary.centerx + 18,
+                summary.y + 14,
+                summary.width - 80,
+            )
+        else:
+            self._draw_stand_centered(
+                surface,
+                FONT_LABEL,
+                "CONFERINDO A MENSAGEM…",
+                C_TEXT_DIM,
+                summary.centerx,
+                summary.y + 15,
+                summary.width - 30,
+            )
 
     def _draw_game_diagnose(self, surface, body, controller, t):
         self._draw_stand_centered(surface, FONT_TITLE, "O QUE PODE TER ACONTECIDO?", C_TEXT_PRIMARY, body.centerx, body.y, body.width - 50)

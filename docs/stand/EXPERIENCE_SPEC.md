@@ -76,16 +76,16 @@ bancada; a jornada visual anterior foi removida.
 |---|---|---|
 | `ATTRACT` | Terra, CubeSat, cabeçalho `SALVE A MENSAGEM EM ÓRBITA` e botão isolado | `INICIAR MISSÃO` ou D27 abrem diretamente uma nova partida |
 | `SELECT_MISSION` | telemetria, comando crítico ou configuração, cada qual com frase curta e payload | fixa a mensagem |
-| `SELECT_KEY_MODE` | abordagem clássica ou pós-quântica, com uma frase curta | fixa como o segredo será criado |
+| `SELECT_KEY_MODE` | `ECDH P-256 + AES-GCM` ou `ML-KEM-512 + AES-GCM`, com uma frase causal | fixa como o segredo será criado |
 | `SELECT_GUARD` | sem CRC32 ou com CRC32, com uma frase curta | fixa a checagem extra |
-| `NEXT_PREPARE` | ícones de mensagem, bytes e pacote; o próximo passo é anunciado | envia `GAME_BEGIN` e abre a primeira etapa |
+| `NEXT_PREPARE` | frase curta, mensagem, bytes, pacote e botão `CONTINUAR` já visíveis | envia `GAME_BEGIN` e abre a primeira etapa |
 | `PREPARE` | payload centralizado, bytes serializados e CRC opcional | abre a pausa `NEXT_PROTECT` |
-| `NEXT_PROTECT` | ícones de payload, chave e proteção; o próximo passo é anunciado | envia `GAME_PROTECT` |
-| `PROTECT` | chave/cápsula, KDF, AES-GCM, ciphertext e tag | abre a pausa `NEXT_TRANSMIT` |
-| `NEXT_TRANSMIT` | ícones de solo, satélite e solo; o enlace é anunciado | sorteia o vetor e envia `GAME_TRANSMIT` |
-| `TRANSMIT` | pacote percorre o enlace; alerta genérico aparece somente quando há incidente | abre a pausa `NEXT_VERIFY` |
-| `NEXT_VERIFY` | ícones de pacote, AES-GCM e CRC; a conferência é anunciada | envia `GAME_VERIFY` |
-| `VERIFY` | proteção AES-GCM e CRC opcional da mensagem | libera o diagnóstico |
+| `NEXT_PROTECT` | frase curta, payload, chave, proteção e botão `CONTINUAR` já visíveis | envia `GAME_PROTECT` |
+| `PROTECT` | origem/receptor trocam chave pública ou cápsula; segredo, HKDF e AES-GCM completam a proteção | abre a pausa `NEXT_TRANSMIT` |
+| `NEXT_TRANSMIT` | frase curta, origem, satélite, destino e dois trechos amarelos de risco; tudo é apenas ilustrativo | sorteia o vetor e envia `GAME_TRANSMIT` |
+| `TRANSMIT` | ida e volta mantêm risco amarelo; a interferência só pode aparecer no centro da volta | abre a pausa `NEXT_VERIFY` |
+| `NEXT_VERIFY` | frase curta, pacote, AES-GCM, CRC e botão `CONTINUAR` já visíveis | envia `GAME_VERIFY` |
+| `VERIFY` | fluxo sem timeline: pacote → AES-GCM → CRC opcional → resultado | libera o diagnóstico |
 | `DIAGNOSE` | radiação, invasão ou nenhum problema | fixa a hipótese |
 | `SELECT_RESPONSE` | aceitar, retransmitir ou modo seguro | executa `GAME_RETRY` ou `GAME_END` |
 | `RETRY` | mesma mensagem, nova chave e novo nonce, sem falha | envia `GAME_END ... ACCEPT` |
@@ -173,19 +173,23 @@ portanto, movimento visual não antecipa nem inventa execução criptográfica.
 As animações são então orientadas pelo estado e pela resposta aceita:
 
 - `PREPARE`: bytes e CRC opcional;
-- `PROTECT`: setup, iniciador, receptor, HKDF, nonce, AES-GCM e tag; a arte
-  distingue o intercâmbio de pontos ECDH do par/cápsula ML-KEM;
-- `TRANSMIT`: pacote em viagem e alerta genérico quando o sorteio aplica um incidente;
-- `VERIFY`: proteção AES-GCM e CRC opcional da mensagem;
+- `PROTECT`: cinco estações entre origem e receptor. ECDH troca partes públicas;
+  ML-KEM usa `KeyGen`, `Encaps` e `Decaps`; ambos terminam em segredo comum,
+  HKDF-SHA256, nonce e AES-GCM;
+- `TRANSMIT`: 8 s de viagem, com 36% reservados ao trecho de risco da volta;
+  ida e volta ficam sempre amarelas, mas os efeitos genéricos só aparecem no
+  centro da volta quando o sorteio aplica um incidente;
+- `VERIFY`: processo visual sequencial sem timeline; AES-GCM vem primeiro e
+  somente uma mensagem aberta segue ao CRC opcional;
 - `RETRY`: o KEX selecionado é repetido, seguido por nova chave derivada, novo
   nonce, novo envelope e entrega confirmada;
 - `DEBRIEF`: linha causal entre escolhas, incidente, evidências e ação.
 
-Depois de executar uma vez do início ao fim, o replay entra em modo de revisão.
-O visitante segura a própria mensagem e a arrasta pela trilha; ela encaixa na
-entrada ou no fim de uma operação. A estação ativa explica, em linguagem
-pública, `ENTRA`, `O QUE ACONTECE`, `SAI` e a evidência medida. Não existem
-botões de play/pause: a mensagem é o controle. O estado desse arraste pertence
+Depois de executar uma vez do início ao fim, os replays de `PREPARE`,
+`PROTECT`, `TRANSMIT` e `RETRY` entram em modo de revisão. O visitante segura
+a própria mensagem e a arrasta pela trilha; ela encaixa na entrada ou no fim
+de uma operação. `VERIFY` é a exceção: apresenta AES-GCM e CRC como processo
+visual sequencial, sem timeline ou arraste. O estado de revisão pertence
 somente à apresentação e nunca escreve em `InvestigationController`.
 
 Voltar a mensagem não volta a missão nem bloqueia novamente a confirmação. Antes do
@@ -201,7 +205,8 @@ energia. Não há nota, ranking ou gamificação competitiva.
 Nos dois caminhos, a duração relativa de setup, iniciador, receptor, HKDF, RNG
 e AES-GCM usa os subtimings presentes na resposta validada. Etapas sem subtiming
 individual continuam qualitativas e não recebem um número inventado. Em
-`VERIFY`, o valor de cada portal vem exclusivamente de `GameResult`.
+`VERIFY`, cada resultado visual vem exclusivamente de `GameResult`; sem CRC,
+a interface não afirma que a mensagem ficou íntegra.
 
 ## Logs e privacidade
 
@@ -218,15 +223,17 @@ no programa de produção.
 
 ## Acessibilidade e contingência
 
-- 1366×768 e 1920×1080 possuem busca, 17 estados e 18
-  quadros adicionais de replay, cobrindo início, meio e fim dos seis painéis revisáveis;
+- 1366×768 e 1920×1080 possuem busca, 17 estados e 24
+  quadros adicionais de replay, cobrindo início, meio e fim dos seis painéis
+  revisáveis, o estabelecimento clássico e a transmissão normal sem efeitos
+  de interferência;
 - alto contraste, texto junto às cores e nenhuma dependência de áudio;
 - cartões grandes para toque/mouse;
 - o primeiro handshake abre automaticamente a narrativa mínima; `INICIAR
   MISSÃO` ou D27 seguem direto às escolhas; os cartões são quadrados e, na
   escolha de missão, mostram descrição e payload em lista antes da seleção;
-  a consequência surge sem metadados depois da escolha. Os cartões de CPU
-  mostram frequência e descrição curta, sem detalhe posterior;
+  a consequência surge sem metadados depois da escolha. A CPU permanece fixa
+  em 240 MHz e não aparece como decisão pública;
 - `Esc` alterna janela/tela cheia, `F12` apenas mostra diagnóstico e `Ctrl+Q`
   encerra;
 - timeout serial e resposta inválida levam a `ERROR`; desconexão mostra a busca

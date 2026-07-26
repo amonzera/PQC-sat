@@ -41,7 +41,13 @@ INVESTIGATION_STATE_ORDER = (
 )
 
 
-def build_completed_investigation_controller(config_path: Path, fixture_path: Path) -> InvestigationController:
+def build_completed_investigation_controller(
+    config_path: Path,
+    fixture_path: Path,
+    *,
+    key_mode: str = "MLKEM",
+    incident: str = "RX_MEMORY",
+) -> InvestigationController:
     config = replace(
         StandConfig.load(config_path),
         button_debounce_seconds=0.01,
@@ -68,7 +74,7 @@ def build_completed_investigation_controller(config_path: Path, fixture_path: Pa
 
     client.start()
     pump(0)
-    controller.set_forced_incident("RX_MEMORY")
+    controller.set_forced_incident(incident)
     now = 0.1
 
     def press():
@@ -96,14 +102,15 @@ def build_completed_investigation_controller(config_path: Path, fixture_path: Pa
 
     press()
     choose("mission:TELEMETRY")
-    choose("key:MLKEM")
+    choose(f"key:{key_mode}")
     choose("guard:CRC32")
     press()  # NEXT_PREPARE -> GAME_BEGIN -> PREPARE
     finish_stage()  # PREPARE -> NEXT_PROTECT -> PROTECT
     finish_stage()  # PROTECT -> NEXT_TRANSMIT -> TRANSMIT
     finish_stage()  # TRANSMIT -> NEXT_VERIFY -> VERIFY
     finish_stage()  # VERIFY -> DIAGNOSE
-    choose("diagnosis:RADIATION")
+    diagnosis = "NORMAL" if incident == "NORMAL" else "INTRUSION" if incident == "TAMPER" else "RADIATION"
+    choose(f"diagnosis:{diagnosis}")
     choose("response:RETRY")
     finish_stage()  # RETRY -> DEBRIEF/GAME_END
     pump(now + 0.01)
@@ -232,7 +239,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--replay-output-dir",
         type=Path,
-        help="diretório opcional para quadros inicial/intermediário/final dos replays arrastáveis",
+        help="diretório opcional para quadros inicial/intermediário/final dos processos visuais",
     )
     parser.add_argument("--width", type=int, default=1366)
     parser.add_argument("--height", type=int, default=768)
@@ -268,7 +275,7 @@ def main(argv=None) -> int:
             controller,
             size=(args.width, args.height),
             now=2.0,
-            replay_progress=0.5 if state is InvestigationState.TRANSMIT else None,
+            replay_progress=0.6 if state is InvestigationState.TRANSMIT else None,
         )
         output = args.output_dir / f"{index:02d}_{state.value.lower()}_{args.width}x{args.height}.png"
         pygame.image.save(frame, output)
@@ -306,15 +313,58 @@ def main(argv=None) -> int:
             controller.last_clock_at = 2.0
             controller.animation_complete = True
             for label, progress in positions:
+                capture_progress = 0.6 if state is InvestigationState.TRANSMIT and label == "meio" else progress
                 frame = render_game_frame(
                     controller,
                     size=(args.width, args.height),
                     now=2.0,
-                    replay_progress=progress,
+                    replay_progress=capture_progress,
                 )
                 output = args.replay_output_dir / f"{state.value.lower()}_{label}_{args.width}x{args.height}.png"
                 pygame.image.save(frame, output)
                 print(output)
+
+        ecdh_controller = build_completed_investigation_controller(
+            args.config,
+            args.fixture,
+            key_mode="ECDH",
+        )
+        prepare_investigation_capture_state(ecdh_controller, InvestigationState.PROTECT)
+        ecdh_controller.state = InvestigationState.PROTECT
+        ecdh_controller.state_entered_at = 0.0
+        ecdh_controller.last_clock_at = 2.0
+        ecdh_controller.animation_complete = True
+        for label, progress in positions:
+            frame = render_game_frame(
+                ecdh_controller,
+                size=(args.width, args.height),
+                now=2.0,
+                replay_progress=progress,
+            )
+            output = args.replay_output_dir / f"protect_ecdh_{label}_{args.width}x{args.height}.png"
+            pygame.image.save(frame, output)
+            print(output)
+
+        normal_controller = build_completed_investigation_controller(
+            args.config,
+            args.fixture,
+            incident="NORMAL",
+        )
+        prepare_investigation_capture_state(normal_controller, InvestigationState.TRANSMIT)
+        normal_controller.state = InvestigationState.TRANSMIT
+        normal_controller.state_entered_at = 0.0
+        normal_controller.last_clock_at = 2.0
+        normal_controller.animation_complete = True
+        for label, progress in positions:
+            frame = render_game_frame(
+                normal_controller,
+                size=(args.width, args.height),
+                now=2.0,
+                replay_progress=progress,
+            )
+            output = args.replay_output_dir / f"transmit_normal_{label}_{args.width}x{args.height}.png"
+            pygame.image.save(frame, output)
+            print(output)
     pygame.quit()
     return 0
 

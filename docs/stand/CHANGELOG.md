@@ -1,5 +1,33 @@
 # Changelog do modo estande SBPC
 
+## 2026-07-26 — Iteração 9: risco no enlace e verificação visual
+
+- `NEXT_TRANSMIT` passou a mostrar trechos de risco amarelos na ida e na volta,
+  somente como antecipação didática;
+- `TRANSMIT` mantém os dois trechos sempre amarelos e desloca a interferência
+  para o centro da volta, depois que o pacote deixa o satélite;
+- vermelho ficou reservado ao alerta e aos efeitos do incidente realmente
+  sorteado; envios normais atravessam a mesma geometria sem esses efeitos;
+- `VERIFY` deixou de usar timeline e arraste: AES-GCM abre ou rejeita o pacote
+  e, quando possível, entrega a mensagem ao CRC opcional antes do resultado.
+- benchmark headless de 300 quadros ficou em média 5,966 ms a 1366×768 e
+  8,014 ms a 1920×1080, abaixo do orçamento médio de 16,667 ms.
+
+## 2026-07-26 — Iteração 8: chaves e interferência visual
+
+- os cartões da escolha 2/3 agora destacam `ECDH P-256 + AES-GCM` e
+  `ML-KEM-512 + AES-GCM`, com explicações curtas sobre a troca pública;
+- as quatro telas `NEXT_*` mostram imediatamente o próximo fluxo com título,
+  frase curta, três ícones e botão `CONTINUAR`, também aceitando D27;
+- `PROTECT` passou a separar origem e receptor, animando chaves públicas,
+  cápsula, segredo comum, HKDF-SHA256, chave AES-128, nonce e AES-GCM em cinco
+  estações legíveis;
+- `TRANSMIT` passou para 8 s e reserva 36% do replay ao trecho de risco. Quando
+  há incidente, pacote e enlace sofrem distorção, ondas, partículas e alerta
+  genérico sem revelar a causa;
+- evidências offline agora incluem proteção ECDH, proteção ML-KEM e
+  transmissões normal/interferida.
+
 ## 2026-07-26 — Iteração 7: incidentes probabilísticos
 
 - cada partida sorteia 30% de envio normal, 35% de radiação simulada e 35% de

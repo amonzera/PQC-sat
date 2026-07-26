@@ -698,9 +698,11 @@ ou `ETAPA 3/4 • TRANSMITIR`.
 
 A Terra em rotação e o satélite sorridente em órbita formam um mundo
 procedural persistente; a torre sobre o planeta foi removida. Nas escolhas,
-cada cartão quadrado tem um desenho próprio, título e uma frase curta. O
-payload continua visível nas missões; a explicação científica fica com o
-apresentador. Missão, CPU, chave e CRC aparecem somente no relatório final.
+cada cartão quadrado tem um desenho próprio, título e uma frase curta. A
+escolha de abordagem também destaca `ECDH P-256 + AES-GCM` ou
+`ML-KEM-512 + AES-GCM`. O payload continua visível nas missões; a explicação
+científica fica com o apresentador. Missão, CPU, chave e CRC aparecem somente
+no relatório final.
 
 ### 12.2 Cartões de escolha
 
@@ -714,18 +716,25 @@ pronta; depois da confirmação não existe “voltar”.
 `PREPARE`, `PROTECT`, `TRANSMIT`, `VERIFY` e `RETRY` mostram resposta real da
 Wisdom e uma animação didática ampliada. Enquanto comando ou animação estiver
 pendente, verde e D27 não avançam. Tempo, bytes e heap não vêm da animação.
+Nas telas “A seguir”, o próximo fluxo e o botão `CONTINUAR` aparecem
+imediatamente. A tela apenas antecipa o que será feito depois da confirmação.
 
 Antes de a resposta serial passar pelo parser, não há encenação do trabalho:
 a interface mostra uma espera estática. Só depois da validação ela reconstrói
-didaticamente o que ocorreu. Em `PROTECT`, os subtimings reais distribuem as
-etapas visuais quando estão presentes; em `VERIFY`, cada portal recebe o valor
-real de `GameResult`.
+didaticamente o que ocorreu. Em `PROTECT`, origem e receptor ficam separados:
+partes públicas ou cápsula atravessam o enlace, o mesmo segredo aparece nos
+dois lados e a sequência termina em HKDF-SHA256, chave AES, nonce e AES-GCM.
+Os subtimings reais distribuem essas cinco estações quando estão presentes. Em
+`TRANSMIT`, os dois enlaces mostram risco amarelo, mas uma interferência
+sorteada só aparece no centro da volta. Em `VERIFY`, AES-GCM recebe o pacote
+primeiro e somente uma mensagem aberta segue ao CRC; cada resultado vem de
+`GameResult`.
 
-Depois de completar a reprodução automática, a mensagem recebe contorno verde
-e vira o controle da explicação. Segure-a e arraste para a entrada ou para uma
-estação. Cada parada mostra o que entra, o que acontece, o que sai e a evidência
-real. Voltar a mensagem só volta a explicação: não desfaz operação, não altera
-resultado e não bloqueia novamente a confirmação.
+Depois de completar as etapas com timeline, a mensagem recebe contorno verde
+e vira o controle da explicação. `VERIFY` não é arrastável: seu fluxo visual
+GCM→CRC permanece na tela com o resultado final. Voltar uma mensagem nas
+demais etapas só volta a explicação; não desfaz operação, altera resultado ou
+bloqueia novamente a confirmação.
 
 Ordens lógicas dos caminhos FAIR:
 
@@ -907,13 +916,13 @@ e use a faixa verde ou peça um novo D27 em cada linha. Não antecipe o incident
 |---|---|---|---|---|---|---|
 | `ATTRACT` | “Vamos acompanhar uma mensagem real processada pela Wisdom.” | “Pronto para assumir a missão?” | busca automática; abertura por `INICIAR MISSÃO` ou D27 | Terra, CubeSat e chamada mínima; segue direto às escolhas | “Ainda não há resultado; o `HELLO` só confirmou a capacidade.” | “A placa está pronta” sem `game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` |
 | `SELECT_MISSION` | “Escolha qual consequência você quer proteger.” | “Qual mensagem tolera menos erro?” | payload, prioridade e prazo | desenhos de telemetria, comando e configuração; o selecionado pulsa | “O prazo é contexto didático, não deadline de voo certificado.” | “A missão representa um satélite real em operação.” |
-| `SELECT_KEY_MODE` | “Escolha como o segredo será estabelecido.” | “ECDH e ML-KEM fazem qual parte da sessão?” | acordo clássico, KEM pós-quântico, KDF e cifra simétrica | pontos ECDH e chave/cápsula ML-KEM percorrem caminhos visuais distintos | “Os dois estabelecem segredo; HKDF deriva e AES-GCM protege a mensagem.” | “ML-KEM criptografa o payload” ou “ECDH usa chave AES pré-compartilhada.” |
+| `SELECT_KEY_MODE` | “Escolha como o segredo será estabelecido.” | “O que permanece igual depois de ECDH ou ML-KEM?” | acordo clássico, KEM pós-quântico, KDF e cifra simétrica | cards destacam `ECDH P-256 + AES-GCM` e `ML-KEM-512 + AES-GCM` | “Os dois estabelecem segredo; HKDF deriva e AES-GCM protege a mensagem.” | “ML-KEM criptografa o payload” ou “ECDH usa chave AES pré-compartilhada.” |
 | `SELECT_GUARD` | “Escolha se a mensagem terá uma checagem extra.” | “Você quer acrescentar uma checagem?” | checksum e região coberta | blocos do payload recebem ou não o bloco verde de +4 B | “CRC detecta corrupção acidental; não autentica.” | “CRC impede ataque” ou “CRC substitui GCM.” |
-| `NEXT_PREPARE` | “Primeiro vamos preparar a mensagem.” | “O que vem antes de proteger um pacote?” | representação em bytes | mensagem, bytes e pacote aparecem em sequência | “A interface só antecipa o passo; a Wisdom ainda não começou.” | “A tela já executou a etapa.” |
+| `NEXT_PREPARE` | “Este é o próximo passo: preparar a mensagem.” | “O que vem antes de proteger um pacote?” | representação em bytes | mensagem, bytes, pacote, setas e botão `CONTINUAR` já visíveis | “A interface só antecipa o passo; a Wisdom ainda não começou.” | “A tela já executou a etapa.” |
 | `PREPARE` | “A Wisdom está serializando exatamente a mensagem escolhida.” | “Onde o CRC entra quando ligado?” | representação em bytes e referência anterior à falha | bytes só surgem durante serialização; CRC muda de previsto para calculando e anexado; depois arraste a mensagem | “A animação está ampliada; os números de recursos ficam reservados ao debrief.” | “Esses segundos são o tempo real da placa.” |
-| `PROTECT` | “Agora o segredo é obtido e o AES-GCM protege o pacote.” | “Qual parte muda entre ECDH e ML-KEM?” | setup, iniciador, receptor, HKDF, nonce e tag | pontos ECDH ou chave/cápsula ML-KEM; depois arraste por cada subtiming | “As duas opções usam o mesmo HKDF e AES-GCM; muda o estabelecimento.” | “PQC substitui o AES” ou “a tag é um CRC.” |
-| `TRANSMIT` | “O experimento sorteou se algo interfere na entrega.” | “Apareceu um alerta ou o envio foi estável?” | chance 70%, vetor single-bit reproduzível e causa oculta | a mensagem atravessa as estações; um alerta genérico pulsa somente quando há incidente | “A falha é injetada por software; o alerta didático não veio do CRC/GCM.” | “Observamos radiação real” ou “o alerta prova a causa.” |
-| `VERIFY` | “Agora confira AES-GCM e o CRC da mensagem.” | “Qual evidência falhou ou ficou ausente?” | autenticação e integridade opcional pós-GCM | dois indicadores reais são revelados e podem ser revistos arrastando a mensagem | “O padrão sustenta uma hipótese dentro da simulação; não prova a causa física.” | “CRC distingue ataque de radiação.” |
+| `PROTECT` | “Acompanhe quem cria e quem recebe cada parte.” | “Qual parte muda entre ECDH e ML-KEM?” | setup, iniciador, receptor, HKDF, nonce e tag | origem/receptor, setas públicas, mesmo segredo, HKDF, chave AES e AES-GCM em cinco estações | “As duas opções usam o mesmo HKDF e AES-GCM; muda o estabelecimento.” | “PQC substitui o AES” ou “a tag é um CRC.” |
+| `TRANSMIT` | “Todo enlace tem um trecho de risco; agora acompanhe a volta.” | “Apareceu um alerta ou o envio foi estável?” | chance 70%, vetor single-bit reproduzível e causa oculta | ida e volta amarelas; no envio interferido, ondas, distorção, partículas e alerta surgem somente no centro da volta | “A falha é injetada por software; amarelo marca possibilidade e vermelho marca o evento.” | “Observamos radiação real” ou “o alerta prova a causa.” |
+| `VERIFY` | “Primeiro o AES-GCM confere e abre o pacote; depois vem o CRC, se ele existir.” | “Qual evidência falhou ou ficou ausente?” | autenticação e integridade opcional pós-GCM | processo visual sem timeline; falha GCM interrompe o fluxo, sucesso entrega a mensagem ao CRC | “Sem CRC, AES-GCM OK não prova uma alteração posterior à abertura.” | “CRC distingue ataque de radiação.” |
 | `DIAGNOSE` | “Forme sua hipótese sem ver a resposta.” | “Radiação, invasão ou nenhum problema?” | inferência por evidências | hipótese apenas recebe destaque | “Sem CRC, uma alteração pós-GCM pode não deixar evidência suficiente.” | “A tela identificou definitivamente a origem.” |
 | `SELECT_RESPONSE` | “Escolha o que o sistema deveria fazer com este pacote.” | “Aceitar, retransmitir ou pedir modo seguro?” | decisão operacional condicionada à verificação | `ACCEPT` fica bloqueado em rejeição criptográfica | “Pacote criptograficamente rejeitado não pode ser aceito aqui.” | “Modo seguro é uma política universal” ou “retry garante disponibilidade.” |
 | `RETRY` | “Vamos retransmitir a mesma mensagem sem repetir material criptográfico.” | “O que precisa mudar e o que precisa permanecer?” | mesmo payload, chave/nonce novos, sem falha injetada | arraste por payload igual, chave nova, nonce novo, proteção e entrega | “O harness confirma fingerprints novos e `DELIVERED`.” | “Reutilizamos o nonce” ou “corrigimos o pacote antigo.” |
@@ -1278,7 +1287,7 @@ python3 tools/firmware_deploy.py --upload
 - standby liberado automaticamente somente por
   `HELLO STAGED_V1/FAIR_V1/FAIR_SESSION_V1`;
 - abertura narrativa preservada e confirmada por `INICIAR MISSÃO` e D27;
-- uma partida pelo verde com `ANALOG POT` validado em `NEXT_TRANSMIT`;
+- uma partida pelo verde, inclusive nas quatro telas simples `NEXT_*`;
 - uma partida `GAME_BEGIN` … `GAME_END` com retry testada;
 - uma tela de cada checkpoint deixada parada sem avançar sozinha;
 - JSON oficial disponível localmente;
