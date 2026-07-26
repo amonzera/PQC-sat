@@ -792,12 +792,13 @@ Implementado:
   ferramentas técnicas; a interface/roteiro visual anterior foi removida;
 - três cartões de missão com payload e frase pública curta; prioridade, prazo e
   explicação técnica ficam com o narrador e as ferramentas;
-- incidentes `NORMAL`, `CHANNEL_BITFLIP`, `TAMPER` e `RX_MEMORY`, com sequência
-  pública balanceada e causa oculta até o encerramento;
+- incidentes públicos probabilísticos: 30% `NORMAL`, 35% `TAMPER` e 35%
+  `RX_MEMORY`, com causa oculta até o encerramento; `CHANNEL_BITFLIP` permanece
+  somente na instrumentação técnica;
 - handshake obrigatório, fila serial não bloqueante, timeout e reconexão do
   cliente existente;
-- A39 capturado junto ao D27 ou lido assincronamente por `ANALOG POT` quando a
-  faixa verde confirma `NEXT_TRANSMIT`, sempre antes do mapeamento single-bit;
+- vetor single-bit sorteado por RNG experimental reproduzível e registrado;
+  A39 permanece somente nas ferramentas de engenharia;
 - pressões durante comando, animação, guarda ou restauração são ignoradas sem
   consumir o debounce da próxima ação válida;
 - animações específicas de preparação, proteção, canal, verificação, retry e
@@ -810,8 +811,8 @@ Implementado:
   estações explicadas; esse estado é somente visual e não toca no gate de confirmação;
 - fixture oficial somente em testes/evidência offline, com proveniência e
   rótulo permanente;
-- log JSONL v2 com seleção/confirmação, origem D27/tela, fonte A39, estágios,
-  decisão, retry e aborto;
+- log JSONL v2 com seleção/confirmação, origem D27/tela, seed, rolls, vetor RNG,
+  estágios, decisão, retry e aborto;
   leitura de logs V1 preservada;
 - layout em canvas 1366×768 escalável para 1920×1080, sem áudio obrigatório;
 - diagnóstico, smoke, soak, screenshots, vídeo, bateria e validador migrados
@@ -824,15 +825,16 @@ Validado em software novamente em 2026-07-23 após a simplificação da interfac
   incidente;
 - a suíte host atual passa, incluindo busca automática, narrativa direta,
   reconexão limpa, confirmação pela tela em
-  todas as transições, A39 assíncrono, D27, retransmissão, erro, legado,
+  todas as transições, RNG de incidente, D27, retransmissão, erro, legado,
   `INVESTIGATE`, contrato `KEX_FAIR_V1`, plano pareado, fachadas, replay
   arrastável e preservação da sessão em
   `GAME_PROTECT -> ANALOG POT -> GAME_TRANSMIT`;
-- soak de 50 partidas conclui 775 confirmações lógicas, 100 mudanças A39, 275
-  comandos `GAME_*`, 25 retries, zero erros e zero crescimento de RSS;
+- soak de 50 partidas conclui 775 confirmações lógicas, 12 envios normais,
+  24 radiações simuladas, 14 invasões, 275 comandos `GAME_*`, 25 retries,
+  zero erros e zero crescimento de RSS;
 - por resolução, a busca, os 17 estados e 18 quadros de replay em
   início/meio/fim, além do vídeo offline rotulado;
-- média headless da interface completa de 6,312 ms e 8,822 ms, abaixo do
+- média headless da interface completa de 9,960 ms e 15,730 ms, abaixo do
   orçamento de 16,667 ms;
 - o firmware FAIR atual, incluindo `SESSION_BENCH`, compila do zero com
   wolfSSL 5.9.2: 59.020 B de RAM, 1.005.497 B de flash e binário de
@@ -875,11 +877,11 @@ Gate restante:
 - preservar o manifesto e o diagnóstico curto aprovados;
 - executar pelo operador a bateria v2 com 400 fresh, 480 session e 6 benches;
 - validar repouso D27, uma partida visual completa por D27, outra pelo verde,
-  `GAME_ABORT`, variação A39 e todas as etapas; ordem/ID, A39 em uma posição e
-  retransmissão já passaram no smoke curto;
+  `GAME_ABORT` e todas as etapas; ordem/ID, leitura técnica A39 e retransmissão
+  já passaram no smoke curto;
 - provar ausência de avanço em cada estado;
-- executar 30 partidas físicas, três horas, mais de 100 D27, mais de 100
-  mudanças A39, dez recuperações USB, monitor definitivo e avaliação 4/5 com
+- executar 30 partidas físicas, três horas, mais de 100 D27, dez recuperações
+  USB, monitor definitivo e avaliação 4/5 com
   cinco visitantes. Não marcar a etapa como concluída antes de
   `hardware_acceptance_summary.json` retornar `PASS`.
 

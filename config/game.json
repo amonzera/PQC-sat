@@ -16,11 +16,11 @@
   "windowed_size": [1366, 768],
   "animation": {
     "min_duration_ms": 1200,
-    "max_duration_ms": 5250,
+    "max_duration_ms": 6500,
     "checkpoints_ms": {
       "PREPARE": 2750,
       "PROTECT": 5250,
-      "TRANSMIT": 3750,
+      "TRANSMIT": 6500,
       "VERIFY": 4500,
       "RETRY": 3000,
       "DEBRIEF": 1200
@@ -39,8 +39,11 @@
   },
   "button_debounce_seconds": 0.35,
   "investigation": {
-    "seed": 42,
-    "incident_sequence": ["CHANNEL_BITFLIP", "TAMPER", "RX_MEMORY"],
+    "incident_probability": 0.70,
+    "incident_weights": {
+      "RX_MEMORY": 0.50,
+      "TAMPER": 0.50
+    },
     "target_min_seconds": 120.0,
     "target_max_seconds": 180.0,
     "screen_input_guard_seconds": 0.22

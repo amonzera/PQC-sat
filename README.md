@@ -1,8 +1,8 @@
 # PQC-SAT — Missão Bit Flip
 
 Jogo didático em Python, executado com uma BlackBoard Wisdom real. Os cartões
-selecionam opções; o botão verde ou o D27 confirmam cada avanço; o
-potenciômetro A39 seleciona o bit durante a transmissão.
+selecionam opções; o botão verde ou o D27 confirmam cada avanço. A cada envio,
+o experimento sorteia e registra se haverá um incidente e qual bit será usado.
 
 Não existe modo simulado no programa de produção. A fixture determinística é
 importada somente por testes e ferramentas de evidência offline.
@@ -101,11 +101,9 @@ Respostas seriais e fim de animação apenas liberam essa confirmação. `Home`
 aborta a partida inteira; nenhuma tecla simula D27.
 
 Depois do replay de `PROTECT`, a pausa `NEXT_TRANSMIT` apresenta o próximo
-movimento. Nela, o D27 traz o A39 no próprio `BUTTON_PING`; se o visitante
-usar a faixa verde, o dashboard solicita `ANALOG POT` de forma assíncrona e
-só inicia `GAME_TRANSMIT` após validar a leitura real. O firmware permite essa
-consulta somente-leitura durante a sessão `GAME_*`, sem apagar o estado
-`PROTECT`; os demais comandos de bancada continuam bloqueados.
+movimento. D27 ou faixa verde confirmam o envio, e o dashboard sorteia um vetor
+single-bit reproduzível sem solicitar A39. O firmware preserva `ANALOG POT` e
+o mapeamento do potenciômetro somente para diagnóstico e engenharia.
 
 Visualmente, a busca técnica fica fora dos 17 estados, que formam quatro atos:
 receber a missão, montar o
@@ -117,6 +115,11 @@ o perfil de 80 MHz permanece apenas nas ferramentas técnicas. A configuração
 da partida aparece somente no relatório final. As etapas só reproduzem uma
 animação didática depois de uma resposta `GAME_*` validada. O tempo real da
 Wisdom permanece separado do replay ampliado.
+
+Cada partida tem 70% de chance de incidente: 35% de radiação simulada na
+mensagem recebida, 35% de tentativa de invasão simulada e 30% de envio normal.
+A transmissão ampliada dura 6,5 s e mostra somente um alerta genérico quando o
+evento ocorre. A causa continua escondida até o relatório final.
 
 Quando a reprodução automática termina, a própria mensagem fica destacada e
 pode ser arrastada entre as estações. A timeline mostra apenas uma legenda

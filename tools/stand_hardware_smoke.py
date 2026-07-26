@@ -89,7 +89,7 @@ def main(argv=None) -> int:
 
     client = WisdomSerialClient(port=device.port, baudrate=args.baud, timeout=args.timeout)
     logger = StandSessionLogger(args.log_dir, mode="hardware", config=config)
-    controller = InvestigationController(config, client.send, mode="hardware", logger=logger)
+    controller = InvestigationController(config, client.send, mode="hardware", logger=logger, experiment_seed=42)
     pygame.font.init()
     states_seen: list[str] = []
     cycle_summaries: list[dict[str, object]] = []

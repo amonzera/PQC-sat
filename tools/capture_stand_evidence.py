@@ -55,7 +55,7 @@ def build_completed_investigation_controller(config_path: Path, fixture_path: Pa
     def send(command, *, timeout=None):
         client.send(command, timeout=timeout)
 
-    controller = InvestigationController(config, send, mode="simulated", now=0)
+    controller = InvestigationController(config, send, mode="simulated", now=0, experiment_seed=42)
 
     def pump(now):
         for _ in range(20):
@@ -100,11 +100,10 @@ def build_completed_investigation_controller(config_path: Path, fixture_path: Pa
     choose("guard:CRC32")
     press()  # NEXT_PREPARE -> GAME_BEGIN -> PREPARE
     finish_stage()  # PREPARE -> NEXT_PROTECT -> PROTECT
-    controller.set_simulated_pot(client.pot_value)
     finish_stage()  # PROTECT -> NEXT_TRANSMIT -> TRANSMIT
     finish_stage()  # TRANSMIT -> NEXT_VERIFY -> VERIFY
     finish_stage()  # VERIFY -> DIAGNOSE
-    choose("diagnosis:MEMORY")
+    choose("diagnosis:RADIATION")
     choose("response:RETRY")
     finish_stage()  # RETRY -> DEBRIEF/GAME_END
     pump(now + 0.01)
@@ -269,6 +268,7 @@ def main(argv=None) -> int:
             controller,
             size=(args.width, args.height),
             now=2.0,
+            replay_progress=0.5 if state is InvestigationState.TRANSMIT else None,
         )
         output = args.output_dir / f"{index:02d}_{state.value.lower()}_{args.width}x{args.height}.png"
         pygame.image.save(frame, output)

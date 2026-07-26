@@ -176,7 +176,7 @@ def validate_cycle(record: dict[str, object]) -> list[str]:
         if not isinstance(duration, (int, float)) or duration <= 0:
             errors.append("partida não registrou duração positiva")
         diagnosis = str(record.get("diagnosis", ""))
-        if diagnosis not in {"CHANNEL", "AUTH", "MEMORY"}:
+        if diagnosis not in {"RADIATION", "INTRUSION", "NORMAL"}:
             errors.append("partida sem diagnóstico confirmado")
         decision = str(record.get("decision", ""))
         if decision not in {"ACCEPT", "RETRY", "SAFE_MODE"}:
@@ -269,7 +269,12 @@ def main(argv=None) -> int:
     parser.add_argument("logs", nargs="+", type=Path)
     parser.add_argument("--min-cycles", type=int, default=30)
     parser.add_argument("--min-button-actions", type=int, default=100)
-    parser.add_argument("--min-pot-changes", type=int, default=100)
+    parser.add_argument(
+        "--min-pot-changes",
+        type=int,
+        default=0,
+        help="gate técnico opcional de A39; o jogo público não exige movimentos",
+    )
     parser.add_argument("--min-disconnects", type=int, default=10)
     parser.add_argument("--min-continuous-seconds", type=float, default=10800.0)
     parser.add_argument("--output", type=Path, default=Path("docs/stand/evidence/hardware_acceptance_summary.json"))

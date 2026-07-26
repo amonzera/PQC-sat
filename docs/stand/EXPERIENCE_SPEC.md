@@ -10,8 +10,8 @@ na Wisdom. Público: visitantes da 78ª Reunião Anual da SBPC. Duração alvo:
 > protegê-la, interprete as evidências e tome uma decisão operacional.
 
 A experiência não exige conhecimento prévio. A tela apresenta escolhas curtas;
-a faixa verde ou o botão físico D27 confirmam cada fase; o potenciômetro A39
-escolhe o bit usado no vetor single-bit. O incidente só é revelado no
+a faixa verde ou o botão físico D27 confirmam cada fase. O controlador sorteia
+e registra o incidente e o vetor single-bit; a causa só é revelada no
 encerramento.
 
 ## Direção visual em quatro atos
@@ -46,9 +46,8 @@ tela. A abertura narrativa de `ATTRACT` permanece até `INICIAR MISSÃO` ou D27.
 - D27 durante comando pendente, animação, guarda de tela ou restauração de
   perfil é ignorado sem consumir o debounce seguinte;
 - teclado não representa D27 no hardware público, mesmo com diagnóstico;
-- em `NEXT_TRANSMIT`, a faixa verde solicita `ANALOG POT` sem bloquear o loop
-  e só inicia a transmissão com A39 real válido; não reutiliza valor antigo ou
-  padrão;
+- em `NEXT_TRANSMIT`, D27 ou faixa verde confirmam o vetor RNG já registrado;
+  nenhuma leitura A39 é solicitada pelo jogo público;
 - qualquer desconexão reapresenta a busca; após novo `HELLO`, a partida
   interrompida é apagada e a abertura narrativa retorna automaticamente;
 - `Home` é aborto administrativo e exige novo handshake para recuperação;
@@ -60,7 +59,7 @@ tela. A abertura narrativa de `ATTRACT` permanece até `INICIAR MISSÃO` ou D27.
 ```text
 cartão ────── seleciona ──┐
 D27 ou verde ─ confirma ───┼─> InvestigationController ─> WisdomSerialClient
-A39 ──────── escolhe bit ─┘              |                       |
+RNG registrado ─ vetor ────┘              |                       |
                                           v                       v
                                   JSONL log v2 <── USB ──> BlackBoard Wisdom
                                                                 |
@@ -83,11 +82,11 @@ bancada; a jornada visual anterior foi removida.
 | `PREPARE` | payload centralizado, bytes serializados e CRC opcional | abre a pausa `NEXT_PROTECT` |
 | `NEXT_PROTECT` | ícones de payload, chave e proteção; o próximo passo é anunciado | envia `GAME_PROTECT` |
 | `PROTECT` | chave/cápsula, KDF, AES-GCM, ciphertext e tag | abre a pausa `NEXT_TRANSMIT` |
-| `NEXT_TRANSMIT` | ícones de solo, satélite e solo; o enlace é anunciado | captura A39 no D27 ou por `ANALOG POT` e envia `GAME_TRANSMIT` |
-| `TRANSMIT` | pacote percorre satélite, antena e canal; causa segue oculta | abre a pausa `NEXT_VERIFY` |
-| `NEXT_VERIFY` | ícones de pacote, canal e verificação; a conferência é anunciada | envia `GAME_VERIFY` |
-| `VERIFY` | CRC do quadro, tag GCM e CRC da aplicação, nessa ordem | libera o diagnóstico |
-| `DIAGNOSE` | canal, adulteração ou memória | fixa a hipótese |
+| `NEXT_TRANSMIT` | ícones de solo, satélite e solo; o enlace é anunciado | sorteia o vetor e envia `GAME_TRANSMIT` |
+| `TRANSMIT` | pacote percorre o enlace; alerta genérico aparece somente quando há incidente | abre a pausa `NEXT_VERIFY` |
+| `NEXT_VERIFY` | ícones de pacote, AES-GCM e CRC; a conferência é anunciada | envia `GAME_VERIFY` |
+| `VERIFY` | proteção AES-GCM e CRC opcional da mensagem | libera o diagnóstico |
+| `DIAGNOSE` | radiação, invasão ou nenhum problema | fixa a hipótese |
 | `SELECT_RESPONSE` | aceitar, retransmitir ou modo seguro | executa `GAME_RETRY` ou `GAME_END` |
 | `RETRY` | mesma mensagem, nova chave e novo nonce, sem falha | envia `GAME_END ... ACCEPT` |
 | `DEBRIEF` | configuração da partida, incidente, métricas, diagnóstico e contrafactual | encerra e volta a `ATTRACT` |
@@ -139,9 +138,9 @@ O `HELLO` aceito pela superfície pública anuncia
 `game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1`. Há uma única sessão ativa. Ordem ou ID
 incorreto retorna `BAD_GAME_STATE` e limpa a sessão. Novo `GAME_BEGIN`, erro
 fatal, `GAME_ABORT`, `HELLO` ou reconexão também apagam o contexto anterior.
-Durante a sessão, `ANALOG POT` é a única leitura não `GAME_*` permitida: ela
-captura A39 sem apagar `PROTECT`, para que a faixa verde possa preparar o vetor
-de `GAME_TRANSMIT`. Os demais comandos de bancada continuam bloqueados.
+Durante a sessão, `ANALOG POT` continua disponível como leitura técnica sem
+apagar `PROTECT`, mas não participa do fluxo público. O controlador sorteia e
+registra o vetor enviado em `GAME_TRANSMIT`.
 Segredos são apagados depois de `GAME_VERIFY`; somente contexto não secreto
 mínimo fica disponível para `GAME_RETRY`, que usa chave e nonce novos. Nenhuma
 resposta contém chave, segredo compartilhado, nonce ou ciphertext completos;
@@ -150,22 +149,21 @@ somente métricas e fingerprints CRC curtas.
 ## Modelo experimental
 
 ```text
-payload → [CRC aplicação] → estabelecimento de segredo → AES-128-GCM
-        → CRC do quadro → incidente de canal → verificação do quadro
-        → verificação GCM → incidente de memória → CRC da aplicação
+payload → [CRC da mensagem] → estabelecimento de segredo → AES-128-GCM
+        → transmissão → verificação GCM → possível alteração na recepção
+        → CRC opcional da mensagem
 ```
 
-| Incidente | CRC quadro | GCM | CRC aplicação | Resultado |
-|---|---|---|---|---|
-| `NORMAL` | OK | OK | OK ou ausente | `DELIVERED` |
-| `CHANNEL_BITFLIP` | falha | falha diagnóstica | não verificado | `FRAME_REJECT` |
-| `TAMPER` | OK após recálculo | falha | não verificado | `AUTH_REJECT` |
-| `RX_MEMORY` + CRC32 | OK | OK | falha | `APP_REJECT` |
-| `RX_MEMORY` sem CRC | OK | OK | ausente | `SILENT_CORRUPTION` |
+| Incidente público | GCM | CRC da mensagem | Resultado |
+|---|---|---|---|
+| `NORMAL` | OK | OK ou não adicionado | `DELIVERED` |
+| invasão simulada (`TAMPER`) | falha | não verificado ou não adicionado | `AUTH_REJECT` |
+| radiação simulada (`RX_MEMORY`) + CRC32 | OK | falha | `APP_REJECT` |
+| radiação simulada (`RX_MEMORY`) sem CRC | OK | não adicionado | `SILENT_CORRUPTION` |
 
-Quando o CRC do quadro falha, o harness ainda calcula a observação GCM para a
-explicação didática, mas o pacote não é aceito. Os padrões localizam uma camada
-provável; não provam radiação, ataque ou defeito físico.
+`CHANNEL_BITFLIP` e o CRC de quadro permanecem na instrumentação técnica, mas
+não são sorteados nem exibidos no jogo. Os sintomas públicos sustentam apenas
+hipóteses dentro da simulação; não provam radiação, ataque ou defeito físico.
 
 ## Animações e métricas
 
@@ -177,8 +175,8 @@ As animações são então orientadas pelo estado e pela resposta aceita:
 - `PREPARE`: bytes e CRC opcional;
 - `PROTECT`: setup, iniciador, receptor, HKDF, nonce, AES-GCM e tag; a arte
   distingue o intercâmbio de pontos ECDH do par/cápsula ML-KEM;
-- `TRANSMIT`: pacote, A39, bit e pulso do incidente ainda oculto;
-- `VERIFY`: quadro, GCM e aplicação em ordem;
+- `TRANSMIT`: pacote em viagem e alerta genérico quando o sorteio aplica um incidente;
+- `VERIFY`: proteção AES-GCM e CRC opcional da mensagem;
 - `RETRY`: o KEX selecionado é repetido, seguido por nova chave derivada, novo
   nonce, novo envelope e entrega confirmada;
 - `DEBRIEF`: linha causal entre escolhas, incidente, evidências e ação.
@@ -192,8 +190,8 @@ somente à apresentação e nunca escreve em `InvestigationController`.
 
 Voltar a mensagem não volta a missão nem bloqueia novamente a confirmação. Antes do
 fim automático, o arraste está desabilitado. Antes da resposta serial, sequer
-existe replay construído. Em `TRANSMIT`, a revisão mostra byte, bit e máscara
-do A39, mas mantém a causa do incidente oculta até `DEBRIEF`.
+existe replay construído. Em `TRANSMIT`, a causa permanece oculta até
+`DEBRIEF`; seed, sorteios e vetor ficam apenas no log técnico.
 
 A tela rotula “animação didática em tempo ampliado”. As etapas explicam
 causalidade sem mostrar números de recursos; somente o debrief exibe
@@ -208,7 +206,7 @@ individual continuam qualitativas e não recebem um número inventado. Em
 ## Logs e privacidade
 
 `pqc-sat-stand-log-v2` registra seleção e confirmação separadas, origem
-`physical|screen`, controle, uptime de D27, fonte do A39, início/conclusão dos
+`physical|screen`, controle, uptime de D27, seed, sorteios, vetor, início/conclusão dos
 estágios, respostas reais, diagnóstico,
 decisão, retransmissão, resultado, erro e aborto. Logs V1 continuam legíveis
 pelo validador, mas não satisfazem o gate físico `STAGED_V1`.

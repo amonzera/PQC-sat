@@ -3,7 +3,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pygame
 
@@ -111,6 +111,7 @@ class StagedHarness:
             mode="simulated",
             logger=self.logger,
             now=0,
+            experiment_seed=42,
         )
         self.now = 0.0
         self.client.start()
@@ -208,8 +209,10 @@ class StagedConfigurationTests(unittest.TestCase):
         self.assertEqual(set(dict(config.checkpoint_animation_ms)), {"PREPARE", "PROTECT", "TRANSMIT", "VERIFY", "RETRY", "DEBRIEF"})
         self.assertEqual(
             {stage: dict(config.checkpoint_animation_ms)[stage] for stage in ("PREPARE", "PROTECT", "TRANSMIT", "VERIFY")},
-            {"PREPARE": 2750, "PROTECT": 5250, "TRANSMIT": 3750, "VERIFY": 4500},
+            {"PREPARE": 2750, "PROTECT": 5250, "TRANSMIT": 6500, "VERIFY": 4500},
         )
+        self.assertEqual(config.incident_probability, 0.70)
+        self.assertEqual((config.radiation_weight, config.intrusion_weight), (0.50, 0.50))
 
     def test_controlled_battery_covers_four_protections_four_incidents_two_profiles(self):
         rows = list(build_matrix(StandConfig.load(DEFAULT_CONFIG_PATH), 1))
@@ -484,10 +487,11 @@ class StagedControllerTests(unittest.TestCase):
             )
             harness.controller.update(now=harness.now)
             confirm()
-            if harness.controller.state is InvestigationState.NEXT_TRANSMIT:
-                harness.controller.set_simulated_pot(3072)
-                confirm()
-            elif harness.controller.state in {InvestigationState.NEXT_PROTECT, InvestigationState.NEXT_VERIFY}:
+            if harness.controller.state in {
+                InvestigationState.NEXT_PROTECT,
+                InvestigationState.NEXT_TRANSMIT,
+                InvestigationState.NEXT_VERIFY,
+            }:
                 confirm()
 
         confirm()  # ATTRACT
@@ -520,7 +524,7 @@ class StagedControllerTests(unittest.TestCase):
         }
         self.assertEqual(origins, {"screen"})
 
-    def test_green_control_samples_real_a39_before_transmit_transition(self):
+    def test_green_control_uses_logged_rng_vector_without_sampling_a39(self):
         harness = StagedHarness()
         controller = harness.reach_prepare()
         harness.now = max(harness.now + 0.03, (controller.animation_deadline or harness.now) + 0.01)
@@ -533,60 +537,27 @@ class StagedControllerTests(unittest.TestCase):
         controller.update(now=harness.now)
         harness.assert_press()
         self.assertEqual(controller.state, InvestigationState.NEXT_TRANSMIT)
-        harness.client.set_pot(3072)
         controller.mode = "hardware"
         harness.tick()
 
         self.assertTrue(controller.handle_action("confirm", now=harness.now))
         self.assertIsNotNone(controller.pending)
-        self.assertEqual(controller.pending.purpose, "screen_pot")
-        self.assertEqual(harness.commands[-1], "ANALOG POT")
-        self.assertEqual(controller.state, InvestigationState.NEXT_TRANSMIT)
+        self.assertEqual(controller.pending.purpose, "game_transmit")
+        self.assertTrue(harness.commands[-1].startswith("GAME_TRANSMIT "))
+        self.assertNotIn("ANALOG POT", harness.commands)
+        self.assertEqual(controller.state, InvestigationState.TRANSMIT)
+        self.assertEqual(controller.selection.source, "RNG")
+        self.assertIsNone(controller.selection.pot_value)
 
         harness.pump()
         self.assertEqual(controller.state, InvestigationState.TRANSMIT)
-        self.assertEqual(controller.selection.pot_value, 3072)
         confirmation = next(
             record
             for record in reversed(harness.logger.records)
             if record["event"] == "button_confirmed"
         )
         self.assertEqual(confirmation["origin"], "screen")
-        self.assertEqual(confirmation["pot_source"], "ANALOG POT")
-
-    def test_invalid_or_timed_out_screen_a39_never_advances(self):
-        harness = StagedHarness()
-        controller = harness.reach_prepare()
-        harness.now = max(harness.now + 0.03, (controller.animation_deadline or harness.now) + 0.01)
-        controller.update(now=harness.now)
-        harness.assert_press()
-        harness.assert_press()
-        harness.now = max(harness.now + 0.03, (controller.animation_deadline or harness.now) + 0.01)
-        controller.update(now=harness.now)
-        harness.assert_press()
-        self.assertEqual(controller.state, InvestigationState.NEXT_TRANSMIT)
-        controller.mode = "hardware"
-        harness.tick()
-
-        self.assertTrue(controller.handle_action("confirm", now=harness.now))
-        controller.handle_serial_event(
-            "response",
-            {"command": "ANALOG POT", "status": "OK", "payload": {"pot": "9000"}},
-            now=harness.now + 0.01,
-        )
-        self.assertEqual(controller.state, InvestigationState.NEXT_TRANSMIT)
-        self.assertIsNone(controller.pending)
-        self.assertIn("A39 NÃO CONFIRMADO", controller.blocked_choice_message)
-        self.assertTrue(controller.ready)
-
-        harness.now += 0.03
-        self.assertTrue(controller.handle_action("confirm", now=harness.now))
-        deadline = controller.pending.deadline
-        controller.update(now=deadline + 0.01)
-        self.assertEqual(controller.state, InvestigationState.NEXT_TRANSMIT)
-        self.assertIsNone(controller.pending)
-        self.assertIn("timeout", controller.blocked_choice_message)
-        self.assertTrue(controller.ready)
+        self.assertIsNone(confirmation["pot_source"])
 
     def test_every_forward_transition_is_logged_with_the_confirming_button(self):
         harness = StagedHarness()
@@ -654,11 +625,26 @@ class StagedControllerTests(unittest.TestCase):
         self.assertEqual(harness.controller.state, state)
         self.assertIsNone(harness.controller.auto_return_remaining())
 
-    def test_incident_sequence_is_deterministic_and_balanced(self):
-        first = StagedHarness()
-        second = StagedHarness()
-        self.assertEqual(first.controller._incident_order, second.controller._incident_order)
-        self.assertEqual(set(first.controller._incident_order), {IncidentScenario.CHANNEL_BITFLIP, IncidentScenario.TAMPER, IncidentScenario.RX_MEMORY})
+    def test_public_incident_draw_uses_70_percent_and_equal_cause_weights(self):
+        cases = (
+            ((0.70,), IncidentScenario.NORMAL),
+            ((0.69, 0.49), IncidentScenario.RX_MEMORY),
+            ((0.69, 0.50), IncidentScenario.TAMPER),
+        )
+        for rolls, expected in cases:
+            with self.subTest(rolls=rolls):
+                harness = StagedHarness(incident=None)
+                harness.controller._experiment_rng = Mock()
+                harness.controller._experiment_rng.random.side_effect = rolls
+                harness.controller._experiment_rng.randrange.return_value = 0
+                harness.reach_prepare()
+                self.assertIs(harness.controller.incident, expected)
+
+    def test_radiation_without_crc_marks_diagnosis_as_evidence_insufficient(self):
+        harness = StagedHarness(incident="RX_MEMORY", guard="NONE")
+        harness.reach_response()
+        self.assertFalse(harness.controller.diagnosis_evidence_sufficient)
+        self.assertTrue(harness.controller.diagnosis_correct)
 
     def test_pending_command_and_animation_rejections_do_not_consume_next_press(self):
         harness = StagedHarness()
@@ -891,6 +877,46 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
         self.assertEqual(harness.controller.selected_profile_mhz, 240)
         harness.tick()
         self.assertFalse(harness.controller.handle_action("profile:80", now=harness.now))
+
+    def test_next_protect_uses_key_for_ecdh_and_atom_only_for_mlkem(self):
+        for key_mode, expected, forbidden in (
+            ("ECDH", "classic_key", "quantum_atom"),
+            ("MLKEM", "quantum_atom", "classic_key"),
+        ):
+            with self.subTest(key_mode=key_mode):
+                harness = StagedHarness(key_mode=key_mode)
+                controller = harness.reach_prepare()
+                controller.state = InvestigationState.NEXT_PROTECT
+                panel = GamePanel.for_test(controller)
+                with patch("pqc_sat.ui.panel.investigation_view.draw_game_icon") as draw_icon:
+                    panel._draw_next_checkpoint(
+                        pygame.Surface((1366, 768)),
+                        pygame.Rect(80, 60, 1200, 640),
+                        controller,
+                        harness.now,
+                    )
+                icons = [call.args[1] for call in draw_icon.call_args_list]
+                self.assertIn(expected, icons)
+                self.assertNotIn(forbidden, icons)
+
+    def test_public_verification_exposes_only_gcm_and_one_message_crc(self):
+        cases = (
+            ("RX_MEMORY", "CRC32", "OK", "FALHOU"),
+            ("TAMPER", "CRC32", "FALHOU", "NÃO VERIFICADO"),
+            ("RX_MEMORY", "NONE", "OK", "NÃO ADICIONADO"),
+        )
+        for incident, guard, gcm_status, crc_status in cases:
+            with self.subTest(incident=incident, guard=guard):
+                harness = StagedHarness(incident=incident, guard=guard)
+                controller = harness.reach_verify()
+                rows = GamePanel.for_test(controller)._evidence_rows(controller.result)
+                self.assertEqual(
+                    [(label, value) for label, value, _color, _icon in rows],
+                    [
+                        ("PROTEÇÃO AES-GCM", gcm_status),
+                        ("CRC DA MENSAGEM", crc_status),
+                    ],
+                )
 
     def test_completed_replay_packet_can_be_dragged_without_changing_game_state(self):
         controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)

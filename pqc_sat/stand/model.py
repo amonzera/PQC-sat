@@ -136,7 +136,9 @@ class StandConfig:
     button_debounce_seconds: float
     interaction_timeout_seconds: float = 35.0
     missions: tuple[MissionCard, ...] = ()
-    incident_seed: int = 42
+    incident_probability: float = 0.70
+    radiation_weight: float = 0.50
+    intrusion_weight: float = 0.50
     transmit_hold_seconds: float = 2.2
     reveal_seconds: float = 12.0
     max_cycle_seconds: float = 90.0
@@ -144,11 +146,6 @@ class StandConfig:
     public_interaction_timeout_enabled: bool = False
     public_auto_reset_enabled: bool = False
     checkpoint_animation_ms: tuple[tuple[str, int], ...] = ()
-    incident_sequence: tuple[str, ...] = (
-        "CHANNEL_BITFLIP",
-        "TAMPER",
-        "RX_MEMORY",
-    )
     target_min_seconds: float = 120.0
     target_max_seconds: float = 180.0
 
@@ -180,6 +177,9 @@ class StandConfig:
             profiles = data["profiles"]
             pot = data["potentiometer"]
             investigation = data.get("investigation", {})
+            incident_weights = investigation.get("incident_weights", {})
+            if not isinstance(incident_weights, dict):
+                raise TypeError("investigation.incident_weights deve ser um objeto")
             public_flow = data.get("public_flow", {})
             mission_rows = data.get("missions", [])
             missions = tuple(
@@ -225,7 +225,9 @@ class StandConfig:
                 button_debounce_seconds=float(data["button_debounce_seconds"]),
                 interaction_timeout_seconds=float(data.get("interaction_timeout_seconds", 35.0)),
                 missions=missions,
-                incident_seed=int(investigation.get("seed", 42)),
+                incident_probability=float(investigation.get("incident_probability", 0.70)),
+                radiation_weight=float(incident_weights.get("RX_MEMORY", 0.50)),
+                intrusion_weight=float(incident_weights.get("TAMPER", 0.50)),
                 transmit_hold_seconds=float(investigation.get("transmit_hold_seconds", 2.2)),
                 reveal_seconds=float(investigation.get("reveal_seconds", 12.0)),
                 max_cycle_seconds=float(investigation.get("max_cycle_seconds", 90.0)),
@@ -233,13 +235,6 @@ class StandConfig:
                 public_interaction_timeout_enabled=bool(public_flow.get("interaction_timeout_enabled", False)),
                 public_auto_reset_enabled=bool(public_flow.get("auto_reset_enabled", False)),
                 checkpoint_animation_ms=checkpoint_animation_ms,
-                incident_sequence=tuple(
-                    str(value).upper()
-                    for value in investigation.get(
-                        "incident_sequence",
-                        ("CHANNEL_BITFLIP", "TAMPER", "RX_MEMORY"),
-                    )
-                ),
                 target_min_seconds=float(investigation.get("target_min_seconds", 120.0)),
                 target_max_seconds=float(investigation.get("target_max_seconds", 180.0)),
             )
@@ -284,12 +279,12 @@ class StandConfig:
             raise StandConfigError("configuração v3 exige ECDH e MLKEM como modos de chave")
         if tuple(data.get("guards", ())) != ("NONE", "CRC32"):
             raise StandConfigError("configuração v3 exige NONE e CRC32 como guardiões")
-        if set(config.incident_sequence) != {
-            IncidentScenario.CHANNEL_BITFLIP.value,
-            IncidentScenario.TAMPER.value,
-            IncidentScenario.RX_MEMORY.value,
-        } or len(config.incident_sequence) != 3:
-            raise StandConfigError("sequência pública deve balancear canal, adulteração e memória")
+        if not 0.0 <= config.incident_probability <= 1.0:
+            raise StandConfigError("probabilidade pública de incidente deve estar entre 0 e 1")
+        if config.radiation_weight < 0.0 or config.intrusion_weight < 0.0:
+            raise StandConfigError("pesos públicos de incidente não podem ser negativos")
+        if not math.isclose(config.radiation_weight + config.intrusion_weight, 1.0, abs_tol=1e-9):
+            raise StandConfigError("pesos públicos de radiação e invasão devem somar 1")
         if config.target_min_seconds <= 0 or config.target_max_seconds < config.target_min_seconds:
             raise StandConfigError("janela-alvo da partida inválida")
         for value in (
@@ -344,7 +339,8 @@ class FaultSelection:
     byte_index: int
     bit_mask: int
     bit_position: int
-    pot_value: int
+    pot_value: int | None
+    source: str = "POT"
 
 @dataclass(frozen=True)
 class FaultMeasurement:
@@ -493,6 +489,21 @@ def fault_selection_from_pot(pot_value: int | str, payload_len: int, config: Sta
         bit_mask=1 << (bit_position % 8),
         bit_position=bit_position,
         pot_value=clamped,
+        source="POT",
+    )
+
+def fault_selection_from_rng(rng, payload_len: int) -> FaultSelection:
+    """Choose a reproducible single-bit vector from an injected experiment RNG."""
+
+    if payload_len <= 0:
+        raise ValueError("payload vazio")
+    bit_position = int(rng.randrange(payload_len * 8))
+    return FaultSelection(
+        byte_index=bit_position // 8,
+        bit_mask=1 << (bit_position % 8),
+        bit_position=bit_position,
+        pot_value=None,
+        source="RNG",
     )
 
 def flip_selected_bit(payload: bytes, selection: FaultSelection) -> bytes:
@@ -957,9 +968,9 @@ def parse_game_stage_response(
         if incident is None or selection is None:
             raise ValueError("TRANSMIT exige incidente interno e vetor confirmado")
         if _required_int(payload, "byte_index") != selection.byte_index:
-            raise StandProtocolError("TRANSMIT alterou o byte selecionado no A39")
+            raise StandProtocolError("TRANSMIT alterou o byte do vetor selecionado")
         if _required_int(payload, "bit_mask", base=0) != selection.bit_mask:
-            raise StandProtocolError("TRANSMIT alterou a máscara selecionada no A39")
+            raise StandProtocolError("TRANSMIT alterou a máscara do vetor selecionado")
         frame_crc_tx = _required_int(payload, "frame_crc_tx", base=0)
         frame_crc_rx = _required_int(payload, "frame_crc_rx", base=0)
         frame_crc_match = _required_bool(payload, "frame_crc_match")
@@ -1141,6 +1152,7 @@ __all__ = (
     "PendingCommand",
     "safe_ratio",
     "fault_selection_from_pot",
+    "fault_selection_from_rng",
     "flip_selected_bit",
     "scenario_for",
     "expected_game_outcome",

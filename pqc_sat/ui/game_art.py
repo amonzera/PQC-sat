@@ -219,6 +219,12 @@ _CUE_NARRATIVES = {
         "pacote + posição A39",
         "pacote após evento oculto",
     ),
+    "event": (
+        "OBSERVAR ENVIO",
+        "O experimento pode aplicar um evento simulado sem revelar sua causa.",
+        "pacote em trânsito",
+        "pacote após o evento",
+    ),
     "arrival": (
         "CHEGAR AO DESTINO",
         "O receptor recebe exatamente o quadro que será verificado na etapa seguinte.",
@@ -238,10 +244,10 @@ _CUE_NARRATIVES = {
         "resultado de autenticação",
     ),
     "app": (
-        "CHECAR MENSAGEM",
-        "O CRC da aplicação observa o plaintext depois da autenticação, quando foi instalado.",
-        "plaintext recuperado",
-        "resultado do CRC da aplicação",
+        "CHECAR CRC",
+        "O CRC da mensagem confere o conteúdo recebido quando essa checagem foi adicionada.",
+        "mensagem recebida",
+        "resultado do CRC da mensagem",
     ),
     "payload": (
         "MESMA MENSAGEM",
@@ -281,7 +287,7 @@ _CUE_NARRATIVES = {
     ),
     "review_prepare": (
         "PREPARAR",
-        "A mensagem escolhida virou bytes e recebeu o CRC da aplicação quando ele foi ativado.",
+        "A mensagem escolhida virou bytes e recebeu o CRC da mensagem quando ele foi ativado.",
         "missão escolhida",
         "mensagem preparada",
     ),
@@ -293,13 +299,13 @@ _CUE_NARRATIVES = {
     ),
     "review_transmit": (
         "TRANSMITIR",
-        "O pacote atravessou o enlace e o evento oculto foi aplicado no ponto indicado pelo A39.",
+        "O pacote atravessou o enlace e o sorteio decidiu se um evento simulado seria aplicado.",
         "pacote protegido",
         "quadro recebido",
     ),
     "review_verify": (
         "VERIFICAR",
-        "CRC do quadro, tag GCM e CRC da aplicação produziram as evidências da missão.",
+        "A tag GCM e o CRC opcional da mensagem produziram as evidências da missão.",
         "quadro recebido",
         "resultado de segurança",
     ),
@@ -329,7 +335,7 @@ def _cue_specs(stage: str, key_mode: str, guard: str):
             ("serialize", "SERIALIZAR O PAYLOAD", "payload", C_ACCENT_CYAN, None),
         ]
         if guard == "CRC32":
-            specs.append(("app_crc", "ANEXAR CRC32 DA APLICAÇÃO", "crc32", C_ACCENT_GREEN, None))
+            specs.append(("app_crc", "ANEXAR CRC32 DA MENSAGEM", "crc32", C_ACCENT_GREEN, None))
         specs.append(("packet", "MONTAR A MENSAGEM", "packet", C_ACCENT_BLUE, None))
         return specs
     if stage == "PROTECT" and key_mode == "MLKEM":
@@ -354,18 +360,15 @@ def _cue_specs(stage: str, key_mode: str, guard: str):
         return [
             ("uplink", "ENVIAR O PACOTE", "ground", C_ACCENT_CYAN, None),
             ("orbit", "ATRAVESSAR O ENLACE", "satellite", C_ACCENT_BLUE, None),
-            ("bit", "APLICAR O VETOR A39", "bit", C_ACCENT_ORANGE, None),
+            ("event", "OBSERVAR O ENVIO", "channel", C_ACCENT_ORANGE, None),
             ("arrival", "CHEGAR AO RECEPTOR", "packet", C_ACCENT_CYAN, None),
         ]
     if stage == "VERIFY":
-        specs = [
-            ("frame", "CRC DO QUADRO", "channel", C_ACCENT_CYAN, None),
-            ("gcm", "TAG AES-GCM", "aes_gcm", C_ACCENT_PURPLE, None),
-        ]
+        specs = [("gcm", "PROTEÇÃO AES-GCM", "aes_gcm", C_ACCENT_PURPLE, None)]
         if guard == "CRC32":
-            specs.append(("app", "CRC DA APLICAÇÃO", "crc32", C_ACCENT_GREEN, None))
+            specs.append(("app", "CRC DA MENSAGEM", "crc32", C_ACCENT_GREEN, None))
         else:
-            specs.append(("app", "CRC DA APLICAÇÃO AUSENTE", "no_crc", C_TEXT_DIM, None))
+            specs.append(("app", "CRC NÃO ADICIONADO", "no_crc", C_TEXT_DIM, None))
         return specs
     if stage == "RETRY":
         specs = [("payload", "REUTILIZAR O PAYLOAD", "payload", C_ACCENT_CYAN, None)]

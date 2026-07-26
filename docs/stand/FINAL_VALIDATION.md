@@ -1,6 +1,6 @@
 # Validação final — jogo didático `STAGED_V1/FAIR_V1`
 
-Última revisão: 2026-07-23.
+Última revisão: 2026-07-26.
 
 ## Decisão atual
 
@@ -20,18 +20,18 @@ confirmações D27/tela por partida ou o novo debrief.
 
 | Verificação | Resultado | Evidência |
 |---|---|---|
-| suíte integrada | PASS software | 122 testes host; busca automática, narrativa direta, reconexão, controle de tela, A39 assíncrono, pausas entre etapas, contrato FAIR, manifesto, códigos de retorno KEX, baterias v2, limites serial separados, legado e jogo por etapas |
+| suíte integrada | PASS software | testes host cobrem busca, reconexão, controle de tela, sorteio reproduzível, pausas, contrato FAIR, legado e jogo por etapas |
 | matriz científica | PASS | 2 perfis × 2 modos de chave × 2 guardiões × 4 incidentes = 32 casos |
 | confirmação explícita | PASS no modelo | transições v2 exigem `button_confirmed` de origem `physical|screen`; resposta/animação não avançam |
 | busca automática | PASS no host/modelo | dashboard permanece aberto sem porta; somente `HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` fecha o standby |
 | narrativa direta | PASS no modelo | Terra/CubeSat, chamada única e `INICIAR MISSÃO`; clique ou D27 abrem as escolhas sem tela intermediária |
 | reconexão | PASS no modelo | qualquer queda mostra busca; novo handshake apaga a partida e volta automaticamente à narrativa |
-| A39 durante sessão | PASS no hardware curto | `GAME_PROTECT -> ANALOG POT -> GAME_TRANSMIT` preservou a sessão; `pot=1470` selecionou byte 13/máscara `0x04` |
+| incidente probabilístico | PASS software | 70% de chance; causas públicas igualmente ponderadas; seed, rolls e vetor registrados |
 | ausência de timeout público | PASS | estados permanecem parados; flags públicas desabilitadas |
 | retransmissão | PASS no hardware curto | `same_payload=1`, `fresh_key=1`, `fresh_nonce=1`, `result=DELIVERED` |
-| soak offline | PASS software | 50/50 partidas, 775 confirmações lógicas, 100 mudanças A39, 275 `GAME_*`, 25 retries, zero erros e zero crescimento RSS |
+| soak offline | PASS software | 50/50 partidas: 12 normais, 24 radiações simuladas, 14 invasões, 775 confirmações, 275 `GAME_*`, zero erros e zero crescimento RSS |
 | renderização | PASS software | por resolução: busca + 17 estados + 18 quadros dos replays; tela de tutorial ausente |
-| orçamento médio | PASS host | interface completa: 6,312 ms e 8,822 ms; limite 16,667 ms no host headless |
+| orçamento médio | PASS host | interface completa: 9,960 ms e 15,730 ms; limite 16,667 ms no host headless |
 | vídeo offline | PASS | `staged_game_test_fixture.mp4`, permanentemente rotulado como fixture sem hardware |
 | smoke FAIR anterior | FAIL parcial na placa | `logs/stand/diagnostics/20260723T152842Z_stand_diagnostic.json`: handshake, perfil, `KEX_INFO` e ML-KEM passaram; ECDH falhou no setup em 29 µs, antes de initiator/responder |
 | segundo smoke FAIR | PASS criptográfico; FAIL no protocolo | `logs/stand/diagnostics/20260723T155138Z_stand_diagnostic.json`: `KEX_BENCH`, `MISSION` e `SESSION_BENCH` passaram para ECDH/ML-KEM; `FAULT` passou; `GAME_BEGIN` passou; `GAME_PROTECT` tinha `experiment` duplicado |
@@ -53,7 +53,7 @@ perfil FAIR e permanece como histórico da UI. Capturas ficam em
   ou D27 abrem diretamente a escolha da missão;
 - D27 sem seleção não avança nem consome o próximo debounce;
 - toda transição para a frente possui confirmação D27/tela correspondente no log;
-- a faixa verde percorre todos os estados e, em `PROTECT`, espera A39 real;
+- a faixa verde percorre todos os estados sem solicitar A39;
 - resposta serial e término de animação apenas liberam a confirmação;
 - pacote só pode ser arrastado depois do replay automático e o gesto não muda
   controlador, resultado, estado ou liberação da confirmação;
@@ -134,12 +134,12 @@ todos os 17 estados, baterias longas ou compreensão de visitantes.
 | D27 físico | PARCIAL | `BUTTON_PING button=1 pot=1469` e uptime novo observados; falta provar repouso `button=0` e partida integral |
 | protocolo transacional | PARCIAL | caminho principal, retry e ordem inválida passaram; falta `GAME_ABORT` e partida visual |
 | partida visível D27 | FAIL | uma partida completa com todos os avanços por D27 físico no JSONL v2 |
-| partida visível verde | FAIL | busca automática, abertura confirmada e uma partida completa pelo verde, inclusive `ANALOG POT` em `PROTECT` |
+| partida visível verde | FAIL | busca automática, abertura confirmada e uma partida completa pelo verde |
 | permanência dos estados | FAIL | deixar cada estado parado e provar ausência de avanço/reset |
-| A39 e matriz curta | PARCIAL | A39 ativo selecionou byte 13/`0x04`; falta variar vetor e matriz |
+| RNG e matriz curta | FAIL | executar normal, radiação e invasão no fluxo visual e conferir seed/vetor no JSONL |
 | retransmissão real | PASS | mesmo payload, chave/nonce novos e `DELIVERED` |
 | monitor definitivo | FAIL | confirmar legibilidade e controles na montagem final |
-| 30 partidas / 3 h | FAIL | >100 D27, >100 mudanças A39 com delta ADC ≥16, dez reconexões, zero invariantes violados |
+| 30 partidas / 3 h | FAIL | >100 D27, dez reconexões e zero invariantes violados |
 | cinco visitantes | FAIL | mediana 120–180 s e critérios 4/5 de compreensão |
 
 Nenhum desses itens pode ser promovido por fixture, screenshot, vídeo ou
@@ -159,7 +159,7 @@ python3 tools/stand_hardware_smoke.py \
 
 O operador deve pressionar D27 durante o diagnóstico e em cada liberação do
 smoke. Depois deve executar na interface uma partida completa por D27 e outra
-pelo botão verde, conferindo a leitura A39 sob demanda, e testar permanência
+pelo botão verde, conferindo seed, causa e vetor no JSONL, e testar permanência
 dos estados conforme `RUNBOOK.md`.
 
 O comando de upload imprime um manifesto. Depois do smoke curto, a bateria FAIR

@@ -7,7 +7,7 @@
 - firmware candidato com
   `game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` já gravado;
 - D27 em repouso como `button=0` e pressionado como `button=1`;
-- A39 variando de forma observável;
+- A39 disponível apenas para diagnóstico técnico, sem participação no jogo;
 - suspensão de tela e do sistema desabilitada pelo operador.
 
 Não existe fallback simulado no programa do evento. Se a placa não estiver
@@ -102,9 +102,9 @@ Controles:
 | Entrada | Efeito |
 |---|---|
 | toque/clique em cartão | seleciona ou troca a opção atual |
-| faixa verde | confirma e pode avançar a fase; em `PROTECT`, lê `ANALOG POT` antes |
+| faixa verde | confirma e pode avançar a fase |
 | D27 | confirma e pode avançar a fase |
-| A39 | escolhe o bit capturado no checkpoint de transmissão |
+| A39 | leitura técnica fora da jornada pública |
 | `Home` | aborta a sessão inteira |
 | `F12` | mostra/oculta diagnóstico administrativo |
 | `Esc` | alterna janela/tela cheia |
@@ -219,7 +219,7 @@ sem `STAGED_V1`, `FAIR_V1` ou `FAIR_SESSION_V1`; ele não usa os cenários
 legados `CLASSIC/PQC`.
 
 Depois, execute 30 partidas físicas, três horas de exposição, mais de 100
-confirmações D27, 100 mudanças A39 e dez reconexões. Inclua ciclos pelo verde,
+confirmações D27 e dez reconexões. Inclua ciclos pelo verde,
 mas preserve a contagem física exigida. Registre zero transições sem
 confirmação e zero resultados reaproveitados. O teste de compreensão exige cinco
 visitantes e os critérios de `FINAL_VALIDATION.md`.

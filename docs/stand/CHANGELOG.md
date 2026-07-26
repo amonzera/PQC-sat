@@ -1,5 +1,20 @@
 # Changelog do modo estande SBPC
 
+## 2026-07-26 — Iteração 7: incidentes probabilísticos
+
+- cada partida sorteia 30% de envio normal, 35% de radiação simulada e 35% de
+  tentativa de invasão; seed, rolls e vetor single-bit ficam no log;
+- A39 saiu do fluxo público, mas `ANALOG POT` e o mapeamento técnico foram
+  preservados para engenharia;
+- a transmissão passou de 3,75 s para 6,5 s e mostra alerta genérico somente
+  quando o incidente sorteado é aplicado, sem revelar sua causa;
+- ECDH usa uma chave nas telas de proteção; o átomo/cápsula fica exclusivo do
+  caminho ML-KEM;
+- a verificação pública mostra apenas AES-GCM e um único CRC da mensagem.
+  CRC de quadro e `CHANNEL_BITFLIP` permanecem como instrumentação técnica;
+- diagnóstico público usa radiação, invasão ou nenhum problema. Radiação sem
+  CRC é marcada como evidência insuficiente, não como erro do visitante.
+
 ## 2026-07-24 — Iteração 6 do fluxo público
 
 - a escolha de CPU saiu do jogo público: cada partida visual fixa

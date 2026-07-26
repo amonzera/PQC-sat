@@ -41,10 +41,10 @@ dashboard.py
 | `infrastructure/wisdom.py` | descobrir e autenticar a identidade operacional da placa | não escolhe por descrição USB |
 | `infrastructure/serial_client.py` | transportar frames sem bloquear o Pygame | não avança estado |
 | `stand/model.py` | tipar escolhas e validar respostas reais | não desenha |
-| `stand/investigation.py` | aplicar confirmação explícita, ler A39 sob demanda e ordenar `GAME_*` | não trata eventos Pygame |
+| `stand/investigation.py` | aplicar confirmação explícita, sortear incidentes/vetores e ordenar `GAME_*` | não trata eventos Pygame |
 | `ui/game.py` | manter a busca até `HELLO`, separar busca/narrativa e rotear cartões | não emula D27 por teclado |
 | `ui/replay.py` | controlar somente a posição visual da mensagem após o replay validado | não confirma, não libera o próximo avanço e não altera a sessão |
-| `ui/panel/investigation_view.py` | desenhar as 14 telas | não muda o controlador |
+| `ui/panel/investigation_view.py` | desenhar os 17 estados públicos | não muda o controlador |
 
 ## Descoberta da Wisdom
 
@@ -60,6 +60,7 @@ board=BlackBoard-Wisdom
 proto=V1
 game=STAGED_V1
 kex=FAIR_V1
+session_bench=FAIR_SESSION_V1
 uptime_ms=<uint32>
 ```
 
@@ -75,9 +76,8 @@ administrativa e nunca elimina a exigência da placa.
 
 Em `ATTRACT`, `INICIAR MISSÃO` ou D27 abrem diretamente a escolha de missão em
 todas as partidas. Depois disso, `confirm` pode vir de D27 ou do controle
-contextual da tela. Em `PROTECT`, a
-origem de tela cria um `PendingCommand("ANALOG POT", "screen_pot", ...)`; a
-transição só acontece quando a resposta traz A39 dentro da faixa configurada.
+contextual da tela. Em `NEXT_TRANSMIT`, qualquer uma dessas confirmações usa o
+vetor sorteado pelo controlador; A39 não participa do jogo público.
 
 ## Regra de produção versus teste
 

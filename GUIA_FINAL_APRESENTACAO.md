@@ -734,8 +734,8 @@ ECDH:  CHAVE PÚBLICA DO RECEPTOR -> CHAVE/PONTO DO INICIADOR
        -> SEGREDO NO RECEPTOR -> HKDF -> AES-GCM
 MLKEM: CHAVE PÚBLICA DO RECEPTOR -> ENCAP/CÁPSULA
        -> DECAP/SEGREDO NO RECEPTOR -> HKDF -> AES-GCM
-AMBOS: CRC opcional -> CRC DO QUADRO -> CANAL
-       -> GCM -> CRC DA APLICAÇÃO -> RESULTADO
+AMBOS: CRC opcional da mensagem -> proteção AES-GCM
+       -> transmissão -> GCM -> CRC opcional -> RESULTADO
 ```
 
 ### 12.4 Encerramento
@@ -853,7 +853,8 @@ python3 dashboard.py --port /dev/ttyUSB0
 ```
 
 5. Aguarde o standby desaparecer e a abertura narrativa surgir.
-6. Confirme D27 e A39 antes da entrada do público.
+6. Confirme D27 e execute uma leitura técnica A39 antes da entrada do público;
+   o potenciômetro não participa do jogo.
 7. Não inicie bateria longa durante a apresentação.
 
 ### 17.2 Distribuição de tempo
@@ -911,9 +912,9 @@ e use a faixa verde ou peça um novo D27 em cada linha. Não antecipe o incident
 | `NEXT_PREPARE` | “Primeiro vamos preparar a mensagem.” | “O que vem antes de proteger um pacote?” | representação em bytes | mensagem, bytes e pacote aparecem em sequência | “A interface só antecipa o passo; a Wisdom ainda não começou.” | “A tela já executou a etapa.” |
 | `PREPARE` | “A Wisdom está serializando exatamente a mensagem escolhida.” | “Onde o CRC entra quando ligado?” | representação em bytes e referência anterior à falha | bytes só surgem durante serialização; CRC muda de previsto para calculando e anexado; depois arraste a mensagem | “A animação está ampliada; os números de recursos ficam reservados ao debrief.” | “Esses segundos são o tempo real da placa.” |
 | `PROTECT` | “Agora o segredo é obtido e o AES-GCM protege o pacote.” | “Qual parte muda entre ECDH e ML-KEM?” | setup, iniciador, receptor, HKDF, nonce e tag | pontos ECDH ou chave/cápsula ML-KEM; depois arraste por cada subtiming | “As duas opções usam o mesmo HKDF e AES-GCM; muda o estabelecimento.” | “PQC substitui o AES” ou “a tag é um CRC.” |
-| `TRANSMIT` | “Gire A39: ele escolhe o bit; a causa continua escondida.” | “Qual byte e máscara foram selecionados?” | vetor single-bit reproduzível e camada do incidente | a mensagem atravessa as estações; o bit aparece somente no ponto A39 e a revisão não revela a causa | “A falha é injetada por software e ainda não revela sua causa.” | “Observamos radiação real” ou “o potenciômetro mede radiação.” |
-| `VERIFY` | “Leia as três camadas na ordem: quadro, GCM e aplicação.” | “Qual foi a primeira evidência que falhou?” | integridade de transporte, autenticação e integridade pós-GCM | indicadores reais são revelados em ordem e podem ser revistos arrastando a mensagem | “O padrão sugere uma camada; não prova a causa física.” | “CRC distingue ataque de radiação.” |
-| `DIAGNOSE` | “Forme sua hipótese sem ver a resposta.” | “Canal, adulteração ou memória: qual combina com o padrão?” | inferência por evidências | hipótese apenas recebe destaque | “Você pode mudar a seleção até confirmar no verde ou D27.” | “A tela já identificou definitivamente a origem.” |
+| `TRANSMIT` | “O experimento sorteou se algo interfere na entrega.” | “Apareceu um alerta ou o envio foi estável?” | chance 70%, vetor single-bit reproduzível e causa oculta | a mensagem atravessa as estações; um alerta genérico pulsa somente quando há incidente | “A falha é injetada por software; o alerta didático não veio do CRC/GCM.” | “Observamos radiação real” ou “o alerta prova a causa.” |
+| `VERIFY` | “Agora confira AES-GCM e o CRC da mensagem.” | “Qual evidência falhou ou ficou ausente?” | autenticação e integridade opcional pós-GCM | dois indicadores reais são revelados e podem ser revistos arrastando a mensagem | “O padrão sustenta uma hipótese dentro da simulação; não prova a causa física.” | “CRC distingue ataque de radiação.” |
+| `DIAGNOSE` | “Forme sua hipótese sem ver a resposta.” | “Radiação, invasão ou nenhum problema?” | inferência por evidências | hipótese apenas recebe destaque | “Sem CRC, uma alteração pós-GCM pode não deixar evidência suficiente.” | “A tela identificou definitivamente a origem.” |
 | `SELECT_RESPONSE` | “Escolha o que o sistema deveria fazer com este pacote.” | “Aceitar, retransmitir ou pedir modo seguro?” | decisão operacional condicionada à verificação | `ACCEPT` fica bloqueado em rejeição criptográfica | “Pacote criptograficamente rejeitado não pode ser aceito aqui.” | “Modo seguro é uma política universal” ou “retry garante disponibilidade.” |
 | `RETRY` | “Vamos retransmitir a mesma mensagem sem repetir material criptográfico.” | “O que precisa mudar e o que precisa permanecer?” | mesmo payload, chave/nonce novos, sem falha injetada | arraste por payload igual, chave nova, nonce novo, proteção e entrega | “O harness confirma fingerprints novos e `DELIVERED`.” | “Reutilizamos o nonce” ou “corrigimos o pacote antigo.” |
 | `DEBRIEF` | “Agora podemos revelar a cadeia completa.” | “Seu diagnóstico e sua ação protegeram a missão?” | causalidade, contrafactual e limites | arraste a mensagem pela revisão completa; só aqui o incidente é revelado | “Tempo, bytes e heap são desta partida; não há nota ou ranking.” | “Um acerto prova causalidade física” ou “a demo vira resultado oficial.” |
@@ -1112,8 +1113,8 @@ foi selecionado para a partida.
 
 **Por que tocar no cartão não avança?** Para separar escolha de confirmação:
 o cartão muda `pending_choice`; o controle contextual ou D27 confirmam a fase.
-Em `NEXT_TRANSMIT`, o controle da tela solicita uma leitura A39 real antes de
-avançar.
+Em `NEXT_TRANSMIT`, o controle da tela confirma o vetor RNG registrado; A39
+permanece apenas na superfície técnica.
 
 **O que a faixa de RAM mostra?**  Consumo observado de heap em relação ao total
 disponível. `heap` é o livre após a operação; `min_heap` é o menor livre desde

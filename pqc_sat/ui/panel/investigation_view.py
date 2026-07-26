@@ -504,7 +504,7 @@ class InvestigationPresentationMixin:
             "PREPARE": ("payload", "ORGANIZANDO A MENSAGEM E O CRC ESCOLHIDO"),
             "PROTECT": ("aes_gcm", "CRIANDO A SESSÃO E PROTEGENDO A MENSAGEM"),
             "TRANSMIT": ("satellite", "ENVIANDO O PACOTE PELO ENLACE"),
-            "VERIFY": ("channel", "VERIFICANDO QUADRO, TAG E CONTEÚDO"),
+            "VERIFY": ("aes_gcm", "CONFERINDO AES-GCM E CRC DA MENSAGEM"),
             "RETRY": ("retry", "PROTEGENDO E TRANSMITINDO NOVAMENTE"),
         }
         icon_name, operation = descriptions.get(controller.state.value, ("satellite", "EXECUTANDO A ETAPA"))
@@ -545,15 +545,11 @@ class InvestigationPresentationMixin:
         state = controller.state.value
         if state == "PREPARE":
             return "WISDOM VALIDOU O PAYLOAD E O CRC ESCOLHIDO"
-        if state == "TRANSMIT" and controller.selection and cue.key == "bit":
-            selection = controller.selection
-            return (
-                f"A39 REAL: BYTE {selection.byte_index} • BIT {selection.bit_position % 8} • "
-                f"MÁSCARA 0x{selection.bit_mask:02X}"
-            )
+        if state == "TRANSMIT" and cue.key == "event":
+            return "EVENTO SORTEADO E REGISTRADO PELO EXPERIMENTO"
         if state == "VERIFY" and controller.result:
             rows = {label: value for label, value, _color, _icon in self._evidence_rows(controller.result)}
-            label = {"frame": "CRC DO QUADRO", "gcm": "TAG AES-GCM", "app": "CRC DA APLICAÇÃO"}.get(cue.key)
+            label = {"gcm": "PROTEÇÃO AES-GCM", "app": "CRC DA MENSAGEM"}.get(cue.key)
             return f"RESULTADO REAL: {label} = {rows.get(label, '--')}"
         if state == "RETRY" and controller.retry_result:
             raw = controller.retry_result.raw_response
@@ -611,18 +607,12 @@ class InvestigationPresentationMixin:
         ratio = self._timeline_ratio(values, progress)
         packet_x = int(left + (right - left) * ratio)
         packet = pygame.Rect(packet_x - 38, y - 40, 76, 28)
-        selected_bit = None
-        if controller.state.value == "TRANSMIT" and controller.selection:
-            bit_stage = next((cue for cue in timeline.cues if cue.key == "bit"), None)
-            if bit_stage is not None and progress >= bit_stage.start:
-                selected_bit = controller.selection.bit_position % 8
         packet_color = C_TEXT_PRIMARY if self.replay_interaction.dragging else active.color
         draw_packet(
             surface,
             packet,
             color=packet_color,
             t=controller.last_clock_at,
-            selected_bit=selected_bit,
             sealed=controller.state.value != "PREPARE",
         )
         if self.replay_interaction.review_enabled:
@@ -635,6 +625,12 @@ class InvestigationPresentationMixin:
         )
 
     def _draw_next_checkpoint(self, surface, body, controller, t):
+        protect_icon = "classic_key" if controller.selected_key_mode and controller.selected_key_mode.value == "ECDH" else "quantum_atom"
+        protect_subtitle = (
+            "As chaves dos dois lados criam o mesmo segredo. Depois, o AES-GCM protege o pacote."
+            if protect_icon == "classic_key"
+            else "Uma cápsula pós-quântica cria o segredo. Depois, o AES-GCM protege o pacote."
+        )
         details = {
             "NEXT_PREPARE": (
                 "PREPARAR A MENSAGEM",
@@ -644,9 +640,9 @@ class InvestigationPresentationMixin:
             ),
             "NEXT_PROTECT": (
                 "PROTEGER A MENSAGEM",
-                "Vamos criar um segredo e proteger o pacote.",
+                protect_subtitle,
                 C_ACCENT_PURPLE,
-                (("payload", "PACOTE"), ("quantum_atom", "SEGREDO"), ("aes_gcm", "PROTEGIDO")),
+                (("payload", "PACOTE"), (protect_icon, "SEGREDO"), ("aes_gcm", "PROTEGIDO")),
             ),
             "NEXT_TRANSMIT": (
                 "ENVIAR PARA O SATÉLITE",
@@ -656,9 +652,9 @@ class InvestigationPresentationMixin:
             ),
             "NEXT_VERIFY": (
                 "CONFERIR A MENSAGEM",
-                "Vamos checar se ela chegou intacta.",
+                "Vamos conferir a proteção AES-GCM e o CRC da mensagem, quando ele foi adicionado.",
                 C_ACCENT_GREEN,
-                (("packet", "PACOTE"), ("channel", "CHECAGENS"), ("crc32", "RESULTADO")),
+                (("packet", "PACOTE"), ("aes_gcm", "PROTEÇÃO"), ("crc32", "CRC")),
             ),
         }
         title, subtitle, color, icons = details[controller.state.value]
@@ -739,7 +735,7 @@ class InvestigationPresentationMixin:
             crc = pygame.Rect(content.centerx - 98, footer_y, 196, 35)
             pygame.draw.rect(surface, (27, 29, 34), crc, border_radius=5)
             pygame.draw.rect(surface, C_TEXT_DIM, crc, 1, border_radius=5)
-            text = FONT_LABEL.render("CRC DA APLICAÇÃO AUSENTE", True, C_TEXT_DIM)
+            text = FONT_LABEL.render("CRC DA MENSAGEM NÃO ADICIONADO", True, C_TEXT_DIM)
         surface.blit(text, (crc.centerx - text.get_width() // 2, crc.y + 10))
         self._draw_timeline_nodes(surface, visual, timeline, progress, show_status=False)
 
@@ -767,7 +763,27 @@ class InvestigationPresentationMixin:
         active = timeline.active(progress)
         cue_progress = timeline.cue_progress(progress, active)
         content = self._replay_content_rect(visual)
-        center_y = content.centery - 8
+        public_steps = {
+            "ecdh_setup": "CADA LADO CRIA SUA CHAVE",
+            "ecdh_initiator": "AS CHAVES COMEÇAM A FORMAR O MESMO SEGREDO",
+            "ecdh_responder": "OS DOIS LADOS CHEGAM AO MESMO SEGREDO",
+            "keygen": "O RECEPTOR CRIA AS CHAVES PÓS-QUÂNTICAS",
+            "encaps": "A CHAVE PÚBLICA CRIA UMA CÁPSULA E UM SEGREDO",
+            "decaps": "O RECEPTOR ABRE A CÁPSULA E RECRIA O SEGREDO",
+            "kdf": "DO SEGREDO NASCE A CHAVE AES",
+            "nonce": "UM NONCE NOVO EVITA REPETIR A PROTEÇÃO",
+            "aes": "AES-GCM CIFRA A MENSAGEM E CRIA UMA ETIQUETA DE SEGURANÇA",
+        }
+        self._draw_stand_centered(
+            surface,
+            FONT_SMALL,
+            public_steps.get(active.key, active.short_label),
+            active.color,
+            content.centerx,
+            content.y,
+            content.width - 80,
+        )
+        center_y = content.centery + 7
         scale = min(1.15, max(0.72, content.height / 150.0))
         packet_w, packet_h = int(170 * scale), int(50 * scale)
         input_rect = pygame.Rect(content.x + 26, center_y - packet_h // 2, packet_w, packet_h)
@@ -828,24 +844,22 @@ class InvestigationPresentationMixin:
         else:
             local = (path_progress - 0.5) * 2
             packet_center = (int(satellite[0] + (right[0] - satellite[0]) * local), int(satellite[1] + (right[1] - satellite[1]) * local))
-        bit_cue = next(cue for cue in timeline.cues if cue.key == "bit")
-        selected_bit = (
-            controller.selection.bit_position % 8
-            if controller.selection and progress >= bit_cue.start
-            else None
-        )
-        draw_packet(surface, pygame.Rect(packet_center[0] - 47, packet_center[1] - 18, 94, 36), color=active.color, t=t, selected_bit=selected_bit, sealed=True)
-        if 0.56 <= progress <= 0.78:
+        draw_packet(surface, pygame.Rect(packet_center[0] - 47, packet_center[1] - 18, 94, 36), color=active.color, t=t, sealed=True)
+        incident_applied = controller.incident is not None and controller.incident is not IncidentScenario.NORMAL
+        if incident_applied and 0.45 <= progress <= 0.88:
             radius = int(15 + 9 * (0.5 + 0.5 * math.sin(t * 8)))
             pygame.draw.circle(surface, C_ACCENT_RED, packet_center, radius, 2)
-            marker = FONT_LABEL.render("EVENTO OCULTO", True, C_ACCENT_RED)
-            surface.blit(marker, (packet_center[0] - marker.get_width() // 2, packet_center[1] + 25))
+            alert = pygame.Rect(visual.centerx - min(310, visual.width // 3), visual.y + 35, min(620, visual.width - 60), 42)
+            pygame.draw.rect(surface, (48, 8, 19), alert, border_radius=8)
+            pygame.draw.rect(surface, C_ACCENT_RED, alert, 2, border_radius=8)
+            marker = FONT_HEADER.render("ALERTA: ALGO INTERFERIU NA ENTREGA", True, C_ACCENT_RED)
+            surface.blit(marker, (alert.centerx - marker.get_width() // 2, alert.centery - marker.get_height() // 2))
         self._draw_timeline_nodes(surface, visual, timeline, progress)
 
     @staticmethod
     def _indicator_value(present, checked, match):
         if not present:
-            return "NÃO INSTALADO", C_TEXT_DIM
+            return "NÃO ADICIONADO", C_TEXT_DIM
         if not checked:
             return "NÃO VERIFICADO", C_ACCENT_ORANGE
         return ("OK", C_ACCENT_GREEN) if match else ("FALHOU", C_ACCENT_RED)
@@ -853,21 +867,19 @@ class InvestigationPresentationMixin:
     def _evidence_rows(self, result):
         if result is None:
             return (
-                ("CRC DO QUADRO", "AGUARDANDO", C_TEXT_DIM, "channel"),
-                ("TAG AES-GCM", "AGUARDANDO", C_TEXT_DIM, "aes_gcm"),
-                ("CRC DA APLICAÇÃO", "AGUARDANDO", C_TEXT_DIM, "crc32"),
+                ("PROTEÇÃO AES-GCM", "AGUARDANDO", C_TEXT_DIM, "aes_gcm"),
+                ("CRC DA MENSAGEM", "AGUARDANDO", C_TEXT_DIM, "crc32"),
             )
         app_text, app_color = self._indicator_value(result.app_crc_present, result.app_crc_checked, result.app_crc_match)
         return (
-            ("CRC DO QUADRO", "OK" if result.frame_crc_match else "FALHOU", C_ACCENT_GREEN if result.frame_crc_match else C_ACCENT_RED, "channel"),
-            ("TAG AES-GCM", "OK" if result.aead_match else "FALHOU", C_ACCENT_GREEN if result.aead_match else C_ACCENT_RED, "aes_gcm"),
-            ("CRC DA APLICAÇÃO", app_text, app_color, "crc32" if result.app_crc_present else "no_crc"),
+            ("PROTEÇÃO AES-GCM", "OK" if result.aead_match else "FALHOU", C_ACCENT_GREEN if result.aead_match else C_ACCENT_RED, "aes_gcm"),
+            ("CRC DA MENSAGEM", app_text, app_color, "crc32" if result.app_crc_present else "no_crc"),
         )
 
-    def _draw_evidence(self, surface, body, result, *, y, reveal_count=3, t=0.0, height=82):
+    def _draw_evidence(self, surface, body, result, *, y, reveal_count=2, t=0.0, height=82):
         rows = self._evidence_rows(result)
         gap = 14
-        metric_w = (body.width - 50 - gap * 2) // 3
+        metric_w = (body.width - 50 - gap * (len(rows) - 1)) // len(rows)
         for index, (label, value, color, icon) in enumerate(rows):
             shown = index < reveal_count
             card = pygame.Rect(body.x + 25 + index * (metric_w + gap), y, metric_w, height)
@@ -887,7 +899,7 @@ class InvestigationPresentationMixin:
             surface,
             body,
             controller,
-            title="VERIFICAR EM TRÊS CAMADAS",
+            title="CONFERIR A MENSAGEM",
         )
         visual = self._replay_rect(body)
         if result is None:
@@ -906,35 +918,35 @@ class InvestigationPresentationMixin:
         self._draw_timeline_nodes(surface, visual, timeline, progress)
 
     def _draw_game_diagnose(self, surface, body, controller, t):
-        self._draw_stand_centered(surface, FONT_TITLE, "LEIA AS EVIDÊNCIAS: ONDE A MENSAGEM MUDOU?", C_TEXT_PRIMARY, body.centerx, body.y, body.width - 50)
+        self._draw_stand_centered(surface, FONT_TITLE, "O QUE PODE TER ACONTECIDO?", C_TEXT_PRIMARY, body.centerx, body.y, body.width - 50)
         self._draw_evidence(surface, body, controller.result, y=body.y + 35, t=t, height=72)
         choices = (
             ChoiceVisual(
-                "diagnosis:CHANNEL",
-                "NO CANAL",
-                "A mensagem pode ter mudado durante a viagem.",
+                "diagnosis:RADIATION",
+                "RADIAÇÃO ESPACIAL",
+                "Uma falha acidental pode ter alterado a mensagem.",
                 "",
                 "",
                 C_ACCENT_CYAN,
-                "channel",
+                "memory",
             ),
             ChoiceVisual(
-                "diagnosis:AUTH",
-                "PACOTE ALTERADO",
-                "Alguém pode ter alterado o pacote.",
+                "diagnosis:INTRUSION",
+                "TENTATIVA DE INVASÃO",
+                "Alguém pode ter tentado alterar o pacote.",
                 "",
                 "",
                 C_ACCENT_RED,
                 "tamper",
             ),
             ChoiceVisual(
-                "diagnosis:MEMORY",
-                "NO RECEPTOR",
-                "A mensagem pode ter mudado dentro do receptor.",
+                "diagnosis:NORMAL",
+                "NENHUM PROBLEMA",
+                "A mensagem pode ter chegado intacta.",
                 "",
                 "",
-                C_ACCENT_PURPLE,
-                "memory",
+                C_ACCENT_GREEN,
+                "accept",
             ),
         )
         choice_body = pygame.Rect(body.x, body.y + 112, body.width, body.height - 112)
@@ -942,7 +954,7 @@ class InvestigationPresentationMixin:
             surface,
             choice_body,
             controller,
-            "Onde a mensagem pode ter mudado?",
+            "Escolha a hipótese mais provável",
             choices,
             t,
             show_card_descriptions=True,
@@ -1027,10 +1039,10 @@ class InvestigationPresentationMixin:
     @staticmethod
     def _incident_public_text(incident):
         return {
-            IncidentScenario.CHANNEL_BITFLIP: ("CORRUPÇÃO NO CANAL", "O quadro mudou sem atualizar o CRC transmitido.", "channel"),
-            IncidentScenario.TAMPER: ("ADULTERAÇÃO", "O CRC sem chave foi recalculado, mas a tag GCM permaneceu inválida.", "tamper"),
-            IncidentScenario.RX_MEMORY: ("CORRUPÇÃO NA MEMÓRIA", "O plaintext mudou depois que a tag GCM já havia sido validada.", "memory"),
-            IncidentScenario.NORMAL: ("CONTROLE NORMAL", "Nenhuma falha foi aplicada.", "accept"),
+            IncidentScenario.CHANNEL_BITFLIP: ("RADIAÇÃO SIMULADA", "Um bit foi alterado pelo experimento.", "channel"),
+            IncidentScenario.TAMPER: ("TENTATIVA DE INVASÃO SIMULADA", "O pacote protegido foi adulterado e o AES-GCM rejeitou a mudança.", "tamper"),
+            IncidentScenario.RX_MEMORY: ("RADIAÇÃO SIMULADA", "Um bit da mensagem recebida mudou depois da verificação AES-GCM.", "memory"),
+            IncidentScenario.NORMAL: ("ENVIO NORMAL", "Nenhuma falha foi aplicada.", "accept"),
         }.get(incident, ("INCIDENTE INDISPONÍVEL", "", "bit"))
 
     def _draw_mission_configuration(self, surface, body, controller, *, y):
@@ -1038,7 +1050,7 @@ class InvestigationPresentationMixin:
             ("MISSÃO", controller.selected_mission.title if controller.selected_mission else "--", C_ACCENT_CYAN),
             ("CPU", f"{controller.selected_profile_mhz} MHz" if controller.selected_profile_mhz else "--", C_ACCENT_BLUE),
             ("ABORDAGEM", _approach_label(controller.selected_key_mode), C_ACCENT_PURPLE),
-            ("CRC APP", "COM CRC32" if controller.selected_guard is GuardMode.CRC32 else "SEM CRC32", C_ACCENT_GREEN),
+            ("CRC", "COM CRC32" if controller.selected_guard is GuardMode.CRC32 else "SEM CRC32", C_ACCENT_GREEN),
         )
         gap = 8
         chip_w = (body.width - 46 - gap * 3) // 4
@@ -1072,8 +1084,12 @@ class InvestigationPresentationMixin:
             return
 
         incident_title, incident_detail, incident_icon = self._incident_public_text(controller.incident)
-        verdict = "DIAGNÓSTICO CONSISTENTE" if controller.diagnosis_correct else "HIPÓTESE REVISADA PELAS EVIDÊNCIAS"
-        verdict_color = C_ACCENT_GREEN if controller.diagnosis_correct else C_ACCENT_ORANGE
+        if not controller.diagnosis_evidence_sufficient:
+            verdict = "NÃO HAVIA EVIDÊNCIA SUFICIENTE"
+            verdict_color = C_ACCENT_ORANGE
+        else:
+            verdict = "DIAGNÓSTICO CONSISTENTE" if controller.diagnosis_correct else "HIPÓTESE REVISADA PELAS EVIDÊNCIAS"
+            verdict_color = C_ACCENT_GREEN if controller.diagnosis_correct else C_ACCENT_ORANGE
         self._draw_stand_centered(surface, FONT_TITLE, verdict, verdict_color, body.centerx, body.y, body.width - 50)
         self._draw_stand_centered(
             surface,
@@ -1106,9 +1122,9 @@ class InvestigationPresentationMixin:
 
         if controller.incident is IncidentScenario.RX_MEMORY:
             counterfactual = (
-                "COM CRC32, ESTA CORRUPÇÃO DE MEMÓRIA SERIA DETECTADA."
+                "COM CRC32, ESTA ALTERAÇÃO DA MENSAGEM SERIA DETECTADA."
                 if controller.selected_guard is GuardMode.NONE
-                else "SEM CRC32, ESTA CORRUPÇÃO DE MEMÓRIA SERIA SILENCIOSA."
+                else "SEM CRC32, ESTA ALTERAÇÃO DA MENSAGEM SERIA SILENCIOSA."
             )
         else:
             counterfactual = "CRC32 NÃO AUTENTICA: A TAG AES-GCM CONTINUA ESSENCIAL."

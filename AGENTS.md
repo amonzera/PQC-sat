@@ -144,7 +144,8 @@ implementar.
   2026-07-23, que observou `button=1`, `pot=1469` e uptime fresco; repouso D27,
   partida integral e aceite físico longo continuam pendentes.
 - jogo didático `STAGED_V1` implementado em software com 17 estados: toque em
-  cartão apenas seleciona, D27 ou faixa verde confirmam cada transição, A39 seleciona o bit, resposta
+  cartão apenas seleciona, D27 ou faixa verde confirmam cada transição, RNG
+  registrado seleciona incidente e bit, resposta
   serial e animação apenas liberam a confirmação, sem timeout ou reset público;
 - primeiro handshake fecha automaticamente a busca e mostra a abertura com
   Terra/CubeSat, chamada única e botão `INICIAR MISSÃO`; clique ou D27 abrem
@@ -161,8 +162,8 @@ implementar.
   `GAME_VERIFY`, `GAME_RETRY`, `GAME_END` e `GAME_ABORT` implementado no
   firmware, preservando `INVESTIGATE` e o fluxo legado; `CLASSIC_CRC32` permite
   escolher modo de chave e CRC da aplicação independentemente;
-- validação host atual passa 122 testes e preserva a matriz de 32 casos, soak offline
-  de 50 partidas, 76 capturas, vídeo rotulado e benchmark de 6,312 ms e 8,822
+- validação host atual passa 124 testes e preserva a matriz de 32 casos, soak offline
+  de 50 partidas, 76 capturas, vídeo rotulado e benchmark de 9,960 ms e 15,730
   ms, abaixo de 16,667 ms
   em ambas as resoluções; após build FAIR, o candidato corrigido usa
   59.020 B de RAM e 1.005.497 B de flash, com binário de 1.012.080 B e
@@ -383,10 +384,9 @@ compilação.
 
 1. Registrar o D27 em repouso (`button=0`) e percorrer uma partida visual
    completa, inclusive retry, somente com D27.
-2. Percorrer outra partida completa pela faixa verde, validar
-   `ANALOG POT` em `NEXT_TRANSMIT` e exercitar `GAME_ABORT`.
-3. Variar o A39 e executar a matriz física curta de modos, guardiões,
-   incidentes e perfis.
+2. Percorrer outra partida completa pela faixa verde e exercitar `GAME_ABORT`.
+3. Executar a matriz física curta de modos, guardiões e incidentes; A39 fica
+   restrito ao diagnóstico técnico.
 4. Executar pelo operador a bateria FAIR v2 e entregar o JSON para análise.
 5. Provar permanência sem avanço em cada estado e ensaiar no monitor definitivo.
 6. Executar pelo operador o gate longo descrito em `docs/stand/RUNBOOK.md`.

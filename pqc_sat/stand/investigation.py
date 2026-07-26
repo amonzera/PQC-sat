@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import math
 import random
+import secrets
 import time
 
 from pqc_sat.stand.model import (
@@ -25,7 +26,7 @@ from pqc_sat.stand.model import (
     StandError,
     StandProtocolError,
     _required_int,
-    fault_selection_from_pot,
+    fault_selection_from_rng,
     parse_button_press_event,
     parse_game_end_response,
     parse_game_result_response,
@@ -48,12 +49,12 @@ class InvestigationController:
         for key_mode in FAIR_KEY_MODES
         for guard in GuardMode
     )
-    DIAGNOSES = ("CHANNEL", "AUTH", "MEMORY")
+    DIAGNOSES = ("RADIATION", "INTRUSION", "NORMAL")
     RESPONSES = tuple(decision.value for decision in OperationalDecision)
     _EXPECTED_DIAGNOSIS = {
-        IncidentScenario.CHANNEL_BITFLIP: "CHANNEL",
-        IncidentScenario.TAMPER: "AUTH",
-        IncidentScenario.RX_MEMORY: "MEMORY",
+        IncidentScenario.CHANNEL_BITFLIP: "RADIATION",
+        IncidentScenario.TAMPER: "INTRUSION",
+        IncidentScenario.RX_MEMORY: "RADIATION",
         IncidentScenario.NORMAL: "NORMAL",
     }
     _STAGE_BY_STATE = {
@@ -91,6 +92,7 @@ class InvestigationController:
         mode: str,
         logger: StandSessionLogger | None = None,
         now: float | None = None,
+        experiment_seed: int | None = None,
     ) -> None:
         if mode not in {"hardware", "simulated"}:
             raise ValueError("mode deve ser hardware ou simulated")
@@ -149,6 +151,7 @@ class InvestigationController:
         self.end_receipt: GameEndReceipt | None = None
         self.selected_diagnosis = ""
         self.diagnosis_correct: bool | None = None
+        self.diagnosis_evidence_sufficient = True
         self.operational_decision: OperationalDecision | None = None
         self.end_decision: OperationalDecision | None = None
         self.explanation_mode = "quick"
@@ -157,10 +160,17 @@ class InvestigationController:
         self.animation_deadline: float | None = None
         self.animation_complete = False
         self.forced_incident: IncidentScenario | None = None
-        incident_order = list(config.incident_sequence)
-        random.Random(config.incident_seed).shuffle(incident_order)
-        self._incident_order = tuple(IncidentScenario(value) for value in incident_order)
-        self._log("controller_ready", state=self.state.value, protocol=self.protocol_capability)
+        self.experiment_seed = int(secrets.randbits(64) if experiment_seed is None else experiment_seed)
+        self._experiment_rng = random.Random(self.experiment_seed)
+        self.incident_roll: float | None = None
+        self.cause_roll: float | None = None
+        self._log(
+            "controller_ready",
+            state=self.state.value,
+            protocol=self.protocol_capability,
+            experiment_seed=self.experiment_seed,
+            incident_probability=self.config.incident_probability,
+        )
 
     @property
     def ready(self) -> bool:
@@ -662,7 +672,7 @@ class InvestigationController:
         return True
 
     def handle_screen_confirmation(self, *, now: float | None = None) -> bool:
-        """Confirm with the green control, sampling A39 first when required."""
+        """Confirm with the green control; the public fault vector comes from RNG."""
 
         now = time.monotonic() if now is None else now
         self.last_clock_at = now
@@ -673,9 +683,6 @@ class InvestigationController:
         if not allowed:
             self._ignore_input("screen", reason, now=now, action="confirm")
             return False
-        if self.mode == "hardware" and self.state is InvestigationState.NEXT_TRANSMIT:
-            self.blocked_choice_message = "LENDO O A39 REAL NA WISDOM"
-            return self._send("ANALOG POT", "screen_pot", now=now)
         return self.handle_button(
             now=now,
             origin="screen",
@@ -724,8 +731,6 @@ class InvestigationController:
         }:
             return True, ""
         if self.state is InvestigationState.NEXT_TRANSMIT:
-            if pot_value is None and self.mode == "hardware" and not allow_screen_pot_request:
-                return False, "BUTTON_PING sem leitura A39"
             return True, ""
         if self.state is InvestigationState.DEBRIEF:
             return (
@@ -828,14 +833,16 @@ class InvestigationController:
             return True
         if self.state is InvestigationState.NEXT_TRANSMIT:
             assert self.selected_mission is not None
-            selected_pot = self.live_pot_value if pot_value is None else pot_value
-            self.live_pot_value = selected_pot
-            self.selection = fault_selection_from_pot(
-                selected_pot,
+            self.selection = fault_selection_from_rng(
+                self._experiment_rng,
                 len(self.selected_mission.payload_bytes),
-                self.config,
             )
-            self._log("fault_selection_confirmed", button_seq=self.button_sequence, **asdict(self.selection))
+            self._log(
+                "fault_selection_confirmed",
+                button_seq=self.button_sequence,
+                applied=self.incident is not IncidentScenario.NORMAL,
+                **asdict(self.selection),
+            )
             if self._send(
                 f"GAME_TRANSMIT {self.game_id} {self.selection.byte_index} 0x{self.selection.bit_mask:02X}",
                 "game_transmit",
@@ -864,11 +871,16 @@ class InvestigationController:
             assert self.incident is not None
             expected = self._EXPECTED_DIAGNOSIS[self.incident]
             self.diagnosis_correct = self.selected_diagnosis == expected
+            self.diagnosis_evidence_sufficient = not (
+                self.incident is IncidentScenario.RX_MEMORY
+                and self.selected_guard is GuardMode.NONE
+            )
             self._log(
                 "diagnosis_confirmed",
                 selected=self.selected_diagnosis,
                 expected=expected,
                 correct=self.diagnosis_correct,
+                evidence_sufficient=self.diagnosis_evidence_sufficient,
                 button_seq=self.button_sequence,
             )
             self._advance(InvestigationState.SELECT_RESPONSE, reason="diagnosis_confirmed", now=now)
@@ -941,14 +953,37 @@ class InvestigationController:
         assert self.selected_mission is not None
         assert self.selected_key_mode is not None
         assert self.selected_guard is not None
-        self.incident = self.forced_incident or self._incident_order[(self.cycle_index - 1) % len(self._incident_order)]
+        if self.forced_incident is not None:
+            self.incident = self.forced_incident
+            self.incident_roll = None
+            self.cause_roll = None
+        else:
+            self.incident_roll = self._experiment_rng.random()
+            if self.incident_roll >= self.config.incident_probability:
+                self.incident = IncidentScenario.NORMAL
+                self.cause_roll = None
+            else:
+                self.cause_roll = self._experiment_rng.random()
+                self.incident = (
+                    IncidentScenario.RX_MEMORY
+                    if self.cause_roll < self.config.radiation_weight
+                    else IncidentScenario.TAMPER
+                )
         self.game_id = f"G{self.cycle_index:06d}"
         self.incident_id = f"{self.game_id}-{self.incident.value}"
         command = (
             f"GAME_BEGIN {self.game_id} {self.selected_profile} {self.selected_key_mode.value} "
             f"{self.selected_guard.value} {self.incident.value} {self.selected_mission.payload_hex}"
         )
-        self._log("incident_armed", game_id=self.game_id, incident=self.incident.value)
+        self._log(
+            "incident_armed",
+            game_id=self.game_id,
+            incident=self.incident.value,
+            incident_roll=self.incident_roll,
+            incident_probability=self.config.incident_probability,
+            cause_roll=self.cause_roll,
+            source="FORCED" if self.forced_incident is not None else "RNG",
+        )
         if self._send(command, "game_begin", now=now):
             self._reset_animation()
             self._advance(InvestigationState.PREPARE, reason="next_prepare_confirmed", now=now)
@@ -964,6 +999,7 @@ class InvestigationController:
             incident=self.incident.value if self.incident else None,
             diagnosis=self.selected_diagnosis,
             diagnosis_correct=self.diagnosis_correct,
+            diagnosis_evidence_sufficient=self.diagnosis_evidence_sufficient,
             decision=self.operational_decision.value if self.operational_decision else None,
             result=asdict(self.result) if self.result else None,
             retry_result=asdict(self.retry_result) if self.retry_result else None,
@@ -1094,6 +1130,9 @@ class InvestigationController:
         self.end_receipt = None
         self.selected_diagnosis = ""
         self.diagnosis_correct = None
+        self.diagnosis_evidence_sufficient = True
+        self.incident_roll = None
+        self.cause_roll = None
         self.operational_decision = None
         self.end_decision = None
         self.explanation_mode = "quick"

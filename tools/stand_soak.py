@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 
 from pqc_sat.testing.fixture import FixtureSerialClient  # noqa: E402
 from pqc_sat.stand.investigation import InvestigationController  # noqa: E402
-from pqc_sat.stand.model import InvestigationState, StandConfig  # noqa: E402
+from pqc_sat.stand.model import IncidentScenario, InvestigationState, StandConfig  # noqa: E402
 from pqc_sat.stand.settings import DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH  # noqa: E402
 
 
@@ -62,13 +62,13 @@ def main(argv=None) -> int:
     client = FixtureSerialClient(args.fixture, config, latency_seconds=0)
     sent_commands: list[str] = []
     button_actions = 0
-    pot_changes = 0
+    incident_counts = {incident.value: 0 for incident in IncidentScenario}
 
     def send(command, *, timeout=None):
         sent_commands.append(command)
         client.send(command, timeout=timeout)
 
-    controller = InvestigationController(config, send, mode="simulated", now=0)
+    controller = InvestigationController(config, send, mode="simulated", now=0, experiment_seed=42)
     client.start()
     synthetic_now = 0.0
     started = time.monotonic()
@@ -95,9 +95,6 @@ def main(argv=None) -> int:
         if controller.input_ready(synthetic_now) and controller.pending is None:
             state = controller.state
             if state is InvestigationState.ATTRACT:
-                value = (controller.completed_cycles * 977) % (config.pot_maximum + 1)
-                client.set_pot(value)
-                pot_changes += 1
                 press()
             elif state is InvestigationState.SELECT_MISSION:
                 if not controller.pending_choice:
@@ -132,13 +129,10 @@ def main(argv=None) -> int:
             }:
                 press()
             elif state is InvestigationState.NEXT_TRANSMIT:
-                value = (client.pot_value + 613) % (config.pot_maximum + 1)
-                client.set_pot(value)
-                controller.set_simulated_pot(value)
-                pot_changes += 1
                 press()
             elif state is InvestigationState.DIAGNOSE:
                 if not controller.pending_choice:
+                    incident_counts[controller.incident.value] += 1
                     expected = controller._EXPECTED_DIAGNOSIS[controller.incident]
                     controller.handle_action(f"diagnosis:{expected}", now=synthetic_now)
                 else:
@@ -174,7 +168,7 @@ def main(argv=None) -> int:
         "cycles_requested": args.cycles,
         "cycles_completed": controller.completed_cycles,
         "button_actions": button_actions,
-        "pot_changes": pot_changes,
+        "incident_counts": incident_counts,
         "commands_total": len(sent_commands),
         "game_commands": len(game_commands),
         "game_begin_commands": sum(command.startswith("GAME_BEGIN ") for command in game_commands),
@@ -188,7 +182,7 @@ def main(argv=None) -> int:
         "fixture": report_path(args.fixture),
         "limitations": [
             "Ferramenta exclusiva de teste; não é um modo executável pela aplicação de produção.",
-            "Não valida USB, D27, A39, heap real nem continuidade física.",
+            "Não valida USB, D27, heap real nem continuidade física.",
         ],
     }
     report["rss_growth_bytes"] = max(0, report["rss_end_bytes"] - report["rss_start_bytes"])

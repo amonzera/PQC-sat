@@ -1,27 +1,32 @@
 {
   "schema_version": "pqc-sat-stand-soak-v3",
-  "created_at": "2026-07-23T03:42:49.885615+00:00",
+  "created_at": "2026-07-26T04:23:52.188401+00:00",
   "mode": "test-only-deterministic-fixture",
   "flow": "staged_game",
   "result": "PASS",
   "cycles_requested": 50,
   "cycles_completed": 50,
-  "button_actions": 625,
-  "pot_changes": 100,
+  "button_actions": 775,
+  "incident_counts": {
+    "NORMAL": 12,
+    "CHANNEL_BITFLIP": 0,
+    "TAMPER": 14,
+    "RX_MEMORY": 24
+  },
   "commands_total": 275,
   "game_commands": 275,
   "game_begin_commands": 50,
   "game_retry_commands": 25,
   "rejected_events": 0,
   "ignored_inputs": 0,
-  "rss_start_bytes": 23875584,
-  "rss_end_bytes": 23875584,
-  "wall_elapsed_seconds": 0.087,
-  "synthetic_elapsed_seconds": 24.0,
+  "rss_start_bytes": 24371200,
+  "rss_end_bytes": 24371200,
+  "wall_elapsed_seconds": 0.109,
+  "synthetic_elapsed_seconds": 26.0,
   "fixture": "fixtures/stand/official_20260702.json",
   "limitations": [
     "Ferramenta exclusiva de teste; não é um modo executável pela aplicação de produção.",
-    "Não valida USB, D27, A39, heap real nem continuidade física."
+    "Não valida USB, D27, heap real nem continuidade física."
   ],
   "rss_growth_bytes": 0
 }
