@@ -226,6 +226,9 @@ Para a sequência completa de bancada, use
 - `GAME_VERIFY` apaga chaves e segredos; `GAME_RETRY` usa o mesmo payload e
   cria chave/nonce novos sem injetar falha. Respostas expõem somente métricas e
   fingerprints curtas.
+- `GAME_END ... ACCEPT` também encerra uma sessão cujo pacote foi rejeitado.
+  Nesse caso, `final_result` preserva `FRAME_REJECT`, `AUTH_REJECT` ou
+  `APP_REJECT`; a decisão errada nunca é convertida em `DELIVERED`.
 - `INVESTIGATE scenario incident payload_hex index mask incident_id` executa
   mutação single-bit em canal ou memória e retorna as três verificações do
   diagnóstico em uma resposta legada. O frame de entrada suporta o payload
@@ -245,13 +248,14 @@ Para a sequência completa de bancada, use
 ## Manutenção
 
 O MVP original do firmware está concluído. A extensão `STAGED_V1/FAIR_V1`
-atual com `SESSION_BENCH` compila em build limpo com 59.020 B de RAM,
-1.005.497 B de flash e binário de 1.012.080 B, SHA-256
-`9eba850f2ea493edbdb89d7103f85589456277426f50136a2e337f8dac32a18d`.
-Esta revisão corrige o campo `experiment` duplicado em `GAME_PROTECT` depois de
-ECDH/ML-KEM passarem no segundo smoke FAIR. O binário foi gravado pelo
-manifesto `20260723T155737Z` e o diagnóstico `20260723T160223Z` passou os 27
-registros curtos; baterias e aceite físico longo continuam pendentes. Novas
+local da Iteração 10 com `SESSION_BENCH` compila em build limpo com 59.020 B de
+RAM, 1.005.369 B de flash e binário de 1.011.952 B, SHA-256
+`c338c7f10d4e9e3d69169154d8ce00fa7d3653d18581bd1a99592aa9ef99f05f`.
+Essa revisão permite registrar `GAME_END ... ACCEPT` como decisão errada sem
+alterar o resultado verificado. Ela ainda não foi gravada na Wisdom. A revisão
+anterior `9eba850f…32a18d`, gravada pelo manifesto `20260723T155737Z`, continua
+sendo a última validada fisicamente; o diagnóstico `20260723T160223Z` passou os
+27 registros curtos. Baterias e aceite físico longo continuam pendentes. Novas
 mudanças devem
 preservar `MISSION`, `INVESTIGATE`, todos os `GAME_*`, `PQC_KAT`, `PQC_FAULT`,
 `PQC_BENCH 100`, `FAULT CRC32` e `BUTTON_PING` como regressão, sem expor chave

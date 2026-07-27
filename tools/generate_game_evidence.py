@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,33 +66,50 @@ def main(argv=None) -> int:
         print(f"ffmpeg não encontrado; capturas preservadas em {args.output_dir}", file=sys.stderr)
         return 2
     args.video.parent.mkdir(parents=True, exist_ok=True)
-    pattern = str(args.output_dir / f"*_{args.width}x{args.height}.png")
-    subprocess.run(
-        [
-            ffmpeg,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-framerate",
-            "1/4",
-            "-pattern_type",
-            "glob",
-            "-i",
-            pattern,
-            "-vf",
-            "fps=5,format=yuv420p",
-            "-c:v",
-            "mpeg4",
-            "-q:v",
-            "4",
-            "-movflags",
-            "+faststart",
-            str(args.video),
-        ],
-        cwd=ROOT,
-        check=True,
-    )
+    frames = sorted(args.output_dir.glob(f"*_{args.width}x{args.height}.png"))
+    for prefix in ("debrief", "debrief_failure"):
+        frames.extend(
+            args.replay_output_dir / f"{prefix}_{position}_{args.width}x{args.height}.png"
+            for position in ("inicio", "meio", "fim")
+        )
+    missing = [path for path in frames if not path.exists()]
+    if missing:
+        raise RuntimeError(f"quadros de evidência ausentes: {missing}")
+    with tempfile.NamedTemporaryFile("w", suffix=".ffconcat", encoding="utf-8") as manifest:
+        manifest.write("ffconcat version 1.0\n")
+        for frame in frames:
+            escaped = str(frame.resolve()).replace("'", "'\\''")
+            manifest.write(f"file '{escaped}'\n")
+            manifest.write("duration 4\n")
+        escaped_last = str(frames[-1].resolve()).replace("'", "'\\''")
+        manifest.write(f"file '{escaped_last}'\n")
+        manifest.flush()
+        subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                manifest.name,
+                "-vf",
+                "fps=5,format=yuv420p",
+                "-c:v",
+                "mpeg4",
+                "-q:v",
+                "4",
+                "-movflags",
+                "+faststart",
+                str(args.video),
+            ],
+            cwd=ROOT,
+            check=True,
+        )
     print(f"Evidência de fixture de teste: {args.video}")
     return 0
 

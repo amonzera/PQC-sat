@@ -87,15 +87,16 @@ Esses padrões localizam uma camada provável. Não atribuem causalidade física
 ou intenção: radiação, ataque e defeito de software continuam indistinguíveis
 sem evidência externa adicional.
 
-No jogo público, o sorteio usa 30% `NORMAL`, 35% `TAMPER` e 35% `RX_MEMORY`.
-Os dois últimos recebem os rótulos didáticos “tentativa de invasão simulada” e
-“radiação simulada”. `CHANNEL_BITFLIP` e o CRC do quadro permanecem apenas na
-instrumentação técnica. A tela expõe um único CRC opcional da mensagem:
+No jogo público, o sorteio sempre aplica um evento: 50% `TAMPER` e 50%
+`RX_MEMORY`, rotulados didaticamente como “tentativa de invasão simulada” e
+“radiação simulada”. `NORMAL`, `CHANNEL_BITFLIP` e o CRC do quadro permanecem
+apenas na instrumentação técnica. A tela expõe um único CRC opcional da
+mensagem:
 
 - `TAMPER`: AES-GCM falha; o CRC não é verificado;
 - `RX_MEMORY/CRC32`: AES-GCM coincide e o CRC da mensagem falha;
 - `RX_MEMORY/NONE`: AES-GCM coincide, não há CRC e a corrupção é silenciosa;
-- `NORMAL`: todas as verificações aplicáveis coincidem.
+- `NORMAL` técnico: todas as verificações aplicáveis coincidem.
 
 O alerta durante a animação indica que o harness aplicou uma injeção simulada;
 ele não representa um detector embarcado. O diagnóstico é uma hipótese sobre

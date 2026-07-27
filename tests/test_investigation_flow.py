@@ -209,9 +209,10 @@ class StagedConfigurationTests(unittest.TestCase):
         self.assertEqual(set(dict(config.checkpoint_animation_ms)), {"PREPARE", "PROTECT", "TRANSMIT", "VERIFY", "RETRY", "DEBRIEF"})
         self.assertEqual(
             {stage: dict(config.checkpoint_animation_ms)[stage] for stage in ("PREPARE", "PROTECT", "TRANSMIT", "VERIFY")},
-            {"PREPARE": 2750, "PROTECT": 5250, "TRANSMIT": 8000, "VERIFY": 4500},
+            {"PREPARE": 2750, "PROTECT": 5250, "TRANSMIT": 9000, "VERIFY": 4500},
         )
-        self.assertEqual(config.incident_probability, 0.70)
+        self.assertEqual(dict(config.checkpoint_animation_ms)["DEBRIEF"], 6000)
+        self.assertEqual(config.incident_probability, 1.0)
         self.assertEqual((config.radiation_weight, config.intrusion_weight), (0.50, 0.50))
 
     def test_controlled_battery_covers_four_protections_four_incidents_two_profiles(self):
@@ -608,14 +609,36 @@ class StagedControllerTests(unittest.TestCase):
         self.assertEqual(started, ["PREPARE", "PROTECT", "TRANSMIT", "VERIFY", "RETRY", "END"])
         self.assertEqual(completed, started)
 
-    def test_cryptographically_rejected_packet_cannot_be_selected_for_acceptance(self):
+    def test_cryptographically_rejected_packet_can_be_accepted_as_a_wrong_decision(self):
         harness = StagedHarness(incident="TAMPER", guard="NONE")
         controller = harness.reach_response()
-        harness.tick()
-        self.assertFalse(controller.handle_action("response:ACCEPT", now=harness.now))
-        self.assertEqual(controller.state, InvestigationState.SELECT_RESPONSE)
-        self.assertFalse(controller.pending_choice)
-        self.assertIn("NÃO PODE SER ACEITO", controller.blocked_choice_message)
+        harness.choose("response:ACCEPT")
+        self.assertEqual(controller.state, InvestigationState.DEBRIEF)
+        self.assertIsNotNone(controller.end_receipt)
+        self.assertEqual(controller.end_receipt.final_result, "AUTH_REJECT")
+        self.assertFalse(controller.operational_decision_correct)
+        self.assertFalse(controller.mission_success)
+        completed = [
+            record
+            for record in harness.logger.records
+            if record["event"] == "stage_completed" and record["stage"] == "END"
+        ]
+        self.assertEqual(completed[-1]["decision_correct"], False)
+        self.assertEqual(completed[-1]["mission_success"], False)
+
+    def test_mission_success_requires_both_correct_diagnosis_and_safe_action(self):
+        harness = StagedHarness()
+        controller = harness.controller
+        for diagnosis_correct, decision, expected in (
+            (True, OperationalDecision.RETRY, True),
+            (True, OperationalDecision.SAFE_MODE, True),
+            (True, OperationalDecision.ACCEPT, False),
+            (False, OperationalDecision.RETRY, False),
+        ):
+            with self.subTest(diagnosis_correct=diagnosis_correct, decision=decision):
+                controller.diagnosis_correct = diagnosis_correct
+                controller.operational_decision = decision
+                self.assertEqual(controller.mission_success, expected)
 
     def test_no_inactivity_or_summary_timer_changes_the_screen(self):
         harness = StagedHarness()
@@ -625,11 +648,10 @@ class StagedControllerTests(unittest.TestCase):
         self.assertEqual(harness.controller.state, state)
         self.assertIsNone(harness.controller.auto_return_remaining())
 
-    def test_public_incident_draw_uses_70_percent_and_equal_cause_weights(self):
+    def test_public_incident_draw_always_selects_one_of_two_equal_weighted_causes(self):
         cases = (
-            ((0.70,), IncidentScenario.NORMAL),
-            ((0.69, 0.49), IncidentScenario.RX_MEMORY),
-            ((0.69, 0.50), IncidentScenario.TAMPER),
+            ((0.99, 0.49), IncidentScenario.RX_MEMORY),
+            ((0.99, 0.50), IncidentScenario.TAMPER),
         )
         for rolls, expected in cases:
             with self.subTest(rolls=rolls):
@@ -943,6 +965,96 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
         self.assertIn("chaves públicas", captured["key:ECDH"][1])
         self.assertIn("cápsula", captured["key:MLKEM"][1])
 
+    def test_response_cards_keep_accept_available_and_hide_raw_verification_result(self):
+        harness = StagedHarness(incident="TAMPER", guard="NONE")
+        controller = harness.reach_response()
+        panel = GamePanel.for_test(controller)
+        centered_text = []
+        captured = {}
+
+        def capture_cards(_surface, _body, _controller, _title, choices, _t, **_kwargs):
+            captured.update({choice.action: choice for choice in choices})
+
+        def capture_text(_surface, _font, text, *_args, **_kwargs):
+            centered_text.append(text)
+
+        with (
+            patch.object(panel, "_draw_choice_cards", side_effect=capture_cards),
+            patch.object(panel, "_draw_stand_centered", side_effect=capture_text),
+        ):
+            panel._draw_game_response(
+                pygame.Surface((1366, 768)),
+                pygame.Rect(40, 70, 1280, 660),
+                controller,
+                harness.now,
+            )
+        self.assertEqual(captured["response:ACCEPT"].disabled_reason, "")
+        self.assertFalse(any("VERIFICAÇÃO REAL" in text or "AUTH_REJECT" in text for text in centered_text))
+
+    def test_debrief_reveals_rows_incrementally_without_a_review_timeline(self):
+        controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)
+        prepare_investigation_capture_state(controller, InvestigationState.DEBRIEF)
+        controller.state = InvestigationState.DEBRIEF
+        controller.animation_complete = True
+        panel = GamePanel.for_test(controller)
+        panel.replay_interaction.sync("DEBRIEF", 1.0, True)
+        panel.replay_interaction.display_progress = 0.5
+
+        with (
+            patch.object(panel, "_draw_report_row") as row,
+            patch.object(panel, "_draw_happy_satellite") as happy,
+            patch.object(panel, "_draw_satellite_explosion") as explosion,
+            patch.object(panel, "_draw_timeline_nodes") as timeline,
+        ):
+            panel._draw_game_debrief(
+                pygame.Surface((1366, 768)),
+                pygame.Rect(40, 70, 1280, 660),
+                controller,
+                2.0,
+            )
+        self.assertEqual(row.call_count, 3)
+        happy.assert_not_called()
+        explosion.assert_not_called()
+        timeline.assert_not_called()
+        self.assertEqual(panel.replay_interaction.track_rect.width, 0)
+
+    def test_debrief_ends_with_happy_satellite_only_when_both_choices_are_correct(self):
+        body = pygame.Rect(40, 70, 1280, 660)
+        frame = pygame.Surface((1366, 768))
+        success = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)
+        prepare_investigation_capture_state(success, InvestigationState.DEBRIEF)
+        success.state = InvestigationState.DEBRIEF
+        success.animation_complete = True
+        success_panel = GamePanel.for_test(success)
+        success_panel.replay_interaction.sync("DEBRIEF", 1.0, True)
+        with (
+            patch.object(success_panel, "_draw_happy_satellite") as happy,
+            patch.object(success_panel, "_draw_satellite_explosion") as explosion,
+        ):
+            success_panel._draw_game_debrief(frame, body, success, 2.0)
+        happy.assert_called_once()
+        explosion.assert_not_called()
+
+        failure = build_completed_investigation_controller(
+            DEFAULT_CONFIG_PATH,
+            DEFAULT_FIXTURE_PATH,
+            incident="TAMPER",
+            diagnosis="NORMAL",
+            response="ACCEPT",
+        )
+        prepare_investigation_capture_state(failure, InvestigationState.DEBRIEF)
+        failure.state = InvestigationState.DEBRIEF
+        failure.animation_complete = True
+        failure_panel = GamePanel.for_test(failure)
+        failure_panel.replay_interaction.sync("DEBRIEF", 1.0, True)
+        with (
+            patch.object(failure_panel, "_draw_happy_satellite") as happy,
+            patch.object(failure_panel, "_draw_satellite_explosion") as explosion,
+        ):
+            failure_panel._draw_game_debrief(frame, body, failure, 2.0)
+        happy.assert_not_called()
+        explosion.assert_called_once()
+
     def test_transmission_effect_is_generic_and_only_runs_for_an_incident(self):
         controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)
         prepare_investigation_capture_state(controller, InvestigationState.TRANSMIT)
@@ -958,12 +1070,12 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
             panel._draw_game_transmit(frame, body, controller, 2.0)
             effect.assert_called_once()
 
-        panel.replay_interaction.display_progress = 0.42
+        panel.replay_interaction.display_progress = 0.40
         with patch.object(panel, "_draw_transmission_interference") as effect:
             panel._draw_game_transmit(frame, body, controller, 2.0)
             effect.assert_not_called()
 
-        panel.replay_interaction.display_progress = 0.49
+        panel.replay_interaction.display_progress = 0.45
         with patch.object(panel, "_draw_transmission_interference") as effect:
             panel._draw_game_transmit(frame, body, controller, 2.0)
             effect.assert_not_called()
@@ -989,10 +1101,10 @@ class StagedLoggingAndRenderingTests(unittest.TestCase):
             panel._draw_game_transmit(frame, body, controller, 2.0)
         self.assertEqual(risk.call_count, 2)
         self.assertGreater(panel._transmission_route_progress(0.50), 0.64)
-        self.assertLess(panel._transmission_route_progress(0.72), 0.86)
-        self.assertEqual(panel._transmission_incident_strength(0.49, True), 0.0)
+        self.assertLess(panel._transmission_route_progress(0.76), 0.86)
+        self.assertEqual(panel._transmission_incident_strength(0.45, True), 0.0)
         self.assertGreater(panel._transmission_incident_strength(0.60, True), 0.0)
-        self.assertEqual(panel._transmission_incident_strength(0.73, True), 0.0)
+        self.assertEqual(panel._transmission_incident_strength(0.78, True), 0.0)
 
     def test_next_transmit_shows_two_decorative_risk_segments(self):
         controller = build_completed_investigation_controller(DEFAULT_CONFIG_PATH, DEFAULT_FIXTURE_PATH)

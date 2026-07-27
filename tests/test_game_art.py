@@ -150,7 +150,7 @@ class GameArtTests(unittest.TestCase):
         self.assertEqual([cue.key for cue in timeline.cues], ["uplink", "orbit", "event", "arrival"])
         self.assertEqual(
             [(round(cue.start, 2), round(cue.end, 2)) for cue in timeline.cues],
-            [(0.0, 0.30), (0.30, 0.42), (0.42, 0.78), (0.78, 1.0)],
+            [(0.0, 0.27), (0.27, 0.37), (0.37, 0.8), (0.8, 1.0)],
         )
         self.assertEqual(timeline.cues[2].short_label, "TRECHO DE RISCO")
 

@@ -176,14 +176,16 @@ As animações são então orientadas pelo estado e pela resposta aceita:
 - `PROTECT`: cinco estações entre origem e receptor. ECDH troca partes públicas;
   ML-KEM usa `KeyGen`, `Encaps` e `Decaps`; ambos terminam em segredo comum,
   HKDF-SHA256, nonce e AES-GCM;
-- `TRANSMIT`: 8 s de viagem, com 36% reservados ao trecho de risco da volta;
-  ida e volta ficam sempre amarelas, mas os efeitos genéricos só aparecem no
-  centro da volta quando o sorteio aplica um incidente;
+- `TRANSMIT`: 9 s de viagem; o segundo adicional é reservado ao trecho de
+  risco da volta. Ida e volta ficam sempre amarelas, mas os efeitos genéricos
+  só aparecem no centro da volta;
 - `VERIFY`: processo visual sequencial sem timeline; AES-GCM vem primeiro e
   somente uma mensagem aberta segue ao CRC opcional;
 - `RETRY`: o KEX selecionado é repetido, seguido por nova chave derivada, novo
   nonce, novo envelope e entrega confirmada;
-- `DEBRIEF`: linha causal entre escolhas, incidente, evidências e ação.
+- `DEBRIEF`: revelação incremental de causa, tecnologias, diagnóstico e ação,
+  terminando em CubeSat feliz somente quando diagnóstico e ação estão corretos,
+  ou em explosão didática caso contrário.
 
 Depois de executar uma vez do início ao fim, os replays de `PREPARE`,
 `PROTECT`, `TRANSMIT` e `RETRY` entram em modo de revisão. O visitante segura
@@ -198,8 +200,9 @@ existe replay construído. Em `TRANSMIT`, a causa permanece oculta até
 `DEBRIEF`; seed, sorteios e vetor ficam apenas no log técnico.
 
 A tela rotula “animação didática em tempo ampliado”. As etapas explicam
-causalidade sem mostrar números de recursos; somente o debrief exibe
-tempo/bytes/heap da partida. `elapsed_us` é tempo de processamento, não
+causalidade sem mostrar números de recursos. O debrief também omite
+tempo/bytes/heap e mantém apenas as escolhas e o diagnóstico da missão.
+`elapsed_us` continua registrado tecnicamente como tempo de processamento, não
 energia. Não há nota, ranking ou gamificação competitiva.
 
 Nos dois caminhos, a duração relativa de setup, iniciador, receptor, HKDF, RNG

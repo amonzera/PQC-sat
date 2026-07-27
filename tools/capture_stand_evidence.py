@@ -47,6 +47,9 @@ def build_completed_investigation_controller(
     *,
     key_mode: str = "MLKEM",
     incident: str = "RX_MEMORY",
+    guard: str = "CRC32",
+    diagnosis: str | None = None,
+    response: str = "RETRY",
 ) -> InvestigationController:
     config = replace(
         StandConfig.load(config_path),
@@ -103,16 +106,17 @@ def build_completed_investigation_controller(
     press()
     choose("mission:TELEMETRY")
     choose(f"key:{key_mode}")
-    choose("guard:CRC32")
+    choose(f"guard:{guard}")
     press()  # NEXT_PREPARE -> GAME_BEGIN -> PREPARE
     finish_stage()  # PREPARE -> NEXT_PROTECT -> PROTECT
     finish_stage()  # PROTECT -> NEXT_TRANSMIT -> TRANSMIT
     finish_stage()  # TRANSMIT -> NEXT_VERIFY -> VERIFY
     finish_stage()  # VERIFY -> DIAGNOSE
-    diagnosis = "NORMAL" if incident == "NORMAL" else "INTRUSION" if incident == "TAMPER" else "RADIATION"
-    choose(f"diagnosis:{diagnosis}")
-    choose("response:RETRY")
-    finish_stage()  # RETRY -> DEBRIEF/GAME_END
+    selected_diagnosis = diagnosis or ("NORMAL" if incident == "NORMAL" else "INTRUSION" if incident == "TAMPER" else "RADIATION")
+    choose(f"diagnosis:{selected_diagnosis}")
+    choose(f"response:{response}")
+    if response == "RETRY":
+        finish_stage()  # RETRY -> DEBRIEF/GAME_END
     pump(now + 0.01)
     now = max(now + 0.03, (controller.animation_deadline or now) + 0.01)
     controller.update(now=now)
@@ -363,6 +367,29 @@ def main(argv=None) -> int:
                 replay_progress=progress,
             )
             output = args.replay_output_dir / f"transmit_normal_{label}_{args.width}x{args.height}.png"
+            pygame.image.save(frame, output)
+            print(output)
+
+        failure_controller = build_completed_investigation_controller(
+            args.config,
+            args.fixture,
+            incident="TAMPER",
+            diagnosis="NORMAL",
+            response="ACCEPT",
+        )
+        prepare_investigation_capture_state(failure_controller, InvestigationState.DEBRIEF)
+        failure_controller.state = InvestigationState.DEBRIEF
+        failure_controller.state_entered_at = 0.0
+        failure_controller.last_clock_at = 2.0
+        failure_controller.animation_complete = True
+        for label, progress in positions:
+            frame = render_game_frame(
+                failure_controller,
+                size=(args.width, args.height),
+                now=2.0,
+                replay_progress=progress,
+            )
+            output = args.replay_output_dir / f"debrief_failure_{label}_{args.width}x{args.height}.png"
             pygame.image.save(frame, output)
             print(output)
     pygame.quit()

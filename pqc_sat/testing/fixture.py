@@ -499,12 +499,6 @@ class FixtureSerialClient:
                 decision = parts[2].upper()
                 if state not in {"VERIFY", "RETRY"} or decision not in {"ACCEPT", "SAFE_MODE"}:
                     return self._bad_game(command_line, f"GAME_END inválido após {state}")
-                if state == "VERIFY" and decision == "ACCEPT" and str(self._game.get("final_result")) in {
-                    "FRAME_REJECT",
-                    "AUTH_REJECT",
-                    "APP_REJECT",
-                }:
-                    return self._bad_game(command_line, "pacote rejeitado não pode ser aceito")
                 final_result = "DELIVERED" if state == "RETRY" else str(self._game.get("final_result"))
                 self._game = None
                 self.active_profile = self.config.baseline_name

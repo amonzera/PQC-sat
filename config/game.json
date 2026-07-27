@@ -16,14 +16,14 @@
   "windowed_size": [1366, 768],
   "animation": {
     "min_duration_ms": 1200,
-    "max_duration_ms": 8000,
+    "max_duration_ms": 9000,
     "checkpoints_ms": {
       "PREPARE": 2750,
       "PROTECT": 5250,
-      "TRANSMIT": 8000,
+      "TRANSMIT": 9000,
       "VERIFY": 4500,
       "RETRY": 3000,
-      "DEBRIEF": 1200
+      "DEBRIEF": 6000
     }
   },
   "profiles": {
@@ -39,7 +39,7 @@
   },
   "button_debounce_seconds": 0.35,
   "investigation": {
-    "incident_probability": 0.70,
+    "incident_probability": 1.0,
     "incident_weights": {
       "RX_MEMORY": 0.50,
       "TAMPER": 0.50

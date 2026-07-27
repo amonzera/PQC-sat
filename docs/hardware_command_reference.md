@@ -186,7 +186,7 @@ GAME_END G000001 ACCEPT
 | `GAME_TRANSMIT id index mask` | `PROTECT` do mesmo ID | fixa vetor single-bit, monta quadro e aplica incidente oculto |
 | `GAME_VERIFY id` | `TRANSMIT` do mesmo ID | verifica quadro, GCM e CRC da aplicação; apaga segredos |
 | `GAME_RETRY id` | `VERIFY` do mesmo ID | mesmo payload, nova chave/nonce, sem falha, resultado `DELIVERED` |
-| `GAME_END id ACCEPT\|SAFE_MODE` | `VERIFY` ou `RETRY` do mesmo ID | registra decisão, apaga sessão e restaura 240 MHz |
+| `GAME_END id ACCEPT\|SAFE_MODE` | `VERIFY` ou `RETRY` do mesmo ID | registra decisão, preserva o resultado verificado, apaga sessão e restaura 240 MHz; `ACCEPT` não converte rejeição em entrega |
 | `GAME_ABORT id` | qualquer estágio ativo do mesmo ID | apaga sessão e restaura o baseline |
 
 ID ou ordem incorreta retorna `BAD_GAME_STATE` e limpa a sessão. `HELLO`, erro

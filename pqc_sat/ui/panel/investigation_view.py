@@ -11,7 +11,6 @@ from pqc_sat.ui.display import DISPLAY
 from pqc_sat.ui.game_art import (
     ChoiceVisual,
     build_didactic_timeline,
-    build_mission_review_timeline,
     draw_game_icon,
     draw_packet,
     draw_signal_link,
@@ -56,30 +55,10 @@ STEP_LABELS = {
 }
 
 
-def _format_elapsed(value):
-    try:
-        elapsed_us = int(value)
-    except (TypeError, ValueError):
-        return "--"
-    if elapsed_us >= 1_000_000:
-        return f"{elapsed_us / 1_000_000:.2f} s"
-    if elapsed_us >= 1_000:
-        return f"{elapsed_us / 1_000:.1f} ms"
-    return f"{elapsed_us} us"
-
-
 def _enum_value(value, default="--"):
     if value is None:
         return default
     return str(getattr(value, "value", value))
-
-
-def _approach_label(value, default="--"):
-    key_mode = _enum_value(value, default=default)
-    return {
-        "ECDH": "CLÁSSICA • ECDH P-256",
-        "MLKEM": "PÓS-QUÂNTICA • ML-KEM-512",
-    }.get(key_mode, key_mode)
 
 
 class InvestigationPresentationMixin:
@@ -1045,16 +1024,16 @@ class InvestigationPresentationMixin:
     @staticmethod
     def _transmission_route_progress(progress):
         progress = max(0.0, min(1.0, float(progress)))
-        if progress <= 0.30:
-            return 0.5 * (progress / 0.30)
-        if progress <= 0.42:
-            local = (progress - 0.30) / 0.12
+        if progress <= 0.267:
+            return 0.5 * (progress / 0.267)
+        if progress <= 0.374:
+            local = (progress - 0.267) / 0.107
             return 0.5 + 0.14 * local
-        if progress <= 0.78:
-            local = (progress - 0.42) / 0.36
+        if progress <= 0.805:
+            local = (progress - 0.374) / 0.431
             eased = local * local * (3.0 - 2.0 * local)
             return 0.64 + 0.22 * eased
-        local = (progress - 0.78) / 0.22
+        local = (progress - 0.805) / 0.195
         eased = local * local * (3.0 - 2.0 * local)
         return 0.86 + 0.14 * eased
 
@@ -1063,10 +1042,10 @@ class InvestigationPresentationMixin:
         if not incident_applied:
             return 0.0
         progress = float(progress)
-        if not 0.50 < progress < 0.72:
+        if not 0.46 < progress < 0.77:
             return 0.0
-        fade_in = min(1.0, (progress - 0.50) / 0.06)
-        fade_out = min(1.0, (0.72 - progress) / 0.06)
+        fade_in = min(1.0, (progress - 0.46) / 0.06)
+        fade_out = min(1.0, (0.77 - progress) / 0.06)
         local = max(0.0, min(fade_in, fade_out))
         return local * local * (3.0 - 2.0 * local)
 
@@ -1477,11 +1456,7 @@ class InvestigationPresentationMixin:
         )
 
     def _draw_game_response(self, surface, body, controller, t):
-        result = controller.result
-        status = result.result if result else "SEM RESULTADO"
         self._draw_stand_centered(surface, FONT_TITLE, "O que devemos fazer agora?", C_TEXT_PRIMARY, body.centerx, body.y, body.width - 50)
-        self._draw_stand_centered(surface, FONT_BODY, f"VERIFICAÇÃO REAL: {status}", C_ACCENT_ORANGE, body.centerx, body.y + 32, body.width - 70)
-        accept_blocked = bool(result and result.cryptographically_rejected)
         choices = (
             ChoiceVisual(
                 "response:ACCEPT",
@@ -1491,7 +1466,6 @@ class InvestigationPresentationMixin:
                 "",
                 C_ACCENT_GREEN,
                 "accept",
-                "PACOTE REJEITADO: ACEITAR ESTÁ BLOQUEADO" if accept_blocked else "",
             ),
             ChoiceVisual(
                 "response:RETRY",
@@ -1512,7 +1486,7 @@ class InvestigationPresentationMixin:
                 "safe",
             ),
         )
-        choice_body = pygame.Rect(body.x, body.y + 57, body.width, body.height - 57)
+        choice_body = pygame.Rect(body.x, body.y + 30, body.width, body.height - 30)
         self._draw_choice_cards(
             surface,
             choice_body,
@@ -1522,9 +1496,6 @@ class InvestigationPresentationMixin:
             t,
             show_card_descriptions=True,
         )
-        if controller.blocked_choice_message:
-            warning = self._render_clipped(FONT_LABEL, controller.blocked_choice_message, C_ACCENT_RED, body.width - 80)
-            surface.blit(warning, (body.centerx - warning.get_width() // 2, body.bottom - 122))
 
     def _draw_game_retry(self, surface, body, controller, t):
         result = self._stage_status(
@@ -1561,29 +1532,155 @@ class InvestigationPresentationMixin:
             IncidentScenario.NORMAL: ("ENVIO NORMAL", "Nenhuma falha foi aplicada.", "accept"),
         }.get(incident, ("INCIDENTE INDISPONÍVEL", "", "bit"))
 
-    def _draw_mission_configuration(self, surface, body, controller, *, y):
-        values = (
-            ("MISSÃO", controller.selected_mission.title if controller.selected_mission else "--", C_ACCENT_CYAN),
-            ("CPU", f"{controller.selected_profile_mhz} MHz" if controller.selected_profile_mhz else "--", C_ACCENT_BLUE),
-            ("ABORDAGEM", _approach_label(controller.selected_key_mode), C_ACCENT_PURPLE),
-            ("CRC", "COM CRC32" if controller.selected_guard is GuardMode.CRC32 else "SEM CRC32", C_ACCENT_GREEN),
-        )
-        gap = 8
-        chip_w = (body.width - 46 - gap * 3) // 4
-        for index, (label, value, color) in enumerate(values):
-            self._draw_overlay_metric_box(
-                surface,
-                label,
-                value,
-                body.x + 23 + index * (chip_w + gap),
-                y,
-                chip_w,
-                38,
-                color,
+    @staticmethod
+    def _diagnosis_label(value):
+        return {
+            "RADIATION": "RADIAÇÃO ESPACIAL",
+            "INTRUSION": "TENTATIVA DE INVASÃO",
+            "NORMAL": "NENHUM PROBLEMA",
+        }.get(str(value or ""), "--")
+
+    @staticmethod
+    def _decision_label(value):
+        return {
+            "ACCEPT": "ACEITAR A MENSAGEM",
+            "RETRY": "ENVIAR DE NOVO",
+            "SAFE_MODE": "ATIVAR MODO SEGURO",
+        }.get(_enum_value(value, default=""), "--")
+
+    @staticmethod
+    def _draw_happy_satellite(surface, rect, t, progress):
+        pulse = 0.5 + 0.5 * math.sin(t * 4.0)
+        cx, cy = rect.center
+        size = max(70, int(min(rect.width, rect.height) * 0.72))
+        for index in range(8):
+            angle = t * 0.7 + index * math.tau / 8
+            distance = size * (0.46 + 0.04 * pulse)
+            center = (
+                int(cx + math.cos(angle) * distance),
+                int(cy + math.sin(angle) * distance),
             )
+            radius = 2 + (index % 3)
+            pygame.draw.circle(surface, C_ACCENT_GREEN if index % 2 else C_ACCENT_CYAN, center, radius)
+        body = pygame.Rect(cx - size // 6, cy - size // 5, size // 3, size * 2 // 5)
+        panel_w = size // 4
+        panel_h = max(12, size // 9)
+        left = pygame.Rect(body.x - panel_w - 6, cy - panel_h // 2, panel_w, panel_h)
+        right = pygame.Rect(body.right + 6, cy - panel_h // 2, panel_w, panel_h)
+        for panel in (left, right):
+            pygame.draw.rect(surface, (4, 43, 79), panel, border_radius=3)
+            pygame.draw.rect(surface, C_ACCENT_BLUE, panel, 2, border_radius=3)
+            pygame.draw.line(surface, C_ACCENT_BLUE, panel.midtop, panel.midbottom, 1)
+        pygame.draw.line(surface, C_ACCENT_ORANGE, left.midright, body.midleft, 2)
+        pygame.draw.line(surface, C_ACCENT_ORANGE, body.midright, right.midleft, 2)
+        pygame.draw.rect(surface, (178, 198, 218), body, border_radius=6)
+        pygame.draw.rect(surface, C_ACCENT_GREEN, body, 3, border_radius=6)
+        eye_y = cy - size // 18
+        eye_gap = size // 14
+        pygame.draw.circle(surface, C_ACCENT_GREEN, (cx - eye_gap, eye_y), max(3, size // 35))
+        pygame.draw.circle(surface, C_ACCENT_GREEN, (cx + eye_gap, eye_y), max(3, size // 35))
+        smile_y = cy + size // 30
+        smile_width = size // 6
+        smile_depth = max(4, size // 18)
+        pygame.draw.lines(
+            surface,
+            C_ACCENT_GREEN,
+            False,
+            (
+                (cx - smile_width // 2, smile_y),
+                (cx - smile_width // 4, smile_y + smile_depth),
+                (cx + smile_width // 4, smile_y + smile_depth),
+                (cx + smile_width // 2, smile_y),
+            ),
+            max(2, size // 45),
+        )
+        antenna_top = (cx, body.y - size // 8)
+        pygame.draw.line(surface, C_ACCENT_ORANGE, body.midtop, antenna_top, 2)
+        pygame.draw.circle(surface, C_ACCENT_ORANGE, antenna_top, max(4, size // 28))
+        pygame.draw.circle(surface, C_ACCENT_CYAN, antenna_top, max(9, int(size * (0.10 + 0.02 * pulse))), 1)
+
+    @staticmethod
+    def _draw_satellite_explosion(surface, rect, t, progress):
+        progress = max(0.0, min(1.0, float(progress)))
+        scale = min(rect.width, rect.height)
+        flash_radius = max(8, int(scale * (0.08 + 0.13 * progress)))
+        pygame.draw.circle(surface, (255, 236, 152), rect.center, flash_radius)
+        pygame.draw.circle(surface, C_ACCENT_ORANGE, rect.center, max(5, int(flash_radius * 0.62)))
+        pygame.draw.circle(
+            surface,
+            C_ACCENT_RED,
+            rect.center,
+            max(4, int(flash_radius * 1.55)),
+            max(2, int(5 * (1.0 - progress) + 1)),
+        )
+        colors = (C_ACCENT_RED, C_ACCENT_ORANGE, C_ACCENT_CYAN, C_ACCENT_PURPLE)
+        distance = scale * (0.10 + 0.32 * progress)
+        for index in range(12):
+            angle = index * math.tau / 12 + math.sin(t * 1.7 + index) * 0.08
+            center = (
+                int(rect.centerx + math.cos(angle) * distance),
+                int(rect.centery + math.sin(angle) * distance),
+            )
+            size = max(3, int(10 * (1.0 - 0.45 * progress)))
+            fragment = pygame.Rect(center[0] - size, center[1] - size // 2, size * 2, size)
+            pygame.draw.rect(surface, colors[index % len(colors)], fragment, border_radius=2)
+        # Larger recognizable pieces make the didactic satellite breakup clear.
+        parts = (
+            (-0.95, C_ACCENT_BLUE, (30, 12)),
+            (-0.20, C_ACCENT_CYAN, (18, 24)),
+            (0.55, C_ACCENT_BLUE, (30, 12)),
+            (1.25, (180, 198, 216), (22, 24)),
+            (2.15, C_ACCENT_ORANGE, (10, 18)),
+            (2.85, (180, 198, 216), (22, 18)),
+        )
+        part_distance = scale * (0.05 + 0.23 * progress)
+        for index, (angle, color, part_size) in enumerate(parts):
+            wobble = math.sin(t * 2.1 + index) * 0.08
+            center = (
+                int(rect.centerx + math.cos(angle + wobble) * part_distance),
+                int(rect.centery + math.sin(angle + wobble) * part_distance),
+            )
+            width = max(5, int(part_size[0] * (0.75 + 0.25 * progress)))
+            height = max(4, int(part_size[1] * (0.75 + 0.25 * progress)))
+            pygame.draw.rect(
+                surface,
+                color,
+                pygame.Rect(center[0] - width // 2, center[1] - height // 2, width, height),
+                border_radius=2,
+            )
+        if progress < 0.35:
+            faded = pygame.Surface(rect.size, pygame.SRCALPHA)
+            draw_game_icon(
+                faded,
+                "satellite",
+                faded.get_rect().inflate(-int(rect.width * 0.15), -int(rect.height * 0.15)),
+                t,
+                color=C_ACCENT_RED,
+                active=True,
+            )
+            faded.set_alpha(int(255 * (1.0 - progress / 0.35)))
+            surface.blit(faded, rect)
+
+    def _draw_report_row(self, surface, rect, title, value, detail, color, *, correct=None):
+        pygame.draw.rect(surface, (5, 19, 36), rect, border_radius=9)
+        pygame.draw.rect(surface, color, rect, 2, border_radius=9)
+        label = self._render_clipped(FONT_LABEL, title, C_TEXT_DIM, rect.width - 28)
+        surface.blit(label, (rect.x + 14, rect.y + 10))
+        value_surface = self._render_clipped(FONT_HEADER, value, color, rect.width - 28)
+        surface.blit(value_surface, (rect.x + 14, rect.y + 29))
+        if detail:
+            detail_surface = self._render_clipped(FONT_SMALL, detail, C_TEXT_PRIMARY, rect.width - 28)
+            surface.blit(detail_surface, (rect.x + 14, rect.bottom - detail_surface.get_height() - 9))
+        if correct is not None:
+            badge_color = C_ACCENT_GREEN if correct else C_ACCENT_RED
+            badge_text = "CORRETO" if correct else "INCORRETO"
+            badge = FONT_LABEL.render(badge_text, True, badge_color)
+            badge_rect = pygame.Rect(rect.right - badge.get_width() - 24, rect.y + 9, badge.get_width() + 14, 22)
+            pygame.draw.rect(surface, (7, 38, 32) if correct else (48, 8, 19), badge_rect, border_radius=6)
+            surface.blit(badge, (badge_rect.centerx - badge.get_width() // 2, badge_rect.centery - badge.get_height() // 2))
 
     def _draw_game_debrief(self, surface, body, controller, t):
-        if controller.end_receipt is None or not controller.animation_complete:
+        if controller.end_receipt is None:
             pygame.draw.rect(surface, (4, 16, 33), pygame.Rect(body.x + 100, body.y + 45, body.width - 200, body.height - 135), border_radius=11)
             draw_game_icon(surface, "satellite", pygame.Rect(body.centerx - 90, body.y + 65, 180, 130), t, color=C_ACCENT_CYAN)
             self._draw_stand_centered(surface, FONT_LARGE, "ENCERRANDO A SESSÃO", C_ACCENT_CYAN, body.centerx, body.y + 198, body.width - 100)
@@ -1599,82 +1696,114 @@ class InvestigationPresentationMixin:
             self._confirmation_hint(surface, body, controller, ready=False, waiting="FINALIZANDO…")
             return
 
-        incident_title, incident_detail, incident_icon = self._incident_public_text(controller.incident)
-        if not controller.diagnosis_evidence_sufficient:
-            verdict = "NÃO HAVIA EVIDÊNCIA SUFICIENTE"
-            verdict_color = C_ACCENT_ORANGE
-        else:
-            verdict = "DIAGNÓSTICO CONSISTENTE" if controller.diagnosis_correct else "HIPÓTESE REVISADA PELAS EVIDÊNCIAS"
-            verdict_color = C_ACCENT_GREEN if controller.diagnosis_correct else C_ACCENT_ORANGE
-        self._draw_stand_centered(surface, FONT_TITLE, verdict, verdict_color, body.centerx, body.y, body.width - 50)
-        self._draw_stand_centered(
-            surface,
-            FONT_BODY,
-            f"INCIDENTE REVELADO: {incident_title} • {incident_detail}",
-            C_ACCENT_PURPLE,
-            body.centerx,
-            body.y + 31,
-            body.width - 70,
-        )
+        incident_title, incident_detail, _ = self._incident_public_text(controller.incident)
+        progress = self.replay_progress(None)
+        mission_success = controller.mission_success
+        verdict_color = C_ACCENT_GREEN if mission_success else C_ACCENT_RED
+        title = "MISSÃO PROTEGIDA" if mission_success and progress >= 0.8 else "FALHA NA MISSÃO"
+        if progress >= 0.8 and not mission_success:
+            title = "MISSÃO NÃO PROTEGIDA"
+        self._draw_stand_centered(surface, FONT_TITLE, title, verdict_color, body.centerx, body.y, body.width - 50)
 
-        result = controller.result
-        delivery = controller.retry_result.result if controller.retry_result else (result.result if result else "--")
-        elapsed = sum(item.elapsed_us for item in controller.stage_measurements.values())
-        elapsed += (result.elapsed_us if result else 0) + (controller.retry_result.elapsed_us if controller.retry_result else 0)
-        measured_result = controller.retry_result or result
-        bytes_total = measured_result.bytes_total if measured_result else 0
-        self._draw_mission_configuration(surface, body, controller, y=body.y + 62)
-        badges = (
-            ("ENTREGA", delivery, C_ACCENT_GREEN if delivery == "DELIVERED" else C_ACCENT_ORANGE),
-            ("SEGURANÇA", result.result if result else "--", C_ACCENT_CYAN),
-            ("TEMPO", _format_elapsed(elapsed), verdict_color),
-            ("DADOS", f"{bytes_total} B", C_ACCENT_BLUE),
-        )
-        badge_gap = 8
-        badge_w = (body.width - 46 - badge_gap * 3) // 4
-        for index, (label, value, color) in enumerate(badges):
-            x = body.x + 23 + index * (badge_w + badge_gap)
-            self._draw_overlay_metric_box(surface, label, value, x, body.y + 108, badge_w, 46, color)
+        report = pygame.Rect(body.x + 38, body.y + 38, body.width - 76, body.height - 108)
+        pygame.draw.rect(surface, (3, 15, 31), report, border_radius=12)
+        pygame.draw.rect(surface, verdict_color, report, 2, border_radius=12)
+        left = pygame.Rect(report.x + 18, report.y + 16, int(report.width * 0.66), report.height - 32)
+        right = pygame.Rect(left.right + 12, report.y + 16, report.right - left.right - 30, report.height - 32)
+        row_gap = 8
+        row_height = max(72, (left.height - row_gap * 3) // 4)
 
-        if controller.incident is IncidentScenario.RX_MEMORY:
-            counterfactual = (
-                "COM CRC32, ESTA ALTERAÇÃO DA MENSAGEM SERIA DETECTADA."
-                if controller.selected_guard is GuardMode.NONE
-                else "SEM CRC32, ESTA ALTERAÇÃO DA MENSAGEM SERIA SILENCIOSA."
+        if progress >= 0.0:
+            cause_detail = incident_detail
+            if controller.incident is IncidentScenario.RX_MEMORY and controller.selected_guard is GuardMode.NONE:
+                cause_detail = "A mensagem mudou; sem CRC32, a checagem não revelou essa alteração."
+            self._draw_report_row(
+                surface,
+                pygame.Rect(left.x, left.y, left.width, row_height),
+                "O QUE ACONTECEU",
+                incident_title,
+                cause_detail,
+                C_ACCENT_RED,
             )
-        else:
-            counterfactual = "CRC32 NÃO AUTENTICA: A TAG AES-GCM CONTINUA ESSENCIAL."
-        self._draw_stand_centered(surface, FONT_LABEL, counterfactual, C_ACCENT_ORANGE, body.centerx, body.y + 164, body.width - 90)
+        if progress >= 0.2:
+            technology = (
+                "ECDH P-256 + AES-GCM"
+                if _enum_value(controller.selected_key_mode) == "ECDH"
+                else "ML-KEM-512 + AES-GCM"
+            )
+            guard = "COM CRC32" if controller.selected_guard is GuardMode.CRC32 else "SEM CRC32"
+            self._draw_report_row(
+                surface,
+                pygame.Rect(left.x, left.y + row_height + row_gap, left.width, row_height),
+                "TECNOLOGIAS ESCOLHIDAS",
+                technology,
+                guard,
+                C_ACCENT_PURPLE,
+            )
+        if progress >= 0.4:
+            expected = {
+                IncidentScenario.RX_MEMORY: "RADIAÇÃO ESPACIAL",
+                IncidentScenario.CHANNEL_BITFLIP: "RADIAÇÃO ESPACIAL",
+                IncidentScenario.TAMPER: "TENTATIVA DE INVASÃO",
+                IncidentScenario.NORMAL: "NENHUM PROBLEMA",
+            }.get(controller.incident, "--")
+            diagnosis_detail = f"CAUSA REAL: {expected}"
+            if not controller.diagnosis_evidence_sufficient:
+                diagnosis_detail += " • SEM EVIDÊNCIA SUFICIENTE"
+            self._draw_report_row(
+                surface,
+                pygame.Rect(left.x, left.y + (row_height + row_gap) * 2, left.width, row_height),
+                "SEU DIAGNÓSTICO",
+                self._diagnosis_label(controller.selected_diagnosis),
+                diagnosis_detail,
+                C_ACCENT_GREEN if controller.diagnosis_correct else C_ACCENT_RED,
+                correct=controller.diagnosis_correct,
+            )
+        if progress >= 0.6:
+            self._draw_report_row(
+                surface,
+                pygame.Rect(left.x, left.y + (row_height + row_gap) * 3, left.width, row_height),
+                "SUA DECISÃO",
+                self._decision_label(controller.operational_decision),
+                "REENVIAR OU ATIVAR O MODO SEGURO PROTEGE A MISSÃO.",
+                C_ACCENT_GREEN if controller.operational_decision_correct else C_ACCENT_RED,
+                correct=controller.operational_decision_correct,
+            )
 
-        available_h = max(220, body.height - 251)
-        visual_h = min(470, available_h)
-        visual = pygame.Rect(
-            body.x + 18,
-            body.y + 185 + max(0, (available_h - visual_h) // 2),
-            body.width - 36,
-            visual_h,
+        pygame.draw.rect(surface, (5, 19, 36), right, border_radius=10)
+        pygame.draw.rect(surface, verdict_color if progress >= 0.8 else C_PANEL_BORDER, right, 2, border_radius=10)
+        if progress < 0.8:
+            draw_game_icon(
+                surface,
+                "satellite",
+                pygame.Rect(right.x + 12, right.centery - min(85, right.height // 3), right.width - 24, min(170, right.height * 2 // 3)),
+                t,
+                color=C_TEXT_DIM,
+            )
+            self._draw_stand_centered(surface, FONT_HEADER, "ANALISANDO…", C_TEXT_DIM, right.centerx, right.bottom - 52, right.width - 20)
+        else:
+            final_progress = min(1.0, (progress - 0.8) / 0.2)
+            animation_width = min(right.width - 40, max(170, int(right.width * 0.64)))
+            animation_rect = pygame.Rect(
+                right.centerx - animation_width // 2,
+                right.y + 35,
+                animation_width,
+                max(140, right.height - 115),
+            )
+            if mission_success:
+                self._draw_happy_satellite(surface, animation_rect, t, final_progress)
+                final_label = "DIAGNÓSTICO E AÇÃO CORRETOS"
+            else:
+                self._draw_satellite_explosion(surface, animation_rect, t, final_progress)
+                final_label = "A MISSÃO NÃO FOI SALVA"
+            self._draw_stand_centered(surface, FONT_BODY, final_label, verdict_color, right.centerx, right.bottom - 58, right.width - 18)
+        self._confirmation_hint(
+            surface,
+            body,
+            controller,
+            ready=controller.animation_complete,
+            waiting="REVELANDO O RESULTADO…",
         )
-        pygame.draw.rect(surface, (4, 17, 34), visual, border_radius=10)
-        pygame.draw.rect(surface, C_ACCENT_CYAN, visual, 2, border_radius=10)
-        self._draw_replay_label(surface, visual, "REVISÃO DA MISSÃO", C_ACCENT_CYAN)
-        timeline = build_mission_review_timeline(controller.stage_measurements, controller.result, controller.retry_result)
-        progress = self.replay_progress(timeline)
-        active = timeline.active(progress)
-        content = self._replay_content_rect(visual)
-        gap = 7
-        node_w = (content.width - gap * (len(timeline.cues) - 1)) // len(timeline.cues)
-        for index, cue in enumerate(timeline.cues):
-            node = pygame.Rect(content.x + index * (node_w + gap), content.y + 2, node_w, content.height - 4)
-            selected = cue is active
-            pygame.draw.rect(surface, (8, 29, 47) if selected else (5, 19, 35), node, border_radius=6)
-            pygame.draw.rect(surface, cue.color if selected else (42, 64, 82), node, 2 if selected else 1, border_radius=6)
-            icon_h = max(40, min(100, int(node.height * 0.55)))
-            icon_y = node.y + max(3, (node.height - icon_h - 20) // 2)
-            draw_game_icon(surface, cue.icon, pygame.Rect(node.x + 7, icon_y, node.width - 14, icon_h), t, color=cue.color, active=selected)
-            label = self._render_clipped(FONT_LABEL, cue.short_label, cue.color if selected else C_TEXT_DIM, node.width - 10)
-            surface.blit(label, (node.centerx - label.get_width() // 2, node.bottom - 19))
-        self._draw_timeline_nodes(surface, visual, timeline, progress)
-        self._confirmation_hint(surface, body, controller, ready=True, waiting="")
 
     def _draw_game_error(self, surface, body, controller, t):
         pulse = 0.68 + 0.32 * math.sin(t * 4.0)

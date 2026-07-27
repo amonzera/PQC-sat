@@ -165,14 +165,20 @@ implementar.
   `GAME_VERIFY`, `GAME_RETRY`, `GAME_END` e `GAME_ABORT` implementado no
   firmware, preservando `INVESTIGATE` e o fluxo legado; `CLASSIC_CRC32` permite
   escolher modo de chave e CRC da aplicação independentemente;
-- validação host atual passa 133 testes e preserva a matriz de 32 casos, soak offline
-  de 50 partidas, 88 capturas, vídeo rotulado e benchmark de 5,966 ms e 8,014
+- validação host atual passa 137 testes e preserva a matriz de 32 casos, soak offline
+  de 50 partidas sem `NORMAL` público, 94 capturas, vídeo rotulado e benchmark de 6,373 ms e 8,546
   ms, abaixo de 16,667 ms
-  em ambas as resoluções; após build FAIR, o candidato corrigido usa
-  59.020 B de RAM e 1.005.497 B de flash, com binário de 1.012.080 B e
-  SHA-256 `9eba850f…32a18d`; o perfil legado atual compila com 59.004 B de RAM,
+  em ambas as resoluções; após build FAIR, o candidato local da Iteração 10 usa
+  59.020 B de RAM e 1.005.369 B de flash, com binário de 1.011.952 B e
+  SHA-256 `c338c7f1…f99f05f`; o perfil legado atual compila com 59.004 B de RAM,
   940.421 B de flash e binário de 946.992 B; o candidato FAIR foi gravado e
-  verificado pelo manifesto `20260723T155737Z`;
+  verificado pelo manifesto `20260723T155737Z` somente na revisão anterior
+  `9eba850f…32a18d`; a Iteração 10 ainda não foi gravada;
+- Iteração 10 mantém `NORMAL` apenas para engenharia, sorteia obrigatoriamente
+  `RX_MEMORY` ou `TAMPER` no jogo público, amplia `TRANSMIT` para 9 s, permite
+  `ACCEPT` como decisão errada sem alterar o resultado verificado e simplifica
+  o relatório para causa, tecnologias, diagnóstico e ação revelados
+  incrementalmente, com CubeSat feliz ou explosão didática;
 - corrigida no candidato a incompatibilidade observada em hardware na qual
   `ANALOG POT` retornava `BAD_GAME_STATE` durante `PROTECT` e apagava a sessão;
   a leitura A39 agora é a única consulta não `GAME_*` permitida e a regressão

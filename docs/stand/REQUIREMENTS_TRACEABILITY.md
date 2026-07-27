@@ -31,7 +31,7 @@ não é automaticamente um `PASS` de hardware.
 | protocolo legado não contamina o resultado | PASS software | `CLASSIC`/`PQC` continuam aceitos apenas nas ferramentas legadas e são rotulados `LEGACY_V1` | não misturar arquivos nem razões históricas |
 | ML-KEM estabelece segredo | PASS | UI separa KeyGen/Encaps/Decaps/HKDF de AES-GCM | nenhum |
 | CRC não autentica | PASS | cartões, debrief e guia dizem explicitamente | validar compreensão 4/5 |
-| incidente e vetor probabilísticos | PASS software | probabilidade 70%; seed, rolls e vetor RNG registrados; soak determinístico cobre normal/radiação/invasão | observar os três casos na Wisdom |
+| incidente e vetor probabilísticos | PASS software | evento público obrigatório; 50% radiação/50% invasão; seed, rolls e vetor RNG registrados; `NORMAL` preservado para engenharia | observar as duas causas na Wisdom |
 | tabela de quatro incidentes | PASS software | 32 casos automatizados e fixture estrita | matriz curta física e bateria controlada opcional |
 | `RX_MEMORY/NONE` silencioso | PASS software | teste e modelo retornam `SILENT_CORRUPTION` | confirmar na Wisdom |
 | `RX_MEMORY/CRC32` rejeitado | PASS software | teste e modelo retornam `APP_REJECT` | confirmar na Wisdom |
@@ -60,13 +60,13 @@ não é automaticamente um `PASS` de hardware.
 |---|---|---|---|
 | 17 estados renderizados | PASS software | 17 PNGs em cada resolução, incluindo quatro pausas antes das etapas | ensaio no monitor definitivo |
 | escolhas compreensíveis | PASS software | cartões quadrados com título e arte causal; nas três missões, descrição e payload em lista ficam visíveis antes da seleção e somente a consequência surge depois; CPU fixa em 240 MHz não aparece como escolha | testar compreensão com cinco visitantes |
-| replay compreensível e controlável | PASS software | pacote arrastável nas etapas com timeline; `VERIFY` usa processo GCM→CRC sem arraste; 24 quadros extras por resolução | testar compreensão com cinco visitantes |
+| replay compreensível e controlável | PASS software | pacote arrastável nas etapas com timeline; `VERIFY` usa processo GCM→CRC sem arraste; debrief incremental não é timeline | testar compreensão com cinco visitantes |
 | animação orientada à resposta | PASS software | dois riscos amarelos no enlace; incidente vermelho só no risco da volta; GCM e CRC refletem `GameResult` depois da resposta aceita | observar timings reais |
-| métricas da jornada só no debrief | PASS design | etapas mostram causalidade sem números; tempo/bytes/heap da partida aparecem apenas no relatório final | observar no monitor definitivo |
-| log v2 completo | PASS software | seleção/confirmação, origem D27/tela, seed, rolls, vetor RNG, estágio, decisão, retry e aborto | gerar JSONL físico |
+| relatório final simples | PASS design | mostra apenas causa, tecnologias, diagnóstico e ação; final feliz exige diagnóstico e ação corretos | observar no monitor definitivo |
+| log v2 completo | PASS software | seleção/confirmação, origem D27/tela, seed, rolls, vetor RNG, estágio, decisão, correção final, retry e aborto | gerar JSONL físico |
 | validador mantém leitura V1 | PASS | testes e ramo de compatibilidade | nenhum |
 | diagnóstico/smoke/soak/captura/vídeo/bateria atualizados | PARCIAL hardware | diagnóstico curto FAIR passou 27 registros; ferramentas longas e artefatos offline estão preparados | smoke visual, aceite longo e coleta FAIR reais |
-| média <16,667 ms | PASS host | interface completa: 5,966 ms e 8,014 ms | não é garantia de todo host/monitor |
+| média <16,667 ms | PASS host | interface completa: 6,373 ms e 8,546 ms | não é garantia de todo host/monitor |
 
 ## Gates do estande
 

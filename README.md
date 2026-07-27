@@ -117,17 +117,25 @@ estações são desenhados proceduralmente. Os cartões de escolha permanecem
 quadrados, mostram ícone, título e uma frase curta; a missão preserva o payload
 em lista compacta. A apresentação pública fixa a CPU em `BASELINE/240 MHz`;
 o perfil de 80 MHz permanece apenas nas ferramentas técnicas. A configuração
-da partida aparece somente no relatório final. As etapas só reproduzem uma
+das tecnologias escolhidas aparece somente no relatório final. As etapas só reproduzem uma
 animação didática depois de uma resposta `GAME_*` validada. O tempo real da
 Wisdom permanece separado do replay ampliado.
 
-Cada partida tem 70% de chance de incidente: 35% de radiação simulada na
-mensagem recebida, 35% de tentativa de invasão simulada e 30% de envio normal.
-A transmissão ampliada dura 8 s. Ida e volta exibem trechos de risco sempre
-amarelos; quando há incidente, a surpresa visual ocorre somente no centro da
-volta, depois que o pacote deixou o satélite. Vermelho fica restrito ao alerta,
-à distorção, às ondas e às partículas do evento. A causa continua escondida
-até o relatório final.
+Cada partida pública tem um evento: 50% de radiação simulada na mensagem
+recebida ou 50% de tentativa de invasão simulada. `NORMAL` permanece disponível
+somente em testes e ferramentas técnicas. A transmissão ampliada dura 9 s; o
+segundo adicional pertence ao trecho de risco. Ida e volta exibem trechos de
+risco sempre amarelos; a surpresa visual ocorre somente no centro da volta,
+depois que o pacote deixou o satélite. Vermelho fica restrito ao alerta, à
+distorção, às ondas e às partículas do evento. A causa continua escondida até
+o relatório final.
+
+Na decisão operacional, `ACEITAR`, `ENVIAR DE NOVO` e `MODO SEGURO` ficam
+sempre disponíveis. Como toda partida pública contém um evento, aceitar é uma
+decisão incorreta, mas o protocolo ainda encerra a sessão preservando o
+resultado real da verificação. O relatório revela gradualmente somente a causa,
+as tecnologias, o diagnóstico e a ação escolhidos. Diagnóstico e ação corretos
+terminam com o CubeSat feliz; qualquer erro termina com a explosão didática.
 
 Na etapa de proteção, origem e receptor aparecem separados. Chave pública
 ECDH ou ML-KEM, cápsula, segredo compartilhado, HKDF-SHA256, nonce e AES-GCM

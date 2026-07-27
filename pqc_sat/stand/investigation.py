@@ -612,7 +612,15 @@ class InvestigationController:
                 source=self._source_label(),
             )
             self._arm_animation("DEBRIEF", now=now)
-            self._log("stage_completed", game_id=self.game_id, stage=GameStage.END.value, receipt=asdict(self.end_receipt))
+            self._log(
+                "stage_completed",
+                game_id=self.game_id,
+                stage=GameStage.END.value,
+                receipt=asdict(self.end_receipt),
+                diagnosis_correct=self.diagnosis_correct,
+                decision_correct=self.operational_decision_correct,
+                mission_success=self.mission_success,
+            )
             return
         raise StandProtocolError(f"propósito de resposta desconhecido: {pending.purpose}")
 
@@ -660,10 +668,6 @@ class InvestigationController:
             choice_kind = "response"
             choice_value = action.split(":", 1)[1].upper()
             valid = choice_value in self.RESPONSES
-            if valid and choice_value == OperationalDecision.ACCEPT.value and self.result and self.result.cryptographically_rejected:
-                self.blocked_choice_message = "PACOTE REJEITADO PELA CRIPTOGRAFIA NÃO PODE SER ACEITO"
-                self._log("choice_blocked", kind=choice_kind, value=choice_value, reason="cryptographic_reject")
-                return False
         elif action in {"explain:quick", "explain:technical"} and self.state is InvestigationState.DEBRIEF:
             self.explanation_mode = action.split(":", 1)[1]
             self._log("explanation_mode", value=self.explanation_mode)
@@ -888,7 +892,13 @@ class InvestigationController:
         if self.state is InvestigationState.SELECT_RESPONSE:
             decision = OperationalDecision(self._confirm_choice())
             self.operational_decision = decision
-            self._log("operational_decision", decision=decision.value, button_seq=self.button_sequence)
+            self._log(
+                "operational_decision",
+                decision=decision.value,
+                correct=self.operational_decision_correct,
+                mission_success=self.mission_success,
+                button_seq=self.button_sequence,
+            )
             if decision is OperationalDecision.RETRY:
                 if self._send(f"GAME_RETRY {self.game_id}", "game_retry", now=now):
                     self._reset_animation()
@@ -1001,6 +1011,8 @@ class InvestigationController:
             diagnosis_correct=self.diagnosis_correct,
             diagnosis_evidence_sufficient=self.diagnosis_evidence_sufficient,
             decision=self.operational_decision.value if self.operational_decision else None,
+            decision_correct=self.operational_decision_correct,
+            mission_success=self.mission_success,
             result=asdict(self.result) if self.result else None,
             retry_result=asdict(self.retry_result) if self.retry_result else None,
         )
@@ -1013,6 +1025,17 @@ class InvestigationController:
             button_seq=self.button_sequence,
             confirmation_origin=self.last_confirmation_origin,
         )
+
+    @property
+    def operational_decision_correct(self) -> bool:
+        return self.operational_decision in {
+            OperationalDecision.RETRY,
+            OperationalDecision.SAFE_MODE,
+        }
+
+    @property
+    def mission_success(self) -> bool:
+        return self.diagnosis_correct is True and self.operational_decision_correct
 
     def note_interaction(self, *, now: float | None = None) -> None:
         self.last_interaction_at = time.monotonic() if now is None else now

@@ -795,9 +795,9 @@ Implementado:
   ferramentas técnicas; a interface/roteiro visual anterior foi removida;
 - três cartões de missão com payload e frase pública curta; prioridade, prazo e
   explicação técnica ficam com o narrador e as ferramentas;
-- incidentes públicos probabilísticos: 30% `NORMAL`, 35% `TAMPER` e 35%
-  `RX_MEMORY`, com causa oculta até o encerramento; `CHANNEL_BITFLIP` permanece
-  somente na instrumentação técnica;
+- incidentes públicos obrigatórios e probabilísticos: 50% `TAMPER` e 50%
+  `RX_MEMORY`, com causa oculta até o encerramento; `NORMAL` e
+  `CHANNEL_BITFLIP` permanecem somente na instrumentação técnica;
 - handshake obrigatório, fila serial não bloqueante, timeout e reconexão do
   cliente existente;
 - vetor single-bit sorteado por RNG experimental reproduzível e registrado;
@@ -808,18 +808,23 @@ Implementado:
   visual e o botão `CONTINUAR`, preservando confirmação por D27;
 - animações específicas de preparação, proteção, canal, verificação, retry e
   causalidade, separadas do tempo real recebido;
-- a transmissão didática dura 8 s e mostra trechos amarelos na ida e na volta;
-  36% ficam reservados ao risco da volta, e efeitos vermelhos só surgem no
-  centro desse trecho quando existe incidente;
+- a transmissão didática dura 9 s e mostra trechos amarelos na ida e na volta;
+  o segundo adicional fica reservado ao risco da volta, e efeitos vermelhos só
+  surgem no centro desse trecho;
 - a verificação é um processo visual sem timeline: AES-GCM precede o CRC
   opcional e bloqueia sua execução quando rejeita o pacote;
 - cartões de escolha quadrados, com título, arte causal e uma frase curta; na
   escolha de missão, o payload em lista compacta aparece antes da seleção. A
-  configuração da missão aparece somente no relatório final; a torre sobre a
+  tecnologia escolhida aparece somente no relatório final; a torre sobre a
   Terra foi removida e o CubeSat móvel recebeu um sorriso angular original;
 - depois da reprodução automática, a própria mensagem pode ser arrastada nas
   etapas com timeline; `VERIFY` não oferece arraste. A revisão é somente visual
   e não toca no gate de confirmação;
+- `ACCEPT` permanece selecionável mesmo depois de uma rejeição, permitindo
+  demonstrar uma decisão operacional errada sem alterar o resultado real;
+- o relatório final revela causa, tecnologias, diagnóstico e ação em quatro
+  blocos incrementais; diagnóstico e ação precisam estar corretos para o
+  CubeSat terminar feliz, caso contrário a explosão didática encerra a missão;
 - fixture oficial somente em testes/evidência offline, com proveniência e
   rótulo permanente;
 - log JSONL v2 com seleção/confirmação, origem D27/tela, seed, rolls, vetor RNG,
@@ -830,7 +835,7 @@ Implementado:
   para o protocolo por etapas;
 - documentação operacional completa em `docs/stand/`.
 
-Validado em software novamente em 2026-07-26 após a Iteração 8:
+Validado em software novamente em 2026-07-26 após a Iteração 10:
 
 - parser e fixture cobrem 32 combinações de perfil, modo de chave, guardião e
   incidente;
@@ -840,17 +845,17 @@ Validado em software novamente em 2026-07-26 após a Iteração 8:
   `INVESTIGATE`, contrato `KEX_FAIR_V1`, plano pareado, fachadas, replay
   arrastável e preservação da sessão em
   `GAME_PROTECT -> ANALOG POT -> GAME_TRANSMIT`;
-- soak de 50 partidas conclui 775 confirmações lógicas, 12 envios normais,
-  24 radiações simuladas, 14 invasões, 275 comandos `GAME_*`, 25 retries,
+- soak de 50 partidas conclui 775 confirmações lógicas, zero envios normais,
+  30 radiações simuladas, 20 invasões, 275 comandos `GAME_*`, 25 retries,
   zero erros e zero crescimento de RSS;
-- por resolução, a busca, os 17 estados e 24 quadros de replay em
-  início/meio/fim, incluindo ECDH/ML-KEM e envio normal/interferido, além do
-  vídeo offline rotulado;
-- média headless da interface completa de 5,966 ms e 8,014 ms, abaixo do
+- 94 capturas cobrem as duas resoluções: busca, 17 estados, escolhas
+  selecionadas e replays em início/meio/fim, incluindo relatório incremental
+  correto e incorreto, além do vídeo offline rotulado;
+- média headless da interface completa de 6,373 ms e 8,546 ms, abaixo do
   orçamento de 16,667 ms;
-- o firmware FAIR atual, incluindo `SESSION_BENCH`, compila do zero com
-  wolfSSL 5.9.2: 59.020 B de RAM, 1.005.497 B de flash e binário de
-  1.012.080 B, SHA-256 `9eba850f…32a18d`; o perfil legado atual compila sem
+- o firmware FAIR local da Iteração 10, incluindo `SESSION_BENCH`, compila do
+  zero com wolfSSL 5.9.2: 59.020 B de RAM, 1.005.369 B de flash e binário de
+  1.011.952 B, SHA-256 `c338c7f1…f99f05f`; a revisão não foi gravada. O perfil legado compila sem
   wolfSSL com 59.004 B de RAM, 940.421 B de flash e binário de 946.992 B;
   nenhuma compilação é validação na placa;
 - implantação ficou centralizada em `tools/firmware_deploy.py`, sem Bash, com

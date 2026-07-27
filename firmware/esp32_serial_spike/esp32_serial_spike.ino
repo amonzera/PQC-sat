@@ -3196,13 +3196,6 @@ static void handle_game_end(const char *request_id, size_t field_count, char *fi
     staged_game_error(request_id, "BAD_DECISION", "expected_ACCEPT_or_SAFE_MODE");
     return;
   }
-  if (accept && staged_game.state == GAME_VERIFIED &&
-      (strcmp(staged_game.final_result, "FRAME_REJECT") == 0 ||
-       strcmp(staged_game.final_result, "AUTH_REJECT") == 0 ||
-       strcmp(staged_game.final_result, "APP_REJECT") == 0)) {
-    staged_game_error(request_id, "BAD_DECISION", "cryptographically_rejected_packet_cannot_be_accepted");
-    return;
-  }
   char game_id[sizeof(staged_game.id)];
   char final_result[sizeof(staged_game.final_result)];
   snprintf(game_id, sizeof(game_id), "%s", staged_game.id);

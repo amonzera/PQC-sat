@@ -428,7 +428,8 @@ def build_didactic_timeline(
             else None
         )
     if stage_value == "TRANSMIT":
-        shares = [0.30, 0.12, 0.36, 0.22]
+        # The added second belongs entirely to the spatial risk segment.
+        shares = [0.267, 0.107, 0.431, 0.195]
     else:
         numeric = [value if value is not None else 1 for value in measured]
         total = max(1, sum(numeric))

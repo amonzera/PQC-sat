@@ -20,22 +20,23 @@ confirmações D27/tela por partida ou o novo debrief.
 
 | Verificação | Resultado | Evidência |
 |---|---|---|
-| suíte integrada | PASS software | 133 testes host cobrem busca, reconexão, telas `NEXT_*` simples, controle, risco no enlace, verificação visual, contrato FAIR, legado e jogo por etapas |
+| suíte integrada | PASS software | 137 testes host cobrem busca, reconexão, telas `NEXT_*` simples, controle, evento obrigatório, decisão incorreta, relatório incremental, contrato FAIR, legado e jogo por etapas |
 | matriz científica | PASS | 2 perfis × 2 modos de chave × 2 guardiões × 4 incidentes = 32 casos |
 | confirmação explícita | PASS no modelo | transições v2 exigem `button_confirmed` de origem `physical|screen`; resposta/animação não avançam |
 | busca automática | PASS no host/modelo | dashboard permanece aberto sem porta; somente `HELLO game=STAGED_V1 kex=FAIR_V1 session_bench=FAIR_SESSION_V1` fecha o standby |
 | narrativa direta | PASS no modelo | Terra/CubeSat, chamada única e `INICIAR MISSÃO`; clique ou D27 abrem as escolhas sem tela intermediária |
 | reconexão | PASS no modelo | qualquer queda mostra busca; novo handshake apaga a partida e volta automaticamente à narrativa |
-| incidente probabilístico | PASS software | 70% de chance; causas públicas igualmente ponderadas; seed, rolls e vetor registrados |
+| incidente probabilístico | PASS software | evento público obrigatório; radiação e invasão igualmente ponderadas; seed, rolls e vetor registrados |
 | ausência de timeout público | PASS | estados permanecem parados; flags públicas desabilitadas |
 | retransmissão | PASS no hardware curto | `same_payload=1`, `fresh_key=1`, `fresh_nonce=1`, `result=DELIVERED` |
-| soak offline | PASS software | 50/50 partidas: 12 normais, 24 radiações simuladas, 14 invasões, 775 confirmações, 275 `GAME_*`, zero erros e zero crescimento RSS |
-| renderização | PASS software | por resolução: busca + 17 estados + 24 quadros de replay; telas `NEXT_*` simples e sem apresentação progressiva |
-| orçamento médio | PASS host | interface completa: 5,966 ms e 8,014 ms; limite 16,667 ms no host headless |
+| soak offline | PASS software | 50/50 partidas: zero normais, 30 radiações simuladas, 20 invasões, 775 confirmações, 275 `GAME_*`, zero erros e zero crescimento RSS |
+| renderização | PASS software | 94 capturas nas duas resoluções: busca, 17 estados, escolhas selecionadas e replays, incluindo relatório correto e incorreto incremental |
+| orçamento médio | PASS host | interface completa: 6,373 ms e 8,546 ms; limite 16,667 ms no host headless |
 | vídeo offline | PASS | `staged_game_test_fixture.mp4`, permanentemente rotulado como fixture sem hardware |
 | smoke FAIR anterior | FAIL parcial na placa | `logs/stand/diagnostics/20260723T152842Z_stand_diagnostic.json`: handshake, perfil, `KEX_INFO` e ML-KEM passaram; ECDH falhou no setup em 29 µs, antes de initiator/responder |
 | segundo smoke FAIR | PASS criptográfico; FAIL no protocolo | `logs/stand/diagnostics/20260723T155138Z_stand_diagnostic.json`: `KEX_BENCH`, `MISSION` e `SESSION_BENCH` passaram para ECDH/ML-KEM; `FAULT` passou; `GAME_BEGIN` passou; `GAME_PROTECT` tinha `experiment` duplicado |
 | firmware FAIR corrigido | PASS em build, flash e smoke curto | wolfSSL 5.9.2, 59.020 B RAM, 1.005.497 B flash, binário 1.012.080 B, SHA-256 `9eba850f…32a18d`; manifesto `20260723T155737Z`; diagnóstico `20260723T160223Z` com `result=PASS` |
+| firmware FAIR Iteração 10 | PASS somente em build | 59.020 B RAM, 1.005.369 B flash, binário 1.011.952 B, SHA-256 `c338c7f1…f99f05f`; sem upload ou smoke físico |
 | firmware legado atual | PASS apenas na compilação | ambiente isolado de wolfSSL: 59.004 B RAM (18,0%), 940.421 B flash (71,7%), binário 946.992 B, SHA-256 `8cfd7746…d152188`; nenhum upload |
 
 O registro consolidado fica em
@@ -192,7 +193,7 @@ O relatório `hardware_acceptance_summary.json` precisa ter todos os gates em
 | Entregável | Estado |
 |---|---|
 | código, configuração v3, parsers, fixture v2 e firmware | PASS em software |
-| testes, soak, benchmark, 88 capturas e vídeo offline | PASS |
+| 137 testes, soak, benchmark, 94 capturas e vídeo offline | PASS |
 | documentação, guia do apresentador e catálogo técnico | PASS |
 | JSON FAIR v2 oficial ECDH/ML-KEM | FAIL — bateria do operador ainda não executada |
 | log de partida `STAGED_V1/FAIR_V1` em hardware | FAIL — ainda não produzido |

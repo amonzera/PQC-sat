@@ -136,7 +136,7 @@ class StandConfig:
     button_debounce_seconds: float
     interaction_timeout_seconds: float = 35.0
     missions: tuple[MissionCard, ...] = ()
-    incident_probability: float = 0.70
+    incident_probability: float = 1.0
     radiation_weight: float = 0.50
     intrusion_weight: float = 0.50
     transmit_hold_seconds: float = 2.2
@@ -225,7 +225,7 @@ class StandConfig:
                 button_debounce_seconds=float(data["button_debounce_seconds"]),
                 interaction_timeout_seconds=float(data.get("interaction_timeout_seconds", 35.0)),
                 missions=missions,
-                incident_probability=float(investigation.get("incident_probability", 0.70)),
+                incident_probability=float(investigation.get("incident_probability", 1.0)),
                 radiation_weight=float(incident_weights.get("RX_MEMORY", 0.50)),
                 intrusion_weight=float(incident_weights.get("TAMPER", 0.50)),
                 transmit_hold_seconds=float(investigation.get("transmit_hold_seconds", 2.2)),

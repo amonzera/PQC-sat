@@ -1,5 +1,19 @@
 # Changelog do modo estande SBPC
 
+## 2026-07-26 — Iteração 10: decisão e relatório da missão
+
+- toda partida pública agora sorteia um evento: 50% `RX_MEMORY` ou 50%
+  `TAMPER`; `NORMAL` continua disponível apenas em testes e engenharia;
+- `TRANSMIT` passou a 9 s e o segundo adicional foi reservado ao trecho de
+  risco da volta para prolongar a surpresa visual;
+- `ACEITAR` fica sempre disponível. O dashboard, a fixture e o firmware
+  encerram a sessão sem transformar rejeição ou corrupção em entrega;
+- a decisão é correta somente para `RETRY` ou `SAFE_MODE`, e o resultado geral
+  exige também o diagnóstico correto;
+- o relatório deixou de exibir payload, CPU, métricas e revisão por timeline.
+  Causa, tecnologias, diagnóstico e ação surgem gradualmente; sucesso mostra o
+  CubeSat feliz e qualquer erro termina com uma explosão didática.
+
 ## 2026-07-26 — Iteração 9: risco no enlace e verificação visual
 
 - `NEXT_TRANSMIT` passou a mostrar trechos de risco amarelos na ida e na volta,
@@ -7,7 +21,7 @@
 - `TRANSMIT` mantém os dois trechos sempre amarelos e desloca a interferência
   para o centro da volta, depois que o pacote deixa o satélite;
 - vermelho ficou reservado ao alerta e aos efeitos do incidente realmente
-  sorteado; envios normais atravessam a mesma geometria sem esses efeitos;
+  sorteado; o caso `NORMAL` técnico atravessa a mesma geometria sem efeitos;
 - `VERIFY` deixou de usar timeline e arraste: AES-GCM abre ou rejeita o pacote
   e, quando possível, entrega a mensagem ao CRC opcional antes do resultado.
 - benchmark headless de 300 quadros ficou em média 5,966 ms a 1366×768 e
